@@ -6,6 +6,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 import { sessionsDb } from '@/modules/database/index.js';
+import { shouldExcludeProjectPath } from '@/shared/project-exclude.js';
 import {
   extractFirstValidJsonlData,
   findFilesRecursivelyCreatedAfter,
@@ -131,6 +132,10 @@ export class CursorSessionSynchronizer implements IProviderSessionSynchronizer {
     const projectPath = await this.extractProjectPathFromWorkerLog(workerLogPath);
 
     if (!projectPath) {
+      return null;
+    }
+
+    if (shouldExcludeProjectPath(projectPath)) {
       return null;
     }
 

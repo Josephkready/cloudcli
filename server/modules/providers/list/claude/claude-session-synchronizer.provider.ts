@@ -3,6 +3,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
 import { sessionsDb } from '@/modules/database/index.js';
+import { shouldExcludeProjectPath } from '@/shared/project-exclude.js';
 import {
   buildLookupMap,
   extractFirstValidJsonlData,
@@ -108,6 +109,10 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
     });
 
     if (!parsed) {
+      return null;
+    }
+
+    if (shouldExcludeProjectPath(parsed.projectPath)) {
       return null;
     }
 

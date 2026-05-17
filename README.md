@@ -212,6 +212,15 @@ Yes, for self-hosted. CloudCLI UI reads from and writes to the same `~/.claude` 
 
 </details>
 
+<details>
+<summary>How do I hide ephemeral worktree paths from the sidebar?</summary>
+
+Auto-discovery walks each provider's transcript directory (`~/.claude/projects`, `~/.codex/sessions`, etc.) and registers every distinct `cwd` it sees. By default it skips paths matching `/tmp/**`, `**/worktrees/**`, and `**/.dante-sync-clobbered/**` so short-lived agent worktrees never clutter the sidebar.
+
+Override the defaults with the `CLOUDCLI_EXCLUDED_PROJECT_PATHS` environment variable (colon-separated globs). Set it to an empty string to disable all exclusions. See `.env.example` for the glob syntax.
+
+</details>
+
 ---
 
 ## Community & Support
