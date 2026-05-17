@@ -296,13 +296,56 @@ const expandWorkspacePath = (inputPath) => {
     return inputPath;
 };
 
-// Browse filesystem endpoint for project suggestions - uses existing getFileTree
+// Lightweight directory listing for the folder-picker UI.
+//
+// We only need the immediate child directories of `dirPath` to render a single
+// level of the picker. The general-purpose `getFileTree` walks one level deeper
+// (statting every child of every child) so it can also surface files in the
+// file explorer. For a home dir with ~/.claude/projects/ containing thousands
+// of session jsonls, that pre-walk used to balloon to >20s — see #1. Reading
+// only direct children with no per-entry stat() keeps this O(N) in the
+// directory size and consistently completes in milliseconds.
+const listDirectChildDirectories = async (dirPath) => {
+    let entries;
+    try {
+        entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
+    } catch (error) {
+        if (error.code !== 'EACCES' && error.code !== 'EPERM') {
+            console.error('Error reading directory:', error);
+        }
+        return [];
+    }
+
+    const directories = [];
+    for (const entry of entries) {
+        // Skip heavy build/VCS directories — same filter as getFileTree so the
+        // two listings stay consistent.
+        if (entry.name === 'node_modules' ||
+            entry.name === 'dist' ||
+            entry.name === 'build' ||
+            entry.name === '.git' ||
+            entry.name === '.svn' ||
+            entry.name === '.hg') continue;
+
+        if (!entry.isDirectory()) continue;
+
+        directories.push({
+            name: entry.name,
+            path: path.join(dirPath, entry.name),
+            type: 'directory',
+        });
+    }
+    return directories;
+};
+
+// Browse filesystem endpoint for the project-creation folder picker. Returns
+// only immediate child directories of the requested path — no recursion, no
+// per-entry stat — which keeps the folder picker responsive even when the home
+// directory contains huge subtrees like ~/.claude/projects/.
 app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
     try {
         const { path: dirPath } = req.query;
 
-        console.log('[API] Browse filesystem request for path:', dirPath);
-        console.log('[API] WORKSPACES_ROOT is:', WORKSPACES_ROOT);
         // Default to home directory if no path provided
         const defaultRoot = WORKSPACES_ROOT;
         let targetPath = dirPath ? expandWorkspacePath(dirPath) : defaultRoot;
@@ -329,17 +372,10 @@ app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'Directory not accessible' });
         }
 
-        // Use existing getFileTree function with shallow depth (only direct children)
-        const fileTree = await getFileTree(resolvedPath, 1, 0, false); // maxDepth=1, showHidden=false
-
-        // Filter only directories and format for suggestions
-        const directories = fileTree
-            .filter(item => item.type === 'directory')
-            .map(item => ({
-                path: item.path,
-                name: item.name,
-                type: 'directory'
-            }))
+        // List only the immediate child directories. The folder picker doesn't
+        // render anything below this level, so there's no reason to recurse —
+        // see listDirectChildDirectories for the perf rationale.
+        const directories = (await listDirectChildDirectories(resolvedPath))
             .sort((a, b) => {
                 const aHidden = a.name.startsWith('.');
                 const bHidden = b.name.startsWith('.');
