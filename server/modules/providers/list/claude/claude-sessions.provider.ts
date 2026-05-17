@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 
@@ -9,6 +10,70 @@ import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/
 import { sessionsDb } from '@/modules/database/index.js';
 
 const PROVIDER = 'claude';
+
+/**
+ * Claude stores session JSONL files under the user's home dir, but indexed
+ * paths persist across container/host migrations where the HOME directory
+ * changes (e.g. an older deploy ran as `node` with HOME=/home/node and a new
+ * deploy runs as the host user). The stale absolute path stored in the DB
+ * then points at a file that no longer exists, so message history loads as
+ * empty even though the JSONL is sitting at the equivalent location under
+ * the current HOME. This helper resolves the path that actually exists on
+ * disk now, with a small set of well-known fallbacks.
+ *
+ * Exported for test coverage; callers should treat the returned value as
+ * authoritative for read operations.
+ */
+export async function resolveClaudeJsonlPath(
+  storedPath: string | null,
+  sessionId: string,
+  projectPath: string | null,
+): Promise<string | null> {
+  if (storedPath) {
+    try {
+      await fsp.access(storedPath, fs.constants.R_OK);
+      return storedPath;
+    } catch {
+      // Fall through to recovery below.
+    }
+  }
+
+  const homeDir = os.homedir();
+
+  // Primary recovery: rewrite the stored absolute path by swapping its
+  // home-dir prefix to the current process homedir. This handles the most
+  // common migration case (HOME changed from /home/node to /home/<user>).
+  if (storedPath) {
+    const claudeMarker = `${path.sep}.claude${path.sep}`;
+    const markerIndex = storedPath.indexOf(claudeMarker);
+    if (markerIndex >= 0) {
+      const candidate = path.join(homeDir, storedPath.slice(markerIndex + 1));
+      try {
+        await fsp.access(candidate, fs.constants.R_OK);
+        return candidate;
+      } catch {
+        // Fall through.
+      }
+    }
+  }
+
+  // Secondary recovery: derive the canonical path from project_path +
+  // sessionId. Claude encodes the absolute project directory by replacing
+  // every non-alphanumeric (except `-`) character with `-` and storing the
+  // session as `<encoded>/<sessionId>.jsonl`.
+  if (projectPath) {
+    const encodedProjectPath = projectPath.replace(/[^a-zA-Z0-9-]/g, '-');
+    const candidate = path.join(homeDir, '.claude', 'projects', encodedProjectPath, `${sessionId}.jsonl`);
+    try {
+      await fsp.access(candidate, fs.constants.R_OK);
+      return candidate;
+    } catch {
+      // No more fallbacks; let the caller treat this as an empty history.
+    }
+  }
+
+  return null;
+}
 
 type ClaudeToolResult = {
   content: unknown;
@@ -107,7 +172,12 @@ async function getSessionMessages(
   offset: number,
 ): Promise<ClaudeHistoryMessagesResult> {
   try {
-    const jsonLPath = sessionsDb.getSessionById(sessionId)?.jsonl_path;
+    const sessionRow = sessionsDb.getSessionById(sessionId);
+    const jsonLPath = await resolveClaudeJsonlPath(
+      sessionRow?.jsonl_path ?? null,
+      sessionId,
+      sessionRow?.project_path ?? null,
+    );
 
     if (!jsonLPath) {
       return { messages: [], total: 0, hasMore: false };
