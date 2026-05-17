@@ -86,6 +86,31 @@ test('resolveClaudeJsonlPath falls back to project-path derivation when stored p
   }
 });
 
+test('resolveClaudeJsonlPath falls back to project-path derivation when stored path lacks a .claude/ segment', async () => {
+  // Defensive: stored paths produced by future or custom synchronizers may
+  // not include the `/.claude/` marker. The home-rewrite branch should be
+  // skipped and the project_path derivation should still succeed.
+  const { root, cleanup } = await createSandbox();
+  try {
+    const sessionId = '55555555-6666-7777-8888-999999999999';
+    const projectPath = '/home/jkready/some-project';
+    const encoded = projectPath.replace(/[^a-zA-Z0-9-]/g, '-');
+    const projectDir = path.join(root, '.claude', 'projects', encoded);
+    await fsp.mkdir(projectDir, { recursive: true });
+    const realFilePath = path.join(projectDir, `${sessionId}.jsonl`);
+    await fsp.writeFile(realFilePath, 'data\n');
+
+    // Stored path without the `.claude` marker (e.g. a hypothetical alt
+    // layout from a different provider implementation).
+    const oddStoredPath = `/var/lib/session-storage/${sessionId}.jsonl`;
+
+    const resolved = await resolveClaudeJsonlPath(oddStoredPath, sessionId, projectPath);
+    assert.equal(resolved, realFilePath);
+  } finally {
+    await cleanup();
+  }
+});
+
 test('resolveClaudeJsonlPath returns null when no candidate path exists', async () => {
   const { cleanup } = await createSandbox();
   try {
