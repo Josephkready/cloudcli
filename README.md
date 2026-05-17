@@ -221,6 +221,19 @@ Override the defaults with the `CLOUDCLI_EXCLUDED_PROJECT_PATHS` environment var
 
 </details>
 
+<details>
+<summary>How do I host CloudCLI UI behind a reverse-proxy path prefix?</summary>
+
+React Router reads `window.__ROUTER_BASENAME__` to know where the SPA is mounted. When you serve CloudCLI UI behind a path prefix (for example `https://example.com/claudecodeui/`), set the `ROUTER_BASENAME` environment variable to that prefix so the server injects it into `index.html` before the client JS runs. Without this, the app unmounts after login because the URL no longer matches the router's mount point.
+
+```
+ROUTER_BASENAME=/claudecodeui
+```
+
+The value must start with a slash and not have a trailing slash. Leave it unset for normal root-path hosting — the default `npm install -g @cloudcli-ai/cloudcli && cloudcli` flow needs no configuration.
+
+</details>
+
 ---
 
 ## Community & Support
