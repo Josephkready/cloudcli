@@ -162,6 +162,7 @@ export default tseslint.config(
             "server/shared/frontmatter.ts",
             "server/shared/claude-cli-path.ts",
             "server/shared/project-exclude.ts",
+            "server/shared/router-basename.ts",
           ], // classify shared utility files so modules can depend on them explicitly
           mode: "file",
         },

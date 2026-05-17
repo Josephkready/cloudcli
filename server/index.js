@@ -12,6 +12,10 @@ import cors from 'cors';
 import mime from 'mime-types';
 
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
+import {
+    getRouterBasename,
+    injectRouterBasenameIntoHtml,
+} from '@/shared/router-basename.js';
 import { closeSessionsWatcher, initializeSessionsWatcher } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
 
@@ -191,9 +195,49 @@ app.use('/api/agent', agentRoutes);
 // Serve public files (like api-docs.html)
 app.use(express.static(path.join(APP_ROOT, 'public')));
 
+// Serve the SPA's index.html through a small response transform so we can
+// inject `window.__ROUTER_BASENAME__` before any client JS executes. This is
+// what lets the SPA work when mounted behind a reverse-proxy path prefix
+// (e.g. https://example.com/claudecodeui/) without the brittle nginx
+// sub_filter hack we used to rely on.
+//
+// The transform always runs, including when ROUTER_BASENAME is unset — in
+// that case we inject `""` so the historical `|| ""` fallback in App.tsx is
+// preserved exactly. This must NOT break the default
+// `npm install -g @cloudcli-ai/cloudcli && cloudcli` flow.
+const DIST_INDEX_PATH = path.join(APP_ROOT, 'dist', 'index.html');
+
+function sendIndexHtmlWithBasename(req, res) {
+    if (!fs.existsSync(DIST_INDEX_PATH)) {
+        return false;
+    }
+    const html = fs.readFileSync(DIST_INDEX_PATH, 'utf8');
+    const basename = getRouterBasename(process.env);
+    const transformed = injectRouterBasenameIntoHtml(html, basename);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.send(transformed);
+    return true;
+}
+
+// Intercept the two SPA entry paths that express.static would otherwise serve
+// directly from disk (`/` via its directory-index behaviour, and `/index.html`
+// explicitly). Every other static asset still flows through express.static
+// below unchanged.
+app.get(['/', '/index.html'], (req, res, next) => {
+    if (!sendIndexHtmlWithBasename(req, res)) {
+        return next();
+    }
+});
+
 // Static files served after API routes
 // Add cache control: HTML files should not be cached, but assets can be cached
+// `index: false` disables the built-in directory-index lookup so the handler
+// above is the single source of truth for serving index.html.
 app.use(express.static(path.join(APP_ROOT, 'dist'), {
+    index: false,
     setHeaders: (res, filePath) => {
         if (filePath.endsWith('.html')) {
             // Prevent HTML caching to avoid service worker issues after builds
@@ -1345,21 +1389,17 @@ app.get('*', (req, res) => {
     }
 
     // Only serve index.html for HTML routes, not for static assets
-    // Static assets should already be handled by express.static middleware above
-    const indexPath = path.join(APP_ROOT, 'dist', 'index.html');
-
-    // Check if dist/index.html exists (production build available)
-    if (fs.existsSync(indexPath)) {
-        // Set no-cache headers for HTML to prevent service worker issues
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-        res.sendFile(indexPath);
-    } else {
-        // In development, redirect to Vite dev server only if dist doesn't exist
-        const redirectHost = getConnectableHost(req.hostname);
-        res.redirect(`${req.protocol}://${redirectHost}:${VITE_PORT}`);
+    // Static assets should already be handled by express.static middleware above.
+    // We route through sendIndexHtmlWithBasename so the ROUTER_BASENAME injection
+    // is applied here too (deep-link refreshes hit this branch, not the `/`
+    // handler above).
+    if (sendIndexHtmlWithBasename(req, res)) {
+        return;
     }
+
+    // In development, redirect to Vite dev server only if dist doesn't exist
+    const redirectHost = getConnectableHost(req.hostname);
+    res.redirect(`${req.protocol}://${redirectHost}:${VITE_PORT}`);
 });
 
 // global error middleware must be last
