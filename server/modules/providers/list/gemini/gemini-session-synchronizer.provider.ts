@@ -4,6 +4,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { shouldExcludeProjectPath } from '@/shared/project-exclude.js';
 import {
   findFilesRecursivelyCreatedAfter,
   normalizeProjectPath,
@@ -159,6 +160,10 @@ export class GeminiSessionSynchronizer implements IProviderSessionSynchronizer {
         return null;
       }
 
+      if (shouldExcludeProjectPath(projectPath)) {
+        return null;
+      }
+
       const messages = Array.isArray(data.messages) ? data.messages : [];
       const firstMessage = messages[0] as AnyRecord | undefined;
       let rawName: string | undefined;
@@ -202,6 +207,10 @@ export class GeminiSessionSynchronizer implements IProviderSessionSynchronizer {
       projectPath = projectHashLookup.get(metadata.projectHash.trim().toLowerCase()) ?? '';
     }
     if (!projectPath) {
+      return null;
+    }
+
+    if (shouldExcludeProjectPath(projectPath)) {
       return null;
     }
 
