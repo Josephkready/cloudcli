@@ -12,6 +12,7 @@ import cors from 'cors';
 import mime from 'mime-types';
 
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
+import { shouldExcludeFileTreeEntry } from '@/shared/file-tree-excludes.js';
 import {
     getRouterBasename,
     injectRouterBasenameIntoHtml,
@@ -362,14 +363,10 @@ const listDirectChildDirectories = async (dirPath) => {
 
     const directories = [];
     for (const entry of entries) {
-        // Skip heavy build/VCS directories — same filter as getFileTree so the
-        // two listings stay consistent.
-        if (entry.name === 'node_modules' ||
-            entry.name === 'dist' ||
-            entry.name === 'build' ||
-            entry.name === '.git' ||
-            entry.name === '.svn' ||
-            entry.name === '.hg') continue;
+        // Skip heavy build/VCS/cache directories — same filter as getFileTree
+        // so the two listings stay consistent. List lives in
+        // server/shared/file-tree-excludes.ts.
+        if (shouldExcludeFileTreeEntry(entry.name)) continue;
 
         if (!entry.isDirectory()) continue;
 
@@ -1253,16 +1250,10 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
         const entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
 
         for (const entry of entries) {
-            // Debug: log all entries including hidden files
-
-
-            // Skip heavy build directories and VCS directories
-            if (entry.name === 'node_modules' ||
-                entry.name === 'dist' ||
-                entry.name === 'build' ||
-                entry.name === '.git' ||
-                entry.name === '.svn' ||
-                entry.name === '.hg') continue;
+            // Skip heavy build / VCS / cache / language-tooling directories.
+            // List lives in server/shared/file-tree-excludes.ts so the
+            // folder-picker and the recursive walk stay in sync.
+            if (shouldExcludeFileTreeEntry(entry.name)) continue;
 
             const itemPath = path.join(dirPath, entry.name);
             const item = {
