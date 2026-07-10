@@ -77,3 +77,19 @@ test('does not seed a user when auth is enabled (default)', async () => {
     assert.equal(countUsers(), 0);
   });
 });
+
+test('does not clobber or duplicate a pre-existing user when the flag is enabled later', async () => {
+  // Start with auth enabled (no seeding), then simulate a normal signup...
+  await withIsolatedDatabase(false, async () => {
+    userDb.createUser('someone', 'real-bcrypt-hash');
+    assert.equal(countUsers(), 1);
+
+    // ...then the operator turns the flag on and restarts the server.
+    process.env.VITE_AUTH_DISABLED = 'true';
+    await initializeDatabase();
+
+    // Seeding must be a no-op: the existing user stays, no 'local' row is added.
+    assert.equal(countUsers(), 1);
+    assert.equal(userDb.getFirstUser()?.username, 'someone');
+  });
+});

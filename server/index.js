@@ -71,7 +71,7 @@ import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './util
 import { initializeDatabase, projectsDb } from './modules/database/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
-import { IS_PLATFORM } from './constants/config.js';
+import { IS_PLATFORM, AUTH_DISABLED } from './constants/config.js';
 import { c } from './utils/colors.js';
 
 const __dirname = getModuleDir(import.meta.url);
@@ -1388,6 +1388,9 @@ async function startServer() {
             console.log(`${c.info('[INFO]')} Server URL:  ${c.bright('http://' + DISPLAY_HOST + ':' + SERVER_PORT)}`);
             console.log(`${c.info('[INFO]')} Installed at: ${c.dim(appInstallPath)}`);
             console.log(`${c.tip('[TIP]')}  Run "cloudcli status" for full configuration details`);
+            if (AUTH_DISABLED) {
+                console.warn('[WARN] VITE_AUTH_DISABLED is set — login is OFF; every request runs as the single default user.');
+            }
             console.log('');
 
             // Start watching the projects folder for changes
