@@ -64,12 +64,6 @@ RUN npm ci \
 # @openai/codex-linux-x64 native (~200MB) is intentionally kept.
 FROM node:22-slim
 
-# Carry the same auth-disabled default into the runtime stage: the server reads
-# VITE_AUTH_DISABLED from the environment at startup to bypass login and seed the
-# single default user. Kept in sync with the builder-stage ARG above.
-ARG VITE_AUTH_DISABLED=true
-ENV VITE_AUTH_DISABLED=${VITE_AUTH_DISABLED}
-
 # Runtime apt deps only: git is needed because cloudcli shells out to it for
 # project clone/star operations; ca-certificates for HTTPS. We do NOT install
 # python3 / build-essential here — native modules use prebuilt binaries from
@@ -79,6 +73,13 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/cloudcli
+
+# Carry the same auth-disabled default into the runtime stage: the server reads
+# VITE_AUTH_DISABLED from the environment at startup to bypass login and seed the
+# single default user. Kept in sync with the builder-stage ARG above. Placed
+# after the apt layer so overriding the arg never invalidates that cache.
+ARG VITE_AUTH_DISABLED=true
+ENV VITE_AUTH_DISABLED=${VITE_AUTH_DISABLED}
 
 # Only the build artefacts + manifests + native-build helper script. No src/,
 # no server/ source (the compiled output lives in dist-server/), no
