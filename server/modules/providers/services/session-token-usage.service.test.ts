@@ -58,19 +58,6 @@ test('getSessionTokenUsage returns an unsupported payload for Cursor sessions', 
   assert.match(result.message ?? '', /Cursor/);
 });
 
-test('getSessionTokenUsage returns an unsupported payload for Gemini sessions', async () => {
-  const result = await getSessionTokenUsage('gemini-session-id', {
-    getSessionById: () => ({ provider: 'gemini' }),
-    getClaudeUsage: async () => {
-      throw new Error('claude path should not be reached for gemini sessions');
-    },
-    resolveCodexSessionsDir: () => '/never-touched',
-  });
-
-  assert.equal(result.unsupported, true);
-  assert.match(result.message ?? '', /Gemini/);
-});
-
 test('getSessionTokenUsage returns an unsupported payload for OpenCode sessions', async () => {
   // OpenCode arrived upstream after this service was split out of index.js;
   // it must not fall through to the Claude JSONL reader.

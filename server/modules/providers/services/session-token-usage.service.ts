@@ -155,9 +155,6 @@ export async function getSessionTokenUsage(
   if (provider === 'cursor') {
     return buildUnsupportedResponse('Token usage tracking not available for Cursor sessions');
   }
-  if (provider === 'gemini') {
-    return buildUnsupportedResponse('Token usage tracking not available for Gemini sessions');
-  }
   if (provider === 'opencode') {
     // OpenCode is a provider that landed upstream after this service was
     // extracted from index.js. Its usage lives in OpenCode's SQLite store;
