@@ -2,6 +2,7 @@ export { sessionSynchronizerService } from './services/session-synchronizer.serv
 export { providerSkillsService } from './services/skills.service.js';
 export { getSessionTokenUsage } from './services/session-token-usage.service.js';
 export type { SessionTokenUsageResponse } from './services/session-token-usage.service.js';
+export { providerMcpService } from './services/mcp.service.js';
 
 export { initializeSessionsWatcher } from './services/sessions-watcher.service.js';
 export { closeSessionsWatcher } from './services/sessions-watcher.service.js';

@@ -6,7 +6,7 @@ import readline from 'node:readline';
 
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
-import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/shared/utils.js';
+import { createNormalizedMessage, generateMessageId, readObjectRecord, sliceTailPage } from '@/shared/utils.js';
 import { sessionsDb } from '@/modules/database/index.js';
 
 const PROVIDER = 'claude';
@@ -168,10 +168,14 @@ async function parseAgentTools(filePath: string): Promise<AnyRecord[]> {
 
 async function getSessionMessages(
   sessionId: string,
+  providerSessionId: string,
   limit: number | null,
   offset: number,
 ): Promise<ClaudeHistoryMessagesResult> {
   try {
+    // Heal stale jsonl_path (e.g. from the pre-HOME-flip era) via the shared
+    // resolver: prefer the stored path, else rewrite/derive from project_path +
+    // sessionId. The DB row is keyed by the app-facing session id.
     const sessionRow = sessionsDb.getSessionById(sessionId);
     const jsonLPath = await resolveClaudeJsonlPath(
       sessionRow?.jsonl_path ?? null,
@@ -203,7 +207,7 @@ async function getSessionMessages(
 
       try {
         const entry = JSON.parse(line) as AnyRecord;
-        if (entry.sessionId === sessionId) {
+        if (entry.sessionId === providerSessionId) {
           messages.push(entry);
         }
       } catch {
@@ -380,6 +384,18 @@ export class ClaudeSessionsProvider implements IProviderSessions {
 
     if (raw.message?.role === 'user' && raw.message?.content && raw.isMeta !== true) {
       if (Array.isArray(raw.message.content)) {
+        // Image attachments sent through the SDK are persisted as base64
+        // `image` blocks next to the prompt text. Collect them so the UI can
+        // render them on the user bubble.
+        const imageAttachments: Array<{ data: string }> = [];
+        for (const part of raw.message.content) {
+          if (part?.type === 'image' && part.source?.type === 'base64' && typeof part.source.data === 'string') {
+            const mediaType = typeof part.source.media_type === 'string' ? part.source.media_type : 'image/png';
+            imageAttachments.push({ data: `data:${mediaType};base64,${part.source.data}` });
+          }
+        }
+        let imagesAttached = false;
+
         for (let partIndex = 0; partIndex < raw.message.content.length; partIndex++) {
           const part = raw.message.content[partIndex];
           if (part.type === 'tool_result') {
@@ -406,7 +422,9 @@ export class ClaudeSessionsProvider implements IProviderSessions {
                 kind: 'text',
                 role: 'user',
                 content: text,
+                images: !imagesAttached && imageAttachments.length > 0 ? imageAttachments : undefined,
               }));
+              imagesAttached = true;
             }
           }
         }
@@ -426,8 +444,24 @@ export class ClaudeSessionsProvider implements IProviderSessions {
               kind: 'text',
               role: 'user',
               content: textParts,
+              images: imageAttachments.length > 0 ? imageAttachments : undefined,
             }));
+            imagesAttached = true;
           }
+        }
+
+        // Image-only turns still deserve a user bubble even without text.
+        if (!imagesAttached && imageAttachments.length > 0) {
+          messages.push(createNormalizedMessage({
+            id: `${baseId}_images`,
+            sessionId,
+            timestamp: ts,
+            provider: PROVIDER,
+            kind: 'text',
+            role: 'user',
+            content: '',
+            images: imageAttachments,
+          }));
         }
       } else if (typeof raw.message.content === 'string') {
         const text = raw.message.content;
@@ -623,12 +657,13 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     options: FetchHistoryOptions = {},
   ): Promise<FetchHistoryResult> {
     const { limit = null, offset = 0 } = options;
+    const providerSessionId = options.providerSessionId ?? sessionId;
 
     let result: ClaudeHistoryResult;
     try {
       // Load full history first so `total` reflects frontend-normalized messages,
       // not raw JSONL records.
-      result = await getSessionMessages(sessionId, null, 0);
+      result = await getSessionMessages(sessionId, providerSessionId, null, 0);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[ClaudeProvider] Failed to load session ${sessionId}:`, message);
@@ -676,7 +711,6 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       }
     }
 
-    const totalNormalized = normalized.length;
     let total = 0;
     for (const msg of normalized) {
       if (msg.kind !== 'tool_result') {
@@ -685,18 +719,10 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     }
     const normalizedOffset = Math.max(0, offset);
     const normalizedLimit = limit === null ? null : Math.max(0, limit);
-    const messages = normalizedLimit === null
-      ? normalized
-      : normalized.slice(
-          Math.max(0, totalNormalized - normalizedOffset - normalizedLimit),
-          Math.max(0, totalNormalized - normalizedOffset),
-        );
-    const hasMore = normalizedLimit === null
-      ? false
-      : Math.max(0, totalNormalized - normalizedOffset - normalizedLimit) > 0;
+    const { page, hasMore } = sliceTailPage(normalized, normalizedLimit, normalizedOffset);
 
     return {
-      messages,
+      messages: page,
       total,
       hasMore,
       offset: normalizedOffset,
