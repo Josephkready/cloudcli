@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { IS_PLATFORM } from '../../../constants/config';
+import { AUTH_DISABLED, IS_PLATFORM } from '../../../constants/config';
 import { useAuth } from '../context/AuthContext';
 import Onboarding from '../../onboarding/view/Onboarding';
 import AuthLoadingScreen from './AuthLoadingScreen';
@@ -17,7 +17,7 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     return <AuthLoadingScreen />;
   }
 
-  if (IS_PLATFORM) {
+  if (IS_PLATFORM || AUTH_DISABLED) {
     if (!hasCompletedOnboarding) {
       return <Onboarding onComplete={refreshOnboardingStatus} />;
     }

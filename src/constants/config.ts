@@ -5,6 +5,14 @@
 export const IS_PLATFORM = import.meta.env.VITE_IS_PLATFORM === 'true';
 
 /**
+ * Environment Flag: Auth Disabled
+ * When 'true', the app skips the login/setup screens and runs as the single
+ * default user. Unlike IS_PLATFORM, it does not alter workspace paths, the
+ * WebSocket URL, or any other platform behavior — it only removes login.
+ */
+export const AUTH_DISABLED = import.meta.env.VITE_AUTH_DISABLED === 'true';
+
+/**
  * For empty shell instances where no project is provided,
  * we use a default project object to ensure the shell can still function.
  * This prevents errors related to missing project data.

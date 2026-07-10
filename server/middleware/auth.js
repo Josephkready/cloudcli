@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { userDb, appConfigDb } from '../modules/database/index.js';
-import { IS_PLATFORM } from '../constants/config.js';
+import { IS_PLATFORM, AUTH_DISABLED } from '../constants/config.js';
 
 // Use env var if set, otherwise auto-generate a unique secret per installation
 const JWT_SECRET = process.env.JWT_SECRET || appConfigDb.getOrCreateJwtSecret();
@@ -21,18 +21,18 @@ const validateApiKey = (req, res, next) => {
 
 // JWT authentication middleware
 const authenticateToken = async (req, res, next) => {
-  // Platform mode:  use single database user
-  if (IS_PLATFORM) {
+  // Platform mode or auth-disabled: use the single default database user
+  if (IS_PLATFORM || AUTH_DISABLED) {
     try {
       const user = userDb.getFirstUser();
       if (!user) {
-        return res.status(500).json({ error: 'Platform mode: No user found in database' });
+        return res.status(500).json({ error: 'No user found in database' });
       }
       req.user = user;
       return next();
     } catch (error) {
-      console.error('Platform mode error:', error);
-      return res.status(500).json({ error: 'Platform mode: Failed to fetch user' });
+      console.error('Auth bypass error:', error);
+      return res.status(500).json({ error: 'Failed to fetch user' });
     }
   }
 
@@ -90,8 +90,8 @@ const generateToken = (user) => {
 
 // WebSocket authentication function
 const authenticateWebSocket = (token) => {
-  // Platform mode: bypass token validation, return first user
-  if (IS_PLATFORM) {
+  // Platform mode or auth-disabled: bypass token validation, return first user
+  if (IS_PLATFORM || AUTH_DISABLED) {
     try {
       const user = userDb.getFirstUser();
       if (user) {
@@ -99,7 +99,7 @@ const authenticateWebSocket = (token) => {
       }
       return null;
     } catch (error) {
-      console.error('Platform mode WebSocket error:', error);
+      console.error('Auth bypass WebSocket error:', error);
       return null;
     }
   }

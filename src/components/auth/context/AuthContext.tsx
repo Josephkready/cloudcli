@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { IS_PLATFORM } from '../../../constants/config';
+import { AUTH_DISABLED, IS_PLATFORM } from '../../../constants/config';
 import { api } from '../../../utils/api';
 import { AUTH_ERROR_MESSAGES, AUTH_TOKEN_STORAGE_KEY } from '../constants';
 import type {
@@ -125,8 +125,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return;
     }
 
+    if (AUTH_DISABLED) {
+      // Auth disabled: run as the single default user without a login screen.
+      // A sentinel token keeps every existing token-based caller (REST, WS,
+      // SSE, uploads) working unchanged; the server ignores it in this mode.
+      setSession({ username: 'local' }, 'auth-disabled');
+      setNeedsSetup(false);
+      void checkOnboardingStatus().finally(() => {
+        setIsLoading(false);
+      });
+      return;
+    }
+
     void checkAuthStatus();
-  }, [checkAuthStatus, checkOnboardingStatus]);
+  }, [checkAuthStatus, checkOnboardingStatus, setSession]);
 
   const login = useCallback<AuthContextValue['login']>(
     async (username, password) => {
