@@ -27,6 +27,13 @@ RUN apt-get update \
 
 WORKDIR /build
 
+# Disable the login/setup screen for this single-user dante deploy.
+# VITE_AUTH_DISABLED is a Vite build-time constant, so it must be present during
+# `npm run build` to bake into the frontend bundle. Overridable at build time
+# with `--build-arg VITE_AUTH_DISABLED=false` to restore username/password login.
+ARG VITE_AUTH_DISABLED=true
+ENV VITE_AUTH_DISABLED=${VITE_AUTH_DISABLED}
+
 COPY . .
 RUN npm ci \
  && npm run build
@@ -66,6 +73,13 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/cloudcli
+
+# Carry the same auth-disabled default into the runtime stage: the server reads
+# VITE_AUTH_DISABLED from the environment at startup to bypass login and seed the
+# single default user. Kept in sync with the builder-stage ARG above. Placed
+# after the apt layer so overriding the arg never invalidates that cache.
+ARG VITE_AUTH_DISABLED=true
+ENV VITE_AUTH_DISABLED=${VITE_AUTH_DISABLED}
 
 # Only the build artefacts + manifests + native-build helper script. No src/,
 # no server/ source (the compiled output lives in dist-server/), no
