@@ -65,9 +65,11 @@ RUN npm ci \
 FROM node:22-slim
 
 # Runtime apt deps only: git is needed because cloudcli shells out to it for
-# project clone/star operations; ca-certificates for HTTPS. We do NOT install
-# python3 / build-essential here — native modules use prebuilt binaries from
-# `prebuild-install` during `npm ci` below, no node-gyp fallback is needed.
+# project clone/star operations; ca-certificates for HTTPS. python3 /
+# build-essential are deliberately NOT installed here — the `npm ci` below
+# normally gets prebuilt binaries via `prebuild-install`. When that download
+# fails, the install step installs a toolchain on demand and purges it again;
+# see the comment on that RUN.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -96,8 +98,30 @@ COPY --from=builder --chown=1000:1000 /build/scripts ./scripts
 # found". Native modules (better-sqlite3, node-pty, bcrypt) still need their
 # own install scripts to run so prebuild-install can drop the platform .node
 # binary — so we do NOT pass --ignore-scripts.
+#
+# The `||` fallback is load-bearing, not belt-and-braces. better-sqlite3's
+# install is `prebuild-install || node-gyp rebuild`. prebuild-install fetches a
+# ~1MB tarball from GitHub releases, which from inside a container on dante
+# takes ~10s versus ~0.3s on the host; under `npm ci`'s concurrency that
+# regularly trips its request timeout. It then falls back to node-gyp, which
+# needs Python — absent here — so the whole build dies. That is exactly how the
+# v1.36.3 sync failed to deploy: the image silently stayed on v1.36.1 while
+# ansible logged a swallowed failure.
+#
+# The builder stage never hits this because it installs python3 +
+# build-essential, so its identical prebuild timeout just falls through to a
+# successful source compile. This gives the runtime stage the same escape
+# hatch, without paying for a toolchain on the happy path: try the fast
+# prebuilt install first, and only if it fails install the toolchain, retry,
+# then purge it in the SAME layer so the image keeps no build tooling.
 RUN node -e "const p=require('./package.json');delete p.scripts.prepare;delete p.scripts.postinstall;require('fs').writeFileSync('package.json',JSON.stringify(p,null,2));" \
- && npm ci --omit=dev --no-audit --no-fund \
+ && ( npm ci --omit=dev --no-audit --no-fund \
+      || ( echo "npm ci failed (likely a prebuild-install timeout) — retrying with a build toolchain" \
+           && apt-get update \
+           && apt-get install -y --no-install-recommends python3 build-essential \
+           && npm ci --omit=dev --no-audit --no-fund \
+           && apt-get purge -y --auto-remove python3 build-essential \
+           && rm -rf /var/lib/apt/lists/* ) ) \
  && rm -rf \
       node_modules/@anthropic-ai/claude-agent-sdk-linux-x64 \
       node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl \
