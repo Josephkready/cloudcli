@@ -78,14 +78,36 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
 };
 
 /**
+ * Deployment override for the default permission mode.
+ *
+ * A trusted single-user install (login off, tailnet/LAN-only, where a spawned
+ * agent already inherits full host access — see the "CloudCLI UI — Dante Deploy"
+ * design doc) can opt into starting new sessions in a less-prompting mode instead
+ * of picking it per session, by setting e.g.
+ * `CLOUDCLI_DEFAULT_PERMISSION_MODE=bypassPermissions`.
+ *
+ * It only changes the *default* the picker starts on — every mode stays available,
+ * and the value is ignored for any provider that doesn't list it (so an over-broad
+ * value can never produce an invalid default). Read per call rather than at module
+ * load so a restart / test picks up the env without a stale cache.
+ */
+function applyDefaultPermissionModeOverride(caps: ProviderCapabilities): ProviderCapabilities {
+  const override = process.env.CLOUDCLI_DEFAULT_PERMISSION_MODE?.trim();
+  if (override && override !== caps.defaultPermissionMode && caps.permissionModes.includes(override)) {
+    return { ...caps, defaultPermissionMode: override };
+  }
+  return caps;
+}
+
+/**
  * Application service exposing the provider capability matrix.
  */
 export const providerCapabilitiesService = {
   getProviderCapabilities(provider: LLMProvider): ProviderCapabilities {
-    return PROVIDER_CAPABILITIES[provider];
+    return applyDefaultPermissionModeOverride(PROVIDER_CAPABILITIES[provider]);
   },
 
   listAllProviderCapabilities(): ProviderCapabilities[] {
-    return Object.values(PROVIDER_CAPABILITIES);
+    return Object.values(PROVIDER_CAPABILITIES).map(applyDefaultPermissionModeOverride);
   },
 };
