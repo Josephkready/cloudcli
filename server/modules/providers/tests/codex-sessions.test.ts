@@ -15,18 +15,24 @@ const patchHomeDir = (nextHomeDir: string) => {
   };
 };
 
-async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
+async function withIsolatedDatabase(
+  runTest: () => void | Promise<void>,
+  // Fork feature (#6): the session synchronizers skip ephemeral project paths.
+  // Setting the env var (even to '') fully replaces the defaults, so '' disables
+  // the filter — which most tests here want, because the default `/tmp/**`
+  // pattern would exclude these os.tmpdir()-based fixtures wholesale and the
+  // titling logic under test would never run. Pass a pattern to exercise the
+  // filter itself; see the exclude-gate test below.
+  excludedProjectPaths: string = '',
+): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
-  // Fork feature (#6): the session synchronizers skip ephemeral project paths,
-  // and the default filter excludes `/tmp/**`. These fixtures live under
-  // os.tmpdir(), so disable the filter here to exercise the titling logic.
   const previousExcludes = process.env.CLOUDCLI_EXCLUDED_PROJECT_PATHS;
   const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'codex-provider-db-'));
   const databasePath = path.join(tempDirectory, 'auth.db');
 
   closeConnection();
   process.env.DATABASE_PATH = databasePath;
-  process.env.CLOUDCLI_EXCLUDED_PROJECT_PATHS = '';
+  process.env.CLOUDCLI_EXCLUDED_PROJECT_PATHS = excludedProjectPaths;
   await initializeDatabase();
 
   try {
@@ -92,6 +98,80 @@ test('Codex synchronizer titles app-created sessions from the first user message
 
       assert.equal(sessionsDb.getSessionById('app-1')?.custom_name, 'Fix the login redirect bug');
     });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('Codex synchronizer skips sub-agent rollout files', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codex-session-sync-subagent-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    // Codex >=0.144 spawn_agent threads write their own rollout files into the
+    // same sessions tree, marked via thread_source/source in session_meta.
+    const sessionsDir = path.join(tempRoot, '.codex', 'sessions', '2026', '07', '07');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      path.join(sessionsDir, 'rollout-codex-subagent-1.jsonl'),
+      `${JSON.stringify({
+        type: 'session_meta',
+        payload: {
+          id: 'codex-subagent-1',
+          cwd: workspacePath,
+          thread_source: 'subagent',
+          parent_thread_id: 'codex-parent-1',
+          source: { subagent: { thread_spawn: { parent_thread_id: 'codex-parent-1', depth: 1 } } },
+        },
+      })}\n`,
+      'utf8'
+    );
+    await writeCodexTranscript(tempRoot, 'codex-parent-1', workspacePath);
+
+    await withIsolatedDatabase(async () => {
+      const synchronizer = new CodexSessionSynchronizer();
+      const processed = await synchronizer.synchronize();
+
+      assert.equal(processed, 1);
+      assert.ok(sessionsDb.getSessionById('codex-parent-1'));
+      assert.equal(sessionsDb.getSessionById('codex-subagent-1'), null);
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('Codex synchronizer skips sessions whose project path is excluded', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codex-session-sync-excluded-'));
+  const keptPath = path.join(tempRoot, 'workspace');
+  const excludedPath = path.join(tempRoot, 'worktrees', 'feature-branch');
+  await mkdir(keptPath, { recursive: true });
+  await mkdir(excludedPath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    // Fork feature (#6): a session whose cwd is an ephemeral worktree must not
+    // be auto-discovered into the sidebar. This is the sibling gate to
+    // upstream's isSubagent skip above — both live in processSessionFile(), so
+    // an upstream refactor of that function could silently drop this one. The
+    // rest of this file disables the filter, so without this test that
+    // regression would pass green.
+    await writeCodexTranscript(tempRoot, 'codex-kept-1', keptPath);
+    await writeCodexTranscript(tempRoot, 'codex-excluded-1', excludedPath);
+
+    await withIsolatedDatabase(async () => {
+      const synchronizer = new CodexSessionSynchronizer();
+      const processed = await synchronizer.synchronize();
+
+      // Only the non-excluded rollout is indexed.
+      assert.equal(processed, 1);
+      assert.ok(sessionsDb.getSessionById('codex-kept-1'));
+      assert.equal(sessionsDb.getSessionById('codex-excluded-1'), null);
+    }, '**/worktrees/**');
   } finally {
     restoreHomeDir();
     await rm(tempRoot, { recursive: true, force: true });
