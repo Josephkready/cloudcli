@@ -30,7 +30,7 @@ function isWorkspaceTrustPrompt(text = '') {
 
 async function spawnCursor(command, options = {}, ws) {
   return new Promise(async (resolve, reject) => {
-    const { sessionId, projectPath, cwd, toolsSettings, skipPermissions, model, sessionSummary, images } = options;
+    const { sessionId, projectPath, cwd, toolsSettings, skipPermissions, permissionMode, model, sessionSummary, images } = options;
     const resolvedModel = await providerModelsService.resolveResumeModel('cursor', sessionId, model);
     let capturedSessionId = sessionId; // Track session ID throughout the process
     let sessionCreatedSent = false; // Track if we've already sent session-created event
@@ -74,8 +74,11 @@ async function spawnCursor(command, options = {}, ws) {
       baseArgs.push('--output-format', 'stream-json');
     }
 
-    // Add skip permissions flag if enabled
-    if (skipPermissions || settings.skipPermissions) {
+    // Add skip permissions flag if enabled. Cursor has no separate bypass mode,
+    // so a `bypassPermissions` permission mode maps onto the same -f flag — that
+    // way the picker's Bypass option (and the CLOUDCLI_DEFAULT_PERMISSION_MODE
+    // default) actually take effect for cursor, matching claude/codex/opencode.
+    if (skipPermissions || settings.skipPermissions || permissionMode === 'bypassPermissions') {
       baseArgs.push('-f');
     }
 
