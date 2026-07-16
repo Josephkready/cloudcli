@@ -3,9 +3,9 @@
 //
 // Why this exists:
 //   When the SPA is hosted behind a reverse-proxy path prefix (e.g.
-//   `https://example.com/claudecodeui/`), React Router needs `basename` set
+//   `https://example.com/cloudcli/`), React Router needs `basename` set
 //   to that prefix or the app unmounts after client-side navigation because
-//   the URL ("/claudecodeui/...") no longer matches the router's mount point
+//   the URL ("/cloudcli/...") no longer matches the router's mount point
 //   ("/"). The frontend reads `window.__ROUTER_BASENAME__ || ""`, so the
 //   server is responsible for setting that global before the SPA JS runs.
 //

@@ -1,6 +1,6 @@
 <div align="center">
  <img src="public/logo.svg" alt="CloudCLI UI" width="64" height="64">
- <h1>Cloud CLI (aka Claude Code UI)</h1>
+ <h1>Cloud CLI</h1>
  <p>A desktop and mobile UI for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>, <a href="https://docs.cursor.com/en/cli/overview">Cursor CLI</a>, and <a href="https://developers.openai.com/codex">Codex</a>.<br>Use it locally or remotely to view your active projects and sessions from everywhere.</p>
 </div>
 
@@ -242,10 +242,10 @@ Override the defaults with the `CLOUDCLI_EXCLUDED_PROJECT_PATHS` environment var
 <details>
 <summary>How do I host CloudCLI UI behind a reverse-proxy path prefix?</summary>
 
-React Router reads `window.__ROUTER_BASENAME__` to know where the SPA is mounted. When you serve CloudCLI UI behind a path prefix (for example `https://example.com/claudecodeui/`), set the `ROUTER_BASENAME` environment variable to that prefix so the server injects it into `index.html` before the client JS runs. Without this, the app unmounts after login because the URL no longer matches the router's mount point.
+React Router reads `window.__ROUTER_BASENAME__` to know where the SPA is mounted. When you serve CloudCLI UI behind a path prefix (for example `https://example.com/cloudcli/`), set the `ROUTER_BASENAME` environment variable to that prefix so the server injects it into `index.html` before the client JS runs. Without this, the app unmounts after login because the URL no longer matches the router's mount point.
 
 ```
-ROUTER_BASENAME=/claudecodeui
+ROUTER_BASENAME=/cloudcli
 ```
 
 The value must start with a slash and not have a trailing slash. Leave it unset for normal root-path hosting — the default `npm install -g @cloudcli-ai/cloudcli && cloudcli` flow needs no configuration.

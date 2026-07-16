@@ -17,15 +17,15 @@ test('getRouterBasename returns empty string when the env var is explicitly empt
 
 test('getRouterBasename returns the configured value when set', () => {
   assert.equal(
-    getRouterBasename({ ROUTER_BASENAME: '/claudecodeui' }),
-    '/claudecodeui',
+    getRouterBasename({ ROUTER_BASENAME: '/cloudcli' }),
+    '/cloudcli',
   );
 });
 
 test('buildRouterBasenameScript JSON-encodes the basename value', () => {
   assert.equal(
-    buildRouterBasenameScript('/claudecodeui'),
-    '<script>window.__ROUTER_BASENAME__="/claudecodeui";</script>',
+    buildRouterBasenameScript('/cloudcli'),
+    '<script>window.__ROUTER_BASENAME__="/cloudcli";</script>',
   );
 });
 
@@ -50,10 +50,10 @@ test('buildRouterBasenameScript handles the empty-string default exactly like th
 
 test('injectRouterBasenameIntoHtml inserts the script immediately after <head>', () => {
   const html = '<!doctype html><html><head><title>x</title></head><body></body></html>';
-  const out = injectRouterBasenameIntoHtml(html, '/claudecodeui');
+  const out = injectRouterBasenameIntoHtml(html, '/cloudcli');
   assert.equal(
     out,
-    '<!doctype html><html><head><script>window.__ROUTER_BASENAME__="/claudecodeui";</script><title>x</title></head><body></body></html>',
+    '<!doctype html><html><head><script>window.__ROUTER_BASENAME__="/cloudcli";</script><title>x</title></head><body></body></html>',
   );
 });
 
