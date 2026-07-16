@@ -51,6 +51,15 @@ fi
 # if we die mid-swap it holds the last good build, and swap_in restores from it.
 trap 'rm -rf "$STAGE"' EXIT
 
+# A non-empty BACKUP means a previous run died mid-swap without completing its rollback
+# (see the CRITICAL path in swap_in) or was hard-killed. Its contents may be the only
+# copy of the last good build, and a live tree may be missing right now — so refuse
+# rather than delete it. Failing every reconcile until a human looks is the safe answer;
+# silently wiping the recovery point is not.
+if [ -d "$BACKUP" ] && [ -n "$(find "$BACKUP" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+  die "a previous run left builds in ${BACKUP#"$ROOT"/} — it may hold the only copy of the last good build. Restore or remove it by hand, then re-run."
+fi
+
 rm -rf "$STAGE" "$BACKUP"
 mkdir -p "$STAGE"
 
@@ -122,6 +131,8 @@ fi
 # was moved aside but never replaced leaves the path MISSING, and the restart that
 # follows is not gated on our exit code, so it would serve nothing at all.
 
+# Moves the previous tree aside into $BACKUP, then the staged tree into place. Returns
+# non-zero (rather than dying) so the caller can roll back BOTH trees together.
 swap_in() {
   local staged="$1" live="$2"
   local prev
@@ -131,26 +142,48 @@ swap_in() {
   rm -rf "$prev"
 
   if [ -e "$live" ]; then
-    mv "$live" "$prev"
+    mv "$live" "$prev" || die "failed to back up ${live#"$ROOT"/} before swapping"
   fi
+  mv "$staged" "$live" || return 1
+}
 
-  if ! mv "$staged" "$live"; then
-    # $live is currently absent. Put the previous build back before anything else runs.
-    if [ -e "$prev" ]; then
-      mv "$prev" "$live" \
-        || die "CRITICAL: ${live#"$ROOT"/} is MISSING and its backup at ${prev#"$ROOT"/} could not be restored — restore it by hand before the service restarts"
+# Restores every tree that still has a backup, newest failure first. The two trees must
+# stay paired: a new client bundle served against old server code is its own kind of
+# broken, so a failure on the second swap rolls the first one back too. $BACKUP still
+# holds every tree swapped so far because it is not cleaned until both have succeeded.
+rollback_all() {
+  local name
+  local restored=0
+
+  for name in dist dist-server; do
+    if [ -e "$BACKUP/$name" ]; then
+      rm -rf "${ROOT:?}/$name"
+      mv "$BACKUP/$name" "$ROOT/$name" \
+        || die "CRITICAL: $name is MISSING and its backup in ${BACKUP#"$ROOT"/} could not be restored — restore it by hand before the service restarts"
+      log "rolled back $name to the previous build"
+      restored=1
     fi
-    die "failed to move staged build into ${live#"$ROOT"/} (previous build restored)"
+  done
+
+  if [ "$restored" -eq 0 ]; then
+    log "nothing to roll back (no previous build was on disk)"
   fi
+  return 0
 }
 
 log "swapping staged build into place"
-swap_in "$STAGE/dist" "$ROOT/dist"
-swap_in "$STAGE/dist-server" "$ROOT/dist-server"
+if ! swap_in "$STAGE/dist" "$ROOT/dist"; then
+  rollback_all
+  die "failed to swap the staged client build into dist"
+fi
+if ! swap_in "$STAGE/dist-server" "$ROOT/dist-server"; then
+  rollback_all
+  die "failed to swap the staged server build into dist-server"
+fi
 
-# Both trees are live and consistent; the backup has no further use. Reached only on
-# success — a mid-swap failure leaves $BACKUP on disk on purpose, as a manual recovery
-# point alongside the CRITICAL message above.
+# Both trees are live and paired; the backups have no further use. Reached only on
+# success — any earlier failure leaves recovery to rollback_all, or to the operator via
+# the CRITICAL message and the startup guard.
 rm -rf "$BACKUP"
 
 log "build complete"
