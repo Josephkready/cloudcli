@@ -40,7 +40,12 @@ export function cleanTitle(raw: string): string {
       .map((line) => line.trim())
       .find((line) => line.length > 0) ?? '';
 
+  // Strip wrapping quotes/asterisks BEFORE the "Title:" preamble, then again
+  // after — a model that ignores the instructions can emit e.g.
+  // `**Title:** "Fix Login Bug"`, where the leading `**` would otherwise hide
+  // the preamble from the prefix strip and leak `Title:**` into the label.
   return firstLine
+    .replace(/^["'“”‘’`*\s]+/, '')
     .replace(/^(?:title|label)\s*[:\-]\s*/i, '')
     .replace(/^["'“”‘’`*\s]+/, '')
     .replace(/["'“”‘’`*\s]+$/, '')

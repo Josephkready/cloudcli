@@ -15,6 +15,12 @@ test('cleanTitle strips quotes, preambles, trailing punctuation, and collapses w
   assert.equal(cleanTitle('**Audio Preloading**'), 'Audio Preloading');
 });
 
+test('cleanTitle handles a markdown-wrapped or quoted "Title:" preamble', () => {
+  assert.equal(cleanTitle('**Title:** "Fix Login Bug"'), 'Fix Login Bug');
+  assert.equal(cleanTitle('*Label:* Update Docs'), 'Update Docs');
+  assert.equal(cleanTitle('Title: "Quoted Thing"'), 'Quoted Thing');
+});
+
 test('cleanTitle takes the first non-empty line when the model adds commentary', () => {
   assert.equal(
     cleanTitle('\n\nEarful Version 2 Design\nThis title captures the design work.'),
@@ -87,6 +93,22 @@ test('generateShortTitle returns null for empty or overlong model output', async
       model: 'm',
       fetchImpl: overlong.fetchImpl,
     }),
+    null,
+  );
+});
+
+test('generateShortTitle accepts output at the length limit and rejects one over', async () => {
+  const raw = 'a raw title long enough to be worth shortening';
+
+  const atLimit = stubFetch({ response: 'a'.repeat(80) });
+  assert.equal(
+    await generateShortTitle(raw, { ollamaUrl: 'http://x', model: 'm', fetchImpl: atLimit.fetchImpl }),
+    'a'.repeat(80),
+  );
+
+  const overLimit = stubFetch({ response: 'a'.repeat(81) });
+  assert.equal(
+    await generateShortTitle(raw, { ollamaUrl: 'http://x', model: 'm', fetchImpl: overLimit.fetchImpl }),
     null,
   );
 });

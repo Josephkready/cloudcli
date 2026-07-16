@@ -148,6 +148,31 @@ test('updateSessionCustomName records name_source only when a source is given', 
   });
 });
 
+test('createSession does not overwrite AI- or user-owned titles on re-sync', async () => {
+  await withIsolatedDatabase(() => {
+    const project = '/workspace/sticky-titles';
+
+    // Simulates Cursor, whose synchronizer recomputes the name from the raw
+    // transcript on every scan and always passes a fresh (long) name back in.
+    sessionsDb.createSession('ai-row', 'cursor', project, LONG_TITLE);
+    sessionsDb.updateSessionCustomName('ai-row', 'Short AI Title', 'ai');
+    sessionsDb.createSession('user-row', 'cursor', project, LONG_TITLE);
+    sessionsDb.updateSessionCustomName('user-row', 'My Manual Name', 'user');
+    sessionsDb.createSession('raw-row', 'cursor', project, LONG_TITLE);
+
+    // Re-sync (server restart / file-watcher) re-runs createSession with a new
+    // long name for every row.
+    sessionsDb.createSession('ai-row', 'cursor', project, OTHER_LONG_TITLE);
+    sessionsDb.createSession('user-row', 'cursor', project, OTHER_LONG_TITLE);
+    sessionsDb.createSession('raw-row', 'cursor', project, OTHER_LONG_TITLE);
+
+    // Owned titles survive; only the raw one refreshes from disk.
+    assert.equal(sessionsDb.getSessionById('ai-row')?.custom_name, 'Short AI Title');
+    assert.equal(sessionsDb.getSessionById('user-row')?.custom_name, 'My Manual Name');
+    assert.equal(sessionsDb.getSessionById('raw-row')?.custom_name, OTHER_LONG_TITLE);
+  });
+});
+
 test('repository reads normalize SQLite UTC timestamps to ISO strings', async () => {
   await withIsolatedDatabase(() => {
     sessionsDb.createAppSession('session-timezone', 'claude', '/workspace/demo-project');

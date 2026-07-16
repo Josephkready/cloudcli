@@ -252,6 +252,19 @@ The value must start with a slash and not have a trailing slash. Leave it unset 
 
 </details>
 
+<details>
+<summary>How do I get AI-shortened session titles?</summary>
+
+By default a session's sidebar title is the first prompt you sent, truncated. If you run a local [Ollama](https://ollama.com/) with a small model pulled (e.g. `ollama pull llama3.1:8b`), CloudCLI can rewrite those into short 2–5 word labels for you. Enable the opt-in background worker with:
+
+```
+CLOUDCLI_AI_TITLES_ENABLED=true
+```
+
+It periodically finds long, auto-generated titles and shortens them in place; titles you rename by hand are never touched, and the sidebar updates live. The Ollama URL, model, and cadence are all configurable — see `.env.example` for every `CLOUDCLI_AI_TITLES_*` variable and its default. It stays off unless you set this, so no local model is required.
+
+</details>
+
 ---
 
 ## Community & Support

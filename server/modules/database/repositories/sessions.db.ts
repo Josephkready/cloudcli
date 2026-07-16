@@ -101,12 +101,17 @@ export const sessionsDb = {
         // everything on each restart and made the archive feature useless for
         // decluttering. Preserving it (by not touching the column) keeps
         // archived sessions hidden across restarts; restore via the UI.
+        // custom_name is only refreshed from disk while name_source IS NULL
+        // (a raw, synchronizer-derived title). Once the AI-title worker ('ai')
+        // or a manual UI rename ('user') owns the name, re-sync must leave it
+        // alone — otherwise providers whose synchronizer recomputes the name on
+        // every scan (e.g. Cursor) would silently revert it on the next restart.
         `UPDATE sessions SET
            provider = ?,
            updated_at = COALESCE(?, CURRENT_TIMESTAMP),
            project_path = ?,
            jsonl_path = ?,
-           custom_name = COALESCE(?, custom_name)
+           custom_name = CASE WHEN name_source IS NULL THEN COALESCE(?, custom_name) ELSE custom_name END
          WHERE session_id = ?`
       ).run(
         provider,
@@ -135,7 +140,8 @@ export const sessionsDb = {
          -- Fork change: preserve isArchived on re-sync (was reset to 0). See
          -- the UPDATE path above for why: startup re-sync must not un-archive.
          isArchived = sessions.isArchived,
-         custom_name = COALESCE(excluded.custom_name, sessions.custom_name)`
+         -- Same guard as the UPDATE path: never overwrite an AI- or user-owned title.
+         custom_name = CASE WHEN sessions.name_source IS NULL THEN COALESCE(excluded.custom_name, sessions.custom_name) ELSE sessions.custom_name END`
     ).run(
       providerSessionId,
       provider,
