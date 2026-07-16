@@ -226,7 +226,7 @@ app.use(express.static(path.join(APP_ROOT, 'public')));
 // Serve the SPA's index.html through a small response transform so we can
 // inject `window.__ROUTER_BASENAME__` before any client JS executes. This is
 // what lets the SPA work when mounted behind a reverse-proxy path prefix
-// (e.g. https://example.com/claudecodeui/) without the brittle nginx
+// (e.g. https://example.com/cloudcli/) without the brittle nginx
 // sub_filter hack we used to rely on.
 //
 // The transform always runs, including when ROUTER_BASENAME is unset — in
