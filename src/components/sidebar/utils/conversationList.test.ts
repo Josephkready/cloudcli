@@ -4,7 +4,7 @@ import test from 'node:test';
 import type { Project, ProjectSession } from '../../../types/app';
 import type { SessionActivity, SessionActivityMap } from '../../../hooks/useSessionProtection';
 
-import { buildConversationList } from './conversationList';
+import { buildConversationList, formatCompactAge } from './conversationList';
 
 function session(id: string, lastActivity: string): ProjectSession {
   return { id, summary: id, lastActivity };
@@ -74,4 +74,35 @@ test('flattens across projects and ranks globally', () => {
 test('returns an empty list when there are no sessions', () => {
   assert.deepEqual(buildConversationList([], new Map(), new Set()), []);
   assert.deepEqual(buildConversationList([project('p', [])], new Map(), new Set()), []);
+});
+
+test('sinks sessions with an unparseable timestamp to the bottom of their band', () => {
+  const p = project('p1', [
+    session('valid', '2026-07-16T00:00:00Z'),
+    session('bad', 'not-a-date'),
+  ]);
+
+  const list = buildConversationList([p], new Map(), new Set());
+
+  assert.deepEqual(list.map((item) => item.session.id), ['valid', 'bad']);
+});
+
+test('formatCompactAge renders compact relative ages across each band', () => {
+  const now = new Date('2026-07-16T12:00:00Z');
+  const at = (iso: string) => new Date(iso).getTime();
+
+  assert.equal(formatCompactAge(at('2026-07-16T11:59:30Z'), now), '<1m'); // 30s
+  assert.equal(formatCompactAge(at('2026-07-16T11:45:00Z'), now), '15m');
+  assert.equal(formatCompactAge(at('2026-07-16T09:00:00Z'), now), '3hr');
+  assert.equal(formatCompactAge(at('2026-07-14T12:00:00Z'), now), '2d');
+});
+
+test('formatCompactAge returns empty for invalid or non-positive input', () => {
+  const now = new Date('2026-07-16T12:00:00Z');
+
+  assert.equal(formatCompactAge(NaN, now), '');
+  assert.equal(formatCompactAge(0, now), '');
+  assert.equal(formatCompactAge(-1, now), '');
+  // A future timestamp clamps to a zero diff rather than going negative.
+  assert.equal(formatCompactAge(now.getTime() + 60_000, now), '<1m');
 });

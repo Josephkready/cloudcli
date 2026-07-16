@@ -8,7 +8,7 @@ import { getAllSessions, getSessionDate } from './utils';
  * Attention-ranked status for a conversation row in the unified Conversations
  * view. Mirrors the herdr "what needs me now" ordering: a session waiting on the
  * user (`attention`) outranks one actively processing (`running`), which
- * outranks everything dormant (`idle`). See design doc item #1.
+ * outranks everything dormant (`idle`).
  */
 export type ConversationStatus = 'attention' | 'running' | 'idle';
 
@@ -26,6 +26,11 @@ const STATUS_RANK: Record<ConversationStatus, number> = {
   running: 1,
   idle: 2,
 };
+
+// Single source of truth for band order: the render layer derives its section
+// order from this, so the ranked sort and the on-screen grouping can't disagree.
+export const STATUS_ORDER: ConversationStatus[] = (Object.keys(STATUS_RANK) as ConversationStatus[])
+  .sort((a, b) => STATUS_RANK[a] - STATUS_RANK[b]);
 
 function resolveStatus(
   sessionId: string,
@@ -49,8 +54,7 @@ function resolveStatus(
  * Only the sessions already loaded onto each project are considered (the first
  * page from `/api/projects`), which always includes the recent — i.e. attention
  * and running — sessions. The idle tail of very long projects may be truncated;
- * a dedicated cross-project endpoint would remove that limit (see design item #1
- * follow-up).
+ * a dedicated cross-project endpoint would remove that limit (planned follow-up).
  */
 export function buildConversationList(
   projects: Project[],
@@ -82,4 +86,30 @@ export function buildConversationList(
     const bTime = Number.isNaN(b.activityTime) ? -Infinity : b.activityTime;
     return bTime - aTime;
   });
+}
+
+/**
+ * Compact relative age (<1m, Xm, Xhr, Xd) for a conversation row. Shares the
+ * format used by the per-project session rows so the two views read the same.
+ * Returns '' for non-finite or non-positive timestamps.
+ */
+export function formatCompactAge(activityTime: number, now: Date): string {
+  if (!Number.isFinite(activityTime) || activityTime <= 0) {
+    return '';
+  }
+
+  const diffInMinutes = Math.floor(Math.max(0, now.getTime() - activityTime) / (1000 * 60));
+  if (diffInMinutes < 1) {
+    return '<1m';
+  }
+  if (diffInMinutes < 60) {
+    return `${diffInMinutes}m`;
+  }
+
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) {
+    return `${diffInHours}hr`;
+  }
+
+  return `${Math.floor(diffInHours / 24)}d`;
 }

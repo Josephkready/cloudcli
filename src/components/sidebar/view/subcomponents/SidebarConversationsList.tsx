@@ -6,7 +6,7 @@ import { cn } from '../../../../lib/utils';
 import type { Project, ProjectSession } from '../../../../types/app';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import type { SessionWithProvider } from '../../types/types';
-import { buildConversationList, type ConversationListItem, type ConversationStatus } from '../../utils/conversationList';
+import { buildConversationList, formatCompactAge, STATUS_ORDER, type ConversationListItem, type ConversationStatus } from '../../utils/conversationList';
 import { getSessionName } from '../../utils/utils';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 
@@ -20,39 +20,20 @@ type SidebarConversationsListProps = {
   t: TFunction;
 };
 
-/**
- * Compact relative age (<1m, Xm, Xhr, Xd) for a conversation row. Shares the
- * format used by the per-project session rows so the two views read the same.
- */
-function formatCompactAge(activityTime: number, currentTime: Date): string {
-  if (!Number.isFinite(activityTime) || activityTime <= 0) {
-    return '';
-  }
-
-  const diffInMinutes = Math.floor(Math.max(0, currentTime.getTime() - activityTime) / (1000 * 60));
-  if (diffInMinutes < 1) {
-    return '<1m';
-  }
-  if (diffInMinutes < 60) {
-    return `${diffInMinutes}m`;
-  }
-
-  const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24) {
-    return `${diffInHours}hr`;
-  }
-
-  return `${Math.floor(diffInHours / 24)}d`;
-}
-
 type SectionMeta = {
-  status: ConversationStatus;
   icon: typeof Activity;
-  label: string;
   iconClassName: string;
+  labelKey: string;
+  labelFallback: string;
 };
 
-const STATUS_ORDER: ConversationStatus[] = ['attention', 'running', 'idle'];
+// Presentation metadata per status band, keyed so rendering walks STATUS_ORDER
+// (the single ordering source in conversationList.ts) instead of a parallel list.
+const SECTION_META: Record<ConversationStatus, SectionMeta> = {
+  attention: { icon: AlertCircle, iconClassName: 'text-amber-500', labelKey: 'conversations.attentionHeader', labelFallback: 'Needs attention' },
+  running: { icon: Activity, iconClassName: 'text-emerald-500', labelKey: 'conversations.runningHeader', labelFallback: 'Running' },
+  idle: { icon: Clock, iconClassName: 'text-muted-foreground', labelKey: 'conversations.idleHeader', labelFallback: 'Recent' },
+};
 
 function ConversationRow({
   item,
@@ -145,27 +126,6 @@ export default function SidebarConversationsList({
     [projects, activeSessions, attentionSessionIds],
   );
 
-  const sections: SectionMeta[] = [
-    {
-      status: 'attention',
-      icon: AlertCircle,
-      label: t('conversations.attentionHeader', 'Needs attention'),
-      iconClassName: 'text-amber-500',
-    },
-    {
-      status: 'running',
-      icon: Activity,
-      label: t('conversations.runningHeader', 'Running'),
-      iconClassName: 'text-emerald-500',
-    },
-    {
-      status: 'idle',
-      icon: Clock,
-      label: t('conversations.idleHeader', 'Recent'),
-      iconClassName: 'text-muted-foreground',
-    },
-  ];
-
   if (items.length === 0) {
     return (
       <div className="px-4 py-12 text-center md:py-8">
@@ -192,18 +152,19 @@ export default function SidebarConversationsList({
 
   return (
     <div className="space-y-3 px-2 pb-safe-area-inset-bottom">
-      {sections.map((section) => {
-        const sectionItems = itemsByStatus.get(section.status) ?? [];
+      {STATUS_ORDER.map((status) => {
+        const sectionItems = itemsByStatus.get(status) ?? [];
         if (sectionItems.length === 0) {
           return null;
         }
-        const SectionIcon = section.icon;
+        const meta = SECTION_META[status];
+        const SectionIcon = meta.icon;
 
         return (
-          <div key={section.status} className="space-y-1">
+          <div key={status} className="space-y-1">
             <div className="flex items-center gap-1.5 px-1 py-1">
-              <SectionIcon className={cn('h-3 w-3 flex-shrink-0', section.iconClassName)} />
-              <span className="text-xs font-medium text-foreground">{section.label}</span>
+              <SectionIcon className={cn('h-3 w-3 flex-shrink-0', meta.iconClassName)} />
+              <span className="text-xs font-medium text-foreground">{t(meta.labelKey, meta.labelFallback)}</span>
               <span className="text-[11px] text-muted-foreground">{sectionItems.length}</span>
             </div>
             <div className="space-y-1">
