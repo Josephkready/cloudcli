@@ -1395,6 +1395,9 @@ async function startServer() {
             if (AUTH_DISABLED) {
                 console.warn('[WARN] VITE_AUTH_DISABLED is set — login is OFF; every request runs as the single default user.');
             }
+            if (SELF_UPDATE_DISABLED) {
+                console.warn('[WARN] SELF_UPDATE_DISABLED is set — in-app update is OFF; this deployment is managed externally.');
+            }
             console.log('');
 
             // Start watching the projects folder for changes

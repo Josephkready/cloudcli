@@ -17,26 +17,41 @@
 #   behind on failure — precisely the state a restart would then serve.
 #
 # So: build into a staging dir, verify the artifacts, and only then swap them in. Any
-# failure leaves the previous good build untouched, making the restart a harmless no-op.
+# failure before the swap leaves the previous good build untouched, making the restart a
+# harmless no-op; a failure during the swap restores the previous build from $BACKUP.
 #
 # This replaces the atomicity the Docker build used to provide for free (a failed
-# `docker build` simply left the previous image running).
+# `docker build` simply left the previous image running). One gap remains that this
+# script cannot close on its own — see the npm ci note below.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# Staging holds the in-progress build. BACKUP holds the previous good build during the
+# swap and MUST live outside STAGE: the EXIT trap wipes STAGE, so a backup kept inside it
+# would be destroyed by the very failure it exists to recover from.
 STAGE="$ROOT/.dante-build"
+BACKUP="$ROOT/.dante-build-prev"
+LOCK="$ROOT/.dante-build.lock"
 
 log() { printf '[dante-build] %s\n' "$*"; }
 die() { printf '[dante-build] ERROR: %s\n' "$*" >&2; exit 1; }
 
-# Staging is disposable in every exit path; the live dist/ and dist-server/ are not
-# touched until the swap below, so bailing out early is always safe.
+# Serialize. ansible-pull reconciles on a 1-minute timer and a hand-run build could
+# overlap a scheduled one; two runs sharing $STAGE would race on rm -rf/mkdir and could
+# interleave their swaps.
+exec 9>"$LOCK"
+if ! flock -n 9; then
+  die "another dante-build is already running (lock: ${LOCK#"$ROOT"/})"
+fi
+
+# Only STAGE is disposable on every exit path. BACKUP is deliberately NOT removed here:
+# if we die mid-swap it holds the last good build, and swap_in restores from it.
 trap 'rm -rf "$STAGE"' EXIT
 
-rm -rf "$STAGE"
+rm -rf "$STAGE" "$BACKUP"
 mkdir -p "$STAGE"
 
 # VITE_AUTH_DISABLED is a Vite build-time constant inlined into the client bundle
@@ -47,6 +62,15 @@ export VITE_AUTH_DISABLED="${VITE_AUTH_DISABLED:-true}"
 
 log "installing dependencies (npm ci)"
 # devDependencies are required: vite, typescript and tsc-alias all live there.
+#
+# ACCEPTED RESIDUAL RISK: unlike the build steps below, this mutates the LIVE tree —
+# npm ci deletes and repopulates node_modules in place, and it cannot be staged because
+# it must run beside package.json. If it is interrupted (network, OOM, a systemd
+# timeout), node_modules can be left partial even though dist/ and dist-server/ still
+# hold the good build, and the unconditional restart that follows could then fail to
+# boot. Staging the whole tree to close this would cost a full duplicate install per
+# deploy. The real fix belongs on the ansible side — gate the restart on this script's
+# exit code instead of on "git SHA moved" — and is handled in the dante-config change.
 npm ci --no-audit --no-fund
 
 log "building client -> staging (VITE_AUTH_DISABLED=${VITE_AUTH_DISABLED})"
@@ -81,28 +105,52 @@ done
 # tsc emits the `@/...` path aliases verbatim; node cannot resolve them at runtime, so
 # a skipped tsc-alias yields a server that dies on its first aliased import. Catch it
 # here rather than at restart.
-if grep -rlq --include='*.js' "from '@/" "$STAGE/dist-server" 2>/dev/null; then
+#
+# Both quote styles must be matched: tsc preserves the source file's original quotes in
+# its output, and the tree genuinely contains both (server/shared/utils.ts uses single,
+# server/modules/database/init-db.ts uses double). Matching only one style would let a
+# real unrewritten import slip through the gate that exists to catch it.
+if grep -rqE --include='*.js' "(from|import\()[[:space:]]*['\"]@/" "$STAGE/dist-server" 2>/dev/null; then
   die "unresolved @/ alias imports in staged server build — tsc-alias did not rewrite output"
 fi
 
 # --- Swap --------------------------------------------------------------------------
-# Same-filesystem renames, so the window where a live path is absent is sub-millisecond
-# and the previous build survives until the new one is in place.
+# Same-filesystem renames, so the window where a live path is absent is sub-millisecond.
+#
+# The previous build is moved into $BACKUP rather than deleted, and restored if the
+# incoming move fails. Getting this wrong is worse than a stale build: a live tree that
+# was moved aside but never replaced leaves the path MISSING, and the restart that
+# follows is not gated on our exit code, so it would serve nothing at all.
 
 swap_in() {
   local staged="$1" live="$2"
-  local prev="$STAGE/prev-$(basename "$live")"
+  local prev
+  prev="$BACKUP/$(basename "$live")"
 
+  mkdir -p "$BACKUP"
   rm -rf "$prev"
+
   if [ -e "$live" ]; then
     mv "$live" "$prev"
   fi
-  mv "$staged" "$live"
-  rm -rf "$prev"
+
+  if ! mv "$staged" "$live"; then
+    # $live is currently absent. Put the previous build back before anything else runs.
+    if [ -e "$prev" ]; then
+      mv "$prev" "$live" \
+        || die "CRITICAL: ${live#"$ROOT"/} is MISSING and its backup at ${prev#"$ROOT"/} could not be restored — restore it by hand before the service restarts"
+    fi
+    die "failed to move staged build into ${live#"$ROOT"/} (previous build restored)"
+  fi
 }
 
 log "swapping staged build into place"
 swap_in "$STAGE/dist" "$ROOT/dist"
 swap_in "$STAGE/dist-server" "$ROOT/dist-server"
+
+# Both trees are live and consistent; the backup has no further use. Reached only on
+# success — a mid-swap failure leaves $BACKUP on disk on purpose, as a manual recovery
+# point alongside the CRITICAL message above.
+rm -rf "$BACKUP"
 
 log "build complete"

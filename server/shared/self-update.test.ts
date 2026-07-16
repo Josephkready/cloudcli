@@ -42,14 +42,18 @@ test('resolveUpdatePlan: platform mode runs its own script from the app root', (
 });
 
 test('resolveUpdatePlan: platform mode wins over installMode', () => {
-  // A platform deployment built from a checkout must still use the platform workflow.
-  const plan = resolveUpdatePlan({
-    isPlatform: true,
-    installMode: 'git',
-    appRoot: APP_ROOT,
-    homeDir: HOME_DIR,
-  });
-  assert.equal(plan.command, 'npm run update:platform');
+  // A platform deployment built from a checkout must still use the platform workflow,
+  // cwd included — the git branch would otherwise pick the same appRoot by coincidence,
+  // so assert the whole plan rather than just the command.
+  assert.deepEqual(
+    resolveUpdatePlan({
+      isPlatform: true,
+      installMode: 'git',
+      appRoot: APP_ROOT,
+      homeDir: HOME_DIR,
+    }),
+    { command: 'npm run update:platform', cwd: APP_ROOT },
+  );
 });
 
 test('resolveUpdatePlan: a git checkout pulls in place from the app root', () => {

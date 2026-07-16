@@ -12,6 +12,13 @@
 # so a new commit naturally invalidates the cache — no CACHE_BUST, no clone,
 # no cross-repo poll. Upstream (siteboon) ships no root Dockerfile, so this
 # fork-only file never conflicts on upstream sync.
+#
+# BEING REPLACED: dante is migrating to a host systemd deploy that runs the
+# server directly as jkready (see scripts/dante-build.sh), because agents are
+# spawned as plain children of the server and inherit its environment — so in a
+# container they lose every host tool outside the bind-mounted /home/jkready.
+# This file is kept as the rollback path until the host deploy is proven; once
+# it is, this Dockerfile and the docker_build wiring in dante-config go away.
 
 # ── Build stage ──────────────────────────────────────────────────────────────
 # Full install + build (vite client + tsc server). The whole devDependency
