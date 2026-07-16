@@ -65,8 +65,9 @@ mkdir -p "$STAGE"
 
 # VITE_AUTH_DISABLED is a Vite build-time constant inlined into the client bundle
 # (src/constants/config.ts), so it has to be set HERE. The systemd unit's runtime copy
-# governs the server only and cannot affect dist/. The default matches the Dockerfile
-# ARG this replaces; export VITE_AUTH_DISABLED=false to build with login restored.
+# governs the server only and cannot affect dist/. Defaults to on for the dante deploy
+# (single user, private network); export VITE_AUTH_DISABLED=false to build with login
+# restored.
 export VITE_AUTH_DISABLED="${VITE_AUTH_DISABLED:-true}"
 
 log "installing dependencies (npm ci)"
