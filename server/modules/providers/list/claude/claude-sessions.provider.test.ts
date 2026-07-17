@@ -4,7 +4,22 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { resolveClaudeJsonlPath } from '@/modules/providers/list/claude/claude-sessions.provider.js';
+import { isInternalContent, resolveClaudeJsonlPath } from '@/modules/providers/list/claude/claude-sessions.provider.js';
+
+test('isInternalContent flags the skill-preamble line so it is not rendered as a user bubble', () => {
+  assert.equal(isInternalContent('Base directory for this skill: /home/user/.claude/skills/foo'), true);
+});
+
+test('isInternalContent still flags the pre-existing internal prefixes', () => {
+  assert.equal(isInternalContent('<system-reminder>hi</system-reminder>'), true);
+  assert.equal(isInternalContent('Caveat: the messages below were generated...'), true);
+  assert.equal(isInternalContent('[Request interrupted by user]'), true);
+});
+
+test('isInternalContent leaves normal user text alone', () => {
+  assert.equal(isInternalContent('Please refactor the auth module'), false);
+  assert.equal(isInternalContent('/usage'), false);
+});
 
 /**
  * Helper that mints a fresh sandbox directory tree mimicking the layout of

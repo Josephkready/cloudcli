@@ -1,5 +1,6 @@
 import { memo, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Terminal } from 'lucide-react';
 
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import type {
@@ -9,6 +10,7 @@ import type {
   Provider,
 } from '../../types/types';
 import { formatUsageLimitText } from '../../utils/chatFormatting';
+import { formatLocalCommandLabel } from '../../utils/localCommand';
 import type { Project } from '../../../../types/app';
 import { ToolRenderer, shouldHideToolResult } from '../../tools';
 import { Reasoning, ReasoningTrigger, ReasoningContent } from '../../../../shared/view/ui';
@@ -72,6 +74,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
 
 
   const formattedTime = useMemo(() => new Date(message.timestamp).toLocaleTimeString(), [message.timestamp]);
+  // Slash-command invocations (e.g. `/usage`) render as a compact command chip
+  // instead of a prose bubble; the label comes from the parsed command fields.
+  const commandLabel = message.isLocalCommand ? formatLocalCommandLabel(message) : '';
   const shouldHideThinkingMessage = Boolean(message.isThinking && !showThinking);
 
   if (shouldHideThinkingMessage) {
@@ -94,7 +99,14 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 projectId={selectedProject?.projectId}
               />
             )}
-            {userCopyContent.trim().length > 0 || !message.images?.length ? (
+            {message.isLocalCommand ? (
+              /* Slash-command invocation: a compact command chip, not a prose bubble */
+              <div className="flex max-w-full items-center gap-1.5 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-blue-700 dark:border-blue-400/25 dark:bg-blue-400/10 dark:text-blue-200">
+                <Terminal className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                <span className="truncate font-mono text-sm" title={commandLabel}>{commandLabel}</span>
+                <span className="flex-shrink-0 text-[11px] text-blue-500/70 dark:text-blue-300/60">{formattedTime}</span>
+              </div>
+            ) : userCopyContent.trim().length > 0 || !message.images?.length ? (
               <div className="group max-w-full rounded-2xl rounded-br-md bg-blue-600 px-3 py-2 text-white shadow-sm sm:px-4">
                 <div dir="auto" className="whitespace-pre-wrap break-words font-serif text-sm">
                   {message.content}

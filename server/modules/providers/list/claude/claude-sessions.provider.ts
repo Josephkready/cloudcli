@@ -287,9 +287,12 @@ const INTERNAL_CONTENT_PREFIXES = [
   '<system-reminder>',
   'Caveat:',
   '[Request interrupted',
+  // Skill invocations inject a user-role preamble starting with this line. When
+  // it isn't flagged `isMeta`, it would otherwise render as a plain user bubble.
+  'Base directory for this skill:',
 ] as const;
 
-function isInternalContent(content: string): boolean {
+export function isInternalContent(content: string): boolean {
   return INTERNAL_CONTENT_PREFIXES.some((prefix) => content.startsWith(prefix));
 }
 
