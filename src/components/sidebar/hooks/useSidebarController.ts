@@ -123,7 +123,7 @@ export function useSidebarController({
   const [editingName, setEditingName] = useState('');
   const [initialSessionsLoaded, setInitialSessionsLoaded] = useState<Set<string>>(new Set());
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>('name');
+  const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>(() => readProjectSortOrder());
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [editingSession, setEditingSession] = useState<string | null>(null);
   const [editingSessionName, setEditingSessionName] = useState('');
@@ -726,6 +726,32 @@ export function useSidebarController({
     }
   }, [fetchArchivedSessions, onSessionDelete, sessionDeleteConfirmation, t]);
 
+  // One-click soft-archive for the hover trash button. A non-force delete
+  // archives (`isArchived = 1`) instead of removing the row, so there's no need
+  // to raise the archive/permanent-delete dialog — archiving is always the
+  // right default. Permanent delete stays reachable via shift-click (the dialog)
+  // and the archived-sessions view.
+  const archiveSession = useCallback(async (sessionId: string) => {
+    try {
+      const response = await api.deleteSession(sessionId, false);
+
+      if (response.ok) {
+        onSessionDelete?.(sessionId);
+        await fetchArchivedSessions();
+      } else {
+        const errorText = await response.text();
+        console.error('[Sidebar] Failed to archive session:', {
+          status: response.status,
+          error: errorText,
+        });
+        alert(t('messages.deleteSessionFailed'));
+      }
+    } catch (error) {
+      console.error('[Sidebar] Error archiving session:', error);
+      alert(t('messages.deleteSessionError'));
+    }
+  }, [fetchArchivedSessions, onSessionDelete, t]);
+
   const requestProjectDelete = useCallback(
     (project: Project) => {
       setDeleteConfirmation({
@@ -935,6 +961,7 @@ export function useSidebarController({
     saveProjectName,
     showDeleteSessionConfirmation,
     confirmDeleteSession,
+    archiveSession,
     requestProjectDelete,
     confirmDeleteProject,
     handleProjectSelect,

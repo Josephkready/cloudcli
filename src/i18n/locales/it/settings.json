@@ -129,7 +129,8 @@
       "label": "Ordinamento progetti",
       "description": "Come vengono ordinati i progetti nella barra laterale",
       "alphabetical": "Alfabetico",
-      "recentActivity": "Attività recente"
+      "recentActivity": "Attività recente",
+      "sessionCount": "Numero di sessioni"
     },
     "codeEditor": {
       "title": "Editor codice",

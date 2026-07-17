@@ -130,7 +130,8 @@
       "label": "项目排序",
       "description": "项目在侧边栏中的排列方式",
       "alphabetical": "按字母顺序",
-      "recentActivity": "最近活动"
+      "recentActivity": "最近活动",
+      "sessionCount": "按会话数量"
     },
     "codeEditor": {
       "title": "代码编辑器",

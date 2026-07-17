@@ -3,17 +3,27 @@ import type { TFunction } from 'i18next';
 import type { LLMProvider, Project, ProjectSession } from '../../../types/app';
 import type { ProjectSortOrder, SettingsProject, SessionViewModel, SessionWithProvider } from '../types/types';
 
+// Session count is the default: the projects with the most sessions are the
+// ones actually worked in, so they lead the list unless the user picked a mode.
+export const DEFAULT_PROJECT_SORT_ORDER: ProjectSortOrder = 'count';
+
+const normalizeProjectSortOrder = (value: unknown): ProjectSortOrder => {
+  return value === 'name' || value === 'date' || value === 'count'
+    ? value
+    : DEFAULT_PROJECT_SORT_ORDER;
+};
+
 export const readProjectSortOrder = (): ProjectSortOrder => {
   try {
     const rawSettings = localStorage.getItem('claude-settings');
     if (!rawSettings) {
-      return 'name';
+      return DEFAULT_PROJECT_SORT_ORDER;
     }
 
     const settings = JSON.parse(rawSettings) as { projectSortOrder?: ProjectSortOrder };
-    return settings.projectSortOrder === 'date' ? 'date' : 'name';
+    return normalizeProjectSortOrder(settings.projectSortOrder);
   } catch {
-    return 'name';
+    return DEFAULT_PROJECT_SORT_ORDER;
   }
 };
 
@@ -134,6 +144,17 @@ export const sortProjects = (
 
     if (!aStarred && bStarred) {
       return 1;
+    }
+
+    if (projectSortOrder === 'count') {
+      // The count is `sessionMeta.total` — the same value shown as the badge on
+      // each project row. Sort it descending so the busiest projects lead.
+      const countDiff = Number(projectB.sessionMeta?.total ?? 0) - Number(projectA.sessionMeta?.total ?? 0);
+      if (countDiff !== 0) {
+        return countDiff;
+      }
+      // Tie-break equal counts by name so ordering stays stable/deterministic.
+      return (projectA.displayName || projectA.projectId).localeCompare(projectB.displayName || projectB.projectId);
     }
 
     if (projectSortOrder === 'date') {

@@ -129,7 +129,8 @@
       "label": "プロジェクトの並び順",
       "description": "サイドバーでのプロジェクトの並び順を設定します",
       "alphabetical": "アルファベット順",
-      "recentActivity": "最近のアクティビティ順"
+      "recentActivity": "最近のアクティビティ順",
+      "sessionCount": "セッション数順"
     },
     "codeEditor": {
       "title": "コードエディタ",

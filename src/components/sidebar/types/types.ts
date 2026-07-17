@@ -1,7 +1,7 @@
 import type { LoadingProgress, Project, ProjectSession, LLMProvider } from '../../../types/app';
 import type { SessionActivityMap } from '../../../hooks/useSessionProtection';
 
-export type ProjectSortOrder = 'name' | 'date';
+export type ProjectSortOrder = 'name' | 'date' | 'count';
 export type SidebarSearchMode = 'projects' | 'conversations' | 'archived';
 export type ArchivedProjectListItem = Project & { isArchived: true };
 

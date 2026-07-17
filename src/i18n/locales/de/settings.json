@@ -129,7 +129,8 @@
       "label": "Projektsortierung",
       "description": "Wie Projekte in der Seitenleiste angeordnet werden",
       "alphabetical": "Alphabetisch",
-      "recentActivity": "Letzte Aktivität"
+      "recentActivity": "Letzte Aktivität",
+      "sessionCount": "Anzahl der Sitzungen"
     },
     "codeEditor": {
       "title": "Code-Editor",

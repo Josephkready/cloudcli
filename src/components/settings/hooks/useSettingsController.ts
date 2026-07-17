@@ -7,6 +7,7 @@ import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuth
 import {
   DEFAULT_CODE_EDITOR_SETTINGS,
   DEFAULT_CURSOR_PERMISSIONS,
+  DEFAULT_PROJECT_SORT_ORDER,
 } from '../constants/constants';
 import type {
   AgentProvider,
@@ -143,7 +144,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
 
   const [activeTab, setActiveTab] = useState<SettingsMainTab>(() => normalizeMainTab(initialTab));
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
-  const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>('name');
+  const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>(DEFAULT_PROJECT_SORT_ORDER);
   const [codeEditorSettings, setCodeEditorSettings] = useState<CodeEditorSettingsState>(() => (
     readCodeEditorSettings()
   ));
@@ -178,7 +179,13 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
         disallowedTools: savedClaudeSettings.disallowedTools || [],
         skipPermissions: Boolean(savedClaudeSettings.skipPermissions),
       });
-      setProjectSortOrder(savedClaudeSettings.projectSortOrder === 'date' ? 'date' : 'name');
+      setProjectSortOrder(
+        savedClaudeSettings.projectSortOrder === 'name'
+          || savedClaudeSettings.projectSortOrder === 'date'
+          || savedClaudeSettings.projectSortOrder === 'count'
+          ? savedClaudeSettings.projectSortOrder
+          : DEFAULT_PROJECT_SORT_ORDER,
+      );
 
       const savedCursorSettings = parseJson<CursorSettingsStorage>(
         localStorage.getItem('cursor-tools-settings'),
@@ -218,7 +225,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
       setCursorPermissions(createEmptyCursorPermissions());
       setNotificationPreferences(createDefaultNotificationPreferences());
       setCodexPermissionMode('default');
-      setProjectSortOrder('name');
+      setProjectSortOrder(DEFAULT_PROJECT_SORT_ORDER);
     }
   }, []);
 

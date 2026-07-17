@@ -30,6 +30,7 @@ type SidebarSessionItemProps = {
     sessionTitle: string,
     provider: LLMProvider,
   ) => void;
+  onArchiveSession: (sessionId: string) => void;
   t: TFunction;
 };
 
@@ -77,6 +78,7 @@ export default function SidebarSessionItem({
   onProjectSelect,
   onSessionSelect,
   onDeleteSession,
+  onArchiveSession,
   t,
 }: SidebarSessionItemProps) {
   const sessionView = createSessionViewModel(session, currentTime, t);
@@ -119,6 +121,10 @@ export default function SidebarSessionItem({
 
   const requestDeleteSession = () => {
     onDeleteSession(project.projectId, session.id, sessionView.sessionName, session.__provider);
+  };
+
+  const requestArchiveSession = () => {
+    onArchiveSession(session.id);
   };
 
   return (
@@ -197,8 +203,9 @@ export default function SidebarSessionItem({
                 className="ml-1 flex h-5 w-5 items-center justify-center rounded-md bg-red-50 opacity-70 transition-transform active:scale-95 dark:bg-red-900/20"
                 onClick={(event) => {
                   event.stopPropagation();
-                  requestDeleteSession();
+                  requestArchiveSession();
                 }}
+                title={t('tooltips.archiveSession', 'Archive session')}
               >
                 <Trash2 className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
               </button>
@@ -334,9 +341,16 @@ export default function SidebarSessionItem({
                     className="flex h-6 w-6 items-center justify-center rounded bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40"
                     onClick={(event) => {
                       event.stopPropagation();
-                      requestDeleteSession();
+                      // Plain click archives in one step (archiving is always the
+                      // right default); shift-click opens the archive/permanent-delete
+                      // dialog for the rare hard delete.
+                      if (event.shiftKey) {
+                        requestDeleteSession();
+                      } else {
+                        requestArchiveSession();
+                      }
                     }}
-                    title={t('tooltips.deleteSessionOptions', 'Archive or permanently delete this session')}
+                    title={t('tooltips.archiveSession', 'Archive session (shift-click to delete permanently)')}
                   >
                     <Trash2 className="h-3 w-3 text-red-600 dark:text-red-400" />
                   </button>

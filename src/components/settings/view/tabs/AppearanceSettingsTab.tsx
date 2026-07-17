@@ -58,6 +58,7 @@ export default function AppearanceSettingsTab({
               onChange={(event) => onProjectSortOrderChange(event.target.value as ProjectSortOrder)}
               className="w-full rounded-lg border border-input bg-card p-2.5 text-sm text-foreground touch-manipulation focus:border-primary focus:ring-1 focus:ring-primary sm:w-36"
             >
+              <option value="count">{t('appearanceSettings.projectSorting.sessionCount')}</option>
               <option value="name">{t('appearanceSettings.projectSorting.alphabetical')}</option>
               <option value="date">{t('appearanceSettings.projectSorting.recentActivity')}</option>
             </select>

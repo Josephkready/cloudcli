@@ -130,7 +130,8 @@
       "label": "Proje Sıralama",
       "description": "Projelerin kenar çubuğunda nasıl sıralanacağı",
       "alphabetical": "Alfabetik",
-      "recentActivity": "Son Etkinlik"
+      "recentActivity": "Son Etkinlik",
+      "sessionCount": "Oturum Sayısı"
     },
     "codeEditor": {
       "title": "Kod Editörü",

@@ -155,7 +155,8 @@
       "label": "Project Sorting",
       "description": "How projects are ordered in the sidebar",
       "alphabetical": "Alphabetical",
-      "recentActivity": "Recent Activity"
+      "recentActivity": "Recent Activity",
+      "sessionCount": "Session Count"
     },
     "codeEditor": {
       "title": "Code Editor",
