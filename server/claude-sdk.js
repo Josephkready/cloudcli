@@ -561,19 +561,29 @@ async function queryClaudeSDK(command, options = {}, ws) {
         dedupeKey: `claude:permission:${capturedSessionId || sessionId || 'none'}:${requestId}`
       }));
 
-      const decision = await waitForToolApproval(requestId, {
-        timeoutMs: requiresInteraction ? 0 : undefined,
-        signal: context?.signal,
-        metadata: {
-          _sessionId: capturedSessionId || sessionId || null,
-          _toolName: toolName,
-          _input: input,
-          _receivedAt: new Date(),
-        },
-        onCancel: (reason) => {
-          ws.send(createNormalizedMessage({ kind: 'permission_cancelled', requestId, reason, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
-        }
-      });
+      // Mark the run blocked so the sidebar ranks it "needs attention" while it
+      // waits on the user (the indefinite timeoutMs:0 path is exactly the
+      // plan-mode / AskUserQuestion case). The finally clears it on every exit
+      // (allow/deny/timeout/cancel/abort).
+      ws.setBlocked?.(true);
+      let decision;
+      try {
+        decision = await waitForToolApproval(requestId, {
+          timeoutMs: requiresInteraction ? 0 : undefined,
+          signal: context?.signal,
+          metadata: {
+            _sessionId: capturedSessionId || sessionId || null,
+            _toolName: toolName,
+            _input: input,
+            _receivedAt: new Date(),
+          },
+          onCancel: (reason) => {
+            ws.send(createNormalizedMessage({ kind: 'permission_cancelled', requestId, reason, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+          }
+        });
+      } finally {
+        ws.setBlocked?.(false);
+      }
       if (!decision) {
         return { behavior: 'deny', message: 'Permission request timed out' };
       }

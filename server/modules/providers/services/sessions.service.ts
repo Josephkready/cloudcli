@@ -96,6 +96,7 @@ export const sessionsService = {
     provider: LLMProvider;
     startedAt: number;
     lastSeq: number;
+    blocked: boolean;
   }> {
     return chatRunRegistry.listRunningRuns();
   },

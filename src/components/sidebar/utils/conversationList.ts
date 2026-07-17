@@ -39,6 +39,13 @@ function resolveStatus(
 ): ConversationStatus {
   // Attention wins over running: a blocked/finished session the user hasn't
   // looked at yet is more urgent than one still churning.
+  //
+  // A running session the server reports as blocked (waiting on a permission
+  // prompt or plan-mode approval) is attention in any tab — independent of
+  // which client started it and of the FS-watcher attention heuristic.
+  if (activeSessions.get(sessionId)?.blocked) {
+    return 'attention';
+  }
   if (attentionSessionIds.has(sessionId)) {
     return 'attention';
   }

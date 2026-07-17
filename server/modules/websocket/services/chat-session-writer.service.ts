@@ -19,6 +19,13 @@ type ChatSessionWriterOptions = {
    */
   onProviderSessionId: (providerSessionId: string) => void;
   /**
+   * Invoked when the run enters or leaves a blocked/awaiting-input state (a
+   * permission prompt or the indefinite plan-mode / `AskUserQuestion` approval).
+   * The registry records this so the sidebar can rank a blocked-but-running
+   * session as "needs attention" regardless of which client started the run.
+   */
+  onBlockedChange?: (blocked: boolean) => void;
+  /**
    * Remaps/sequences/buffers one outbound live event. Implemented by the chat
    * run registry; the writer never forwards a provider event untouched.
    * Returns `null` when the event must be dropped (duplicate terminal
@@ -126,6 +133,14 @@ export class ChatSessionWriter {
 
   getSessionId(): string | null {
     return this.providerSessionId;
+  }
+
+  /**
+   * Signals that the run is (un)blocked waiting on the user around an
+   * interactive approval await. Forwarded to the registry via `onBlockedChange`.
+   */
+  setBlocked(blocked: boolean): void {
+    this.options.onBlockedChange?.(blocked);
   }
 
   private captureProviderSessionId(providerSessionId: string): void {

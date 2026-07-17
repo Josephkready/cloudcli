@@ -17,7 +17,15 @@ function project(projectId: string, sessions: ProjectSession[]): Project {
 function activeSessions(...ids: string[]): SessionActivityMap {
   const map = new Map<string, SessionActivity>();
   for (const id of ids) {
-    map.set(id, { statusText: null, canInterrupt: true, startedAt: 0 });
+    map.set(id, { statusText: null, canInterrupt: true, startedAt: 0, blocked: false });
+  }
+  return map;
+}
+
+function blockedSessions(...ids: string[]): SessionActivityMap {
+  const map = new Map<string, SessionActivity>();
+  for (const id of ids) {
+    map.set(id, { statusText: null, canInterrupt: true, startedAt: 0, blocked: true });
   }
   return map;
 }
@@ -54,6 +62,26 @@ test('attention wins when a session is both active and flagged for attention', (
   const list = buildConversationList([p], activeSessions('s'), new Set(['s']));
 
   assert.equal(list[0].status, 'attention');
+});
+
+test('a running session the server marks blocked ranks as attention', () => {
+  // A blocked-but-running session (parked on a permission/plan approval) is not
+  // in attentionSessionIds — the server "blocked" flag alone must promote it out
+  // of the running band, in any tab.
+  const p = project('p1', [
+    session('s-run', '2026-07-16T02:00:00Z'),
+    session('s-blocked', '2026-07-16T01:00:00Z'),
+  ]);
+
+  const active = new Map([
+    ...activeSessions('s-run'),
+    ...blockedSessions('s-blocked'),
+  ]);
+
+  const list = buildConversationList([p], active, new Set());
+
+  assert.deepEqual(list.map((item) => item.session.id), ['s-blocked', 's-run']);
+  assert.deepEqual(list.map((item) => item.status), ['attention', 'running']);
 });
 
 test('flattens across projects and ranks globally', () => {

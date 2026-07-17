@@ -36,6 +36,13 @@ type ChatRun = {
   writer: ChatSessionWriter;
   startedAt: number;
   completedAt: number | null;
+  /**
+   * When the run entered a blocked/awaiting-input state (a permission prompt or
+   * plan-mode approval), else `null`. Surfaced in `listRunningRuns()` so the
+   * sidebar ranks a blocked-but-running session as "needs attention". Stored as
+   * a timestamp for a future "blocked for Ns" display; only presence matters now.
+   */
+  awaitingInputSince: number | null;
 };
 
 /**
@@ -197,6 +204,15 @@ function recordProviderSessionId(run: ChatRun, providerSessionId: string): void 
 }
 
 /**
+ * Marks a run as blocked (awaiting user input on a permission/plan approval) or
+ * clears it. The value is a timestamp so a future UI can show "blocked for Ns";
+ * today only its presence is read (as `blocked` in `listRunningRuns()`).
+ */
+function setRunBlocked(run: ChatRun, blocked: boolean): void {
+  run.awaitingInputSince = blocked ? Date.now() : null;
+}
+
+/**
  * Registry of live provider runs keyed by the stable app session id.
  *
  * The registry is what makes the websocket protocol provider-independent:
@@ -231,6 +247,7 @@ export const chatRunRegistry = {
       writer: null as unknown as ChatSessionWriter,
       startedAt: Date.now(),
       completedAt: null,
+      awaitingInputSince: null,
     };
 
     run.writer = new ChatSessionWriter({
@@ -240,6 +257,9 @@ export const chatRunRegistry = {
       providerSessionId: input.providerSessionId,
       onProviderSessionId: (providerSessionId) => {
         recordProviderSessionId(run, providerSessionId);
+      },
+      onBlockedChange: (blocked) => {
+        setRunBlocked(run, blocked);
       },
       decorateOutboundEvent: (message) => decorateAndRecordEvent(run, message),
     });
@@ -261,6 +281,7 @@ export const chatRunRegistry = {
     provider: LLMProvider;
     startedAt: number;
     lastSeq: number;
+    blocked: boolean;
   }> {
     return Array.from(runs.values())
       .filter((run) => run.status === 'running')
@@ -269,6 +290,7 @@ export const chatRunRegistry = {
         provider: run.provider,
         startedAt: run.startedAt,
         lastSeq: run.lastSeq,
+        blocked: run.awaitingInputSince !== null,
       }));
   },
 
