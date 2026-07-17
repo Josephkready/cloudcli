@@ -77,6 +77,11 @@ function ConversationRow({
   const compactAge = formatCompactAge(item.activityTime, currentTime);
   const isEditing = editingSession === session.id;
   const isRunning = status === 'running';
+  // A blocked-but-running session ranks as `attention` (not `running`), so gate
+  // the destructive action on the live-run flag — never on the ranking band —
+  // to avoid exposing archive/delete for an in-flight session (matches the
+  // Projects view, which hides it while processing).
+  const isActive = item.isActive;
   const editingContainerRef = useRef<HTMLDivElement>(null);
 
   // The rename panel lives in a group-hover opacity wrapper, so leaving the row
@@ -229,19 +234,17 @@ function ConversationRow({
               className="flex h-6 w-6 items-center justify-center rounded bg-gray-50 hover:bg-gray-100 dark:bg-gray-900/20 dark:hover:bg-gray-900/40"
               onClick={(event) => {
                 event.stopPropagation();
-                event.preventDefault();
                 onStartEditingSession(session.id, title);
               }}
               title={t('tooltips.editSessionName')}
             >
               <Edit2 className="h-3 w-3 text-gray-600 dark:text-gray-400" />
             </button>
-            {!isRunning && (
+            {!isActive && (
               <button
                 className="flex h-6 w-6 items-center justify-center rounded bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40"
                 onClick={(event) => {
                   event.stopPropagation();
-                  event.preventDefault();
                   // Plain click archives in one step (the right default); shift-click
                   // opens the archive/permanent-delete dialog for a hard delete.
                   if (event.shiftKey) {

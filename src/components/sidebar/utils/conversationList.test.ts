@@ -92,6 +92,33 @@ test('a session both blocked and flagged for attention still ranks as attention'
   assert.equal(list[0].status, 'attention');
 });
 
+test('isActive tracks a live run independent of the ranking band', () => {
+  // A blocked-but-running session ranks as attention, not running — but it is
+  // still a live run, so isActive must be true (consumers hide the delete
+  // action for it). Idle sessions are not active.
+  const p = project('p1', [
+    session('s-run', '2026-07-16T03:00:00Z'),
+    session('s-blocked', '2026-07-16T02:00:00Z'),
+    session('s-idle', '2026-07-16T01:00:00Z'),
+  ]);
+
+  const active = new Map([
+    ...activeSessions('s-run'),
+    ...blockedSessions('s-blocked'),
+  ]);
+
+  const byId = Object.fromEntries(
+    buildConversationList([p], active, new Set()).map((item) => [item.session.id, item]),
+  );
+
+  assert.equal(byId['s-run'].status, 'running');
+  assert.equal(byId['s-run'].isActive, true);
+  assert.equal(byId['s-blocked'].status, 'attention');
+  assert.equal(byId['s-blocked'].isActive, true);
+  assert.equal(byId['s-idle'].status, 'idle');
+  assert.equal(byId['s-idle'].isActive, false);
+});
+
 test('flattens across projects and ranks globally', () => {
   const projectA = project('A', [session('a-idle', '2026-07-16T05:00:00Z')]);
   const projectB = project('B', [
