@@ -24,6 +24,14 @@ test('falls back to commandMessage, adding a leading slash', () => {
   assert.equal(formatLocalCommandLabel({ commandMessage: '/usage' }), '/usage');
 });
 
+test('normalizes to exactly one leading slash regardless of field or slashes', () => {
+  // An unslashed commandName gets a slash...
+  assert.equal(formatLocalCommandLabel({ commandName: 'usage' }), '/usage');
+  // ...and multiple leading slashes collapse to one, from either field.
+  assert.equal(formatLocalCommandLabel({ commandName: '//usage' }), '/usage');
+  assert.equal(formatLocalCommandLabel({ commandMessage: '//usage' }), '/usage');
+});
+
 test('falls back to content when no structured command fields exist', () => {
   // content already includes args, so they are not re-appended here.
   assert.equal(

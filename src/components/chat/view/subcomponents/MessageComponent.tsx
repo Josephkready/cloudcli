@@ -99,7 +99,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 projectId={selectedProject?.projectId}
               />
             )}
-            {message.isLocalCommand ? (
+            {message.isLocalCommand && commandLabel ? (
               /* Slash-command invocation: a compact command chip, not a prose bubble */
               <div className="flex max-w-full items-center gap-1.5 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-blue-700 dark:border-blue-400/25 dark:bg-blue-400/10 dark:text-blue-200">
                 <Terminal className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
