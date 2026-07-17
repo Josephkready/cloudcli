@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   BadgeCheck,
@@ -10,6 +10,7 @@ import {
   Search,
   Server,
   Sparkles,
+  Star,
   TerminalSquare,
   Timer,
   RefreshCw,
@@ -25,6 +26,7 @@ import type {
   ModelCommandData,
   StatusCommandData,
 } from '../../hooks/useChatComposerState';
+import { readFavoriteModelIds, writeFavoriteModelIds, sortModelsByFavorite } from '../../utils/modelFavorites';
 
 type CommandResultModalProps = {
   payload: CommandModalPayload | null;
@@ -250,6 +252,28 @@ function ModelsContent({
   const currentModel = data?.current?.model || 'Unknown';
   const providerLabel = data?.current?.providerLabel || getProviderLabel(currentProvider);
   const liveDefinition = providerModelCatalog[currentProvider];
+
+  // Favorite (pinned) models float to the top. Persisted per provider in
+  // localStorage, reloaded whenever the active provider changes.
+  const [favoriteModelIds, setFavoriteModelIds] = useState<Set<string>>(
+    () => new Set(readFavoriteModelIds(currentProvider)),
+  );
+  useEffect(() => {
+    setFavoriteModelIds(new Set(readFavoriteModelIds(currentProvider)));
+  }, [currentProvider]);
+  const toggleFavoriteModel = useCallback((modelId: string) => {
+    setFavoriteModelIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(modelId)) {
+        next.delete(modelId);
+      } else {
+        next.add(modelId);
+      }
+      writeFavoriteModelIds(currentProvider, [...next]);
+      return next;
+    });
+  }, [currentProvider]);
+
   const availableOptions = useMemo<ModelOption[]>(() => {
     if (liveDefinition?.OPTIONS && liveDefinition.OPTIONS.length > 0) {
       return liveDefinition.OPTIONS;
@@ -262,17 +286,21 @@ function ModelsContent({
     const availableModels = Array.isArray(data?.availableModels) ? data.availableModels : [];
     return availableModels.map((model) => ({ value: model, label: model }));
   }, [data, liveDefinition]);
+  const sortedOptions = useMemo(
+    () => sortModelsByFavorite(availableOptions, favoriteModelIds),
+    [availableOptions, favoriteModelIds],
+  );
   const filteredOptions = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) {
-      return availableOptions;
+      return sortedOptions;
     }
 
-    return availableOptions.filter((option) => {
+    return sortedOptions.filter((option) => {
       const haystack = `${option.value} ${option.label || ''} ${option.description || ''}`.toLowerCase();
       return haystack.includes(normalized);
     });
-  }, [availableOptions, query]);
+  }, [sortedOptions, query]);
 
   const hasConcreteSessionId = typeof currentSessionId === 'string' && currentSessionId.trim().length > 0;
   const showSearch = availableOptions.length > 6;
@@ -339,45 +367,64 @@ function ModelsContent({
               const isCurrent = option.value === currentModel;
               const isPendingSelection = option.value === pendingSessionModel;
               const isChanging = option.value === changingModel;
+              const isFavorite = favoriteModelIds.has(option.value);
               return (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => handleSelectModel(option.value)}
-                  disabled={Boolean(changingModel)}
-                  aria-label={`Select model ${option.value}`}
-                  className={`settings-content-enter group flex min-h-[4rem] flex-col rounded-2xl border p-3 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60 ${
-                    isCurrent
-                      ? 'border-primary/45 bg-primary/10'
-                      : isPendingSelection
-                        ? 'border-emerald-500/35 bg-emerald-500/10'
-                        : 'border-border/70 bg-background/80 hover:border-primary/30 hover:bg-background'
-                  }`}
-                  style={{ animationDelay: `${Math.min(index * 14, 180)}ms` }}
-                >
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="break-all font-mono text-sm font-semibold text-foreground">{option.value}</span>
+                <div key={option.value} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectModel(option.value)}
+                    disabled={Boolean(changingModel)}
+                    aria-label={`Select model ${option.value}`}
+                    className={`settings-content-enter group flex min-h-16 w-full flex-col rounded-2xl border p-3 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60 ${
+                      isCurrent
+                        ? 'border-primary/45 bg-primary/10'
+                        : isPendingSelection
+                          ? 'border-emerald-500/35 bg-emerald-500/10'
+                          : 'border-border/70 bg-background/80 hover:border-primary/30 hover:bg-background'
+                    }`}
+                    style={{ animationDelay: `${Math.min(index * 14, 180)}ms` }}
+                  >
+                    <span className="flex items-center gap-2 pr-14">
+                      <span className="break-all font-mono text-sm font-semibold text-foreground">{option.value}</span>
+                    </span>
+                    {option.label && option.label !== option.value && (
+                      <span className="mt-1 text-xs font-medium text-foreground/85">{option.label}</span>
+                    )}
+                    {option.description && (
+                      <span className="mt-1 text-xs leading-5 text-muted-foreground">{option.description}</span>
+                    )}
+                    {isCurrent && (
+                      <span className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">Current selection</span>
+                    )}
+                    {isPendingSelection && !isCurrent && (
+                      <span className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-500 dark:text-emerald-400">
+                        Applies next response
+                      </span>
+                    )}
+                  </button>
+                  {/* Favorite toggle sits outside the select button to avoid nesting
+                      interactive controls; clicking it never triggers selection. */}
+                  <div className="absolute right-2 top-2 flex items-center gap-1">
                     {isCurrent ? (
                       <BadgeCheck className="h-4 w-4 shrink-0 text-primary" />
                     ) : isChanging ? (
                       <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-primary" />
                     ) : null}
-                  </span>
-                  {option.label && option.label !== option.value && (
-                    <span className="mt-1 text-xs font-medium text-foreground/85">{option.label}</span>
-                  )}
-                  {option.description && (
-                    <span className="mt-1 text-xs leading-5 text-muted-foreground">{option.description}</span>
-                  )}
-                  {isCurrent && (
-                    <span className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">Current selection</span>
-                  )}
-                  {isPendingSelection && !isCurrent && (
-                    <span className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-500 dark:text-emerald-400">
-                      Applies next response
-                    </span>
-                  )}
-                </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleFavoriteModel(option.value);
+                      }}
+                      aria-label={isFavorite ? `Remove ${option.value} from favorites` : `Add ${option.value} to favorites`}
+                      aria-pressed={isFavorite}
+                      title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                    >
+                      <Star className={`h-4 w-4 ${isFavorite ? 'fill-current text-yellow-500 dark:text-yellow-400' : ''}`} />
+                    </button>
+                  </div>
+                </div>
               );
             })}
           </div>
