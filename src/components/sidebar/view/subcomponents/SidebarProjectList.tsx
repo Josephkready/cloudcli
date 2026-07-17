@@ -30,6 +30,7 @@ export type SidebarProjectListProps = {
   loadingMoreProjects: Set<string>;
   activeSessions: SessionActivityMap;
   attentionSessionIds: ReadonlySet<string>;
+  onClearAllAttention: () => void;
   isProjectStarred: (projectName: string) => boolean;
   onEditingNameChange: (value: string) => void;
   onToggleProject: (projectName: string) => void;

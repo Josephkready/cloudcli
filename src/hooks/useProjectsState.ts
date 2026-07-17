@@ -11,7 +11,7 @@ import type {
   ProjectSession,
 } from '../types/app';
 
-import { isAttentionEventKind, shouldMarkAttentionForUpsert } from './attentionEvents';
+import { isAttentionEventKind } from './attentionEvents';
 import type { SessionActivityMap } from './useSessionProtection';
 
 type UseProjectsStateArgs = {
@@ -451,6 +451,14 @@ export function useProjectsState({
     });
   }, []);
 
+  // Bulk "mark all read": clears every event-driven attention flag at once.
+  // Sessions the server reports as blocked stay flagged — resolveStatus derives
+  // their attention from the live blocked flag, not this set — so genuine
+  // "needs me" signals survive while the "changed" noise is dismissed.
+  const clearAllSessionAttention = useCallback(() => {
+    setAttentionSessionIds((previous) => (previous.size === 0 ? previous : new Set()));
+  }, []);
+
   const fetchProjects = useCallback(async ({ showLoadingState = true }: FetchProjectsOptions = {}) => {
     try {
       if (showLoadingState) {
@@ -671,9 +679,14 @@ export function useProjectsState({
         return;
       }
 
-      // The transcript of the currently viewed session changed on disk while
-      // no run is active here (e.g. edited from another client or the CLI):
-      // signal the chat view to reload its messages.
+      // A transcript write is a passive "changed on disk" signal, not a "needs
+      // you" one, so it never flags attention. Flagging every write was the #38
+      // noise: idle terminal/CLI sessions constantly flush their transcripts,
+      // inflating the attention count with sessions that don't need the user.
+      // Real attention comes from genuine websocket kinds (isAttentionEventKind
+      // above — complete/permission_request/…) and the server-authoritative
+      // blocked flag surfaced via resolveStatus. Here we only reload the chat
+      // view when the *viewed* session's transcript changed underneath us.
       const currentSelectedSession = selectedSessionRef.current;
       if (
         currentSelectedSession
@@ -681,14 +694,6 @@ export function useProjectsState({
         && !activeSessionsRef.current.has(upsert.sessionId)
       ) {
         setExternalMessageUpdate((prev) => prev + 1);
-      } else if (
-        shouldMarkAttentionForUpsert(upsert.sessionId, activeSessionsRef.current, viewedSessionId)
-      ) {
-        // Only a transcript write from a session that is NOT currently running
-        // warrants attention — a live background run flushes its transcript
-        // constantly, and flagging that is the same still-running misfire as the
-        // streaming events above. See shouldMarkAttentionForUpsert.
-        markSessionAttention(upsert.sessionId);
       }
 
       setProjects((previousProjects) => {
@@ -1029,6 +1034,7 @@ export function useProjectsState({
       selectedSession,
       activeSessions,
       attentionSessionIds,
+      onClearAllAttention: clearAllSessionAttention,
       onProjectSelect: handleProjectSelect,
       onSessionSelect: handleSessionSelect,
       onNewSession: handleNewSession,
@@ -1046,6 +1052,7 @@ export function useProjectsState({
     }),
     [
       attentionSessionIds,
+      clearAllSessionAttention,
       handleNewSession,
       handleProjectDelete,
       handleProjectSelect,

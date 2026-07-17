@@ -43,6 +43,7 @@ export type SidebarProps = {
   selectedSession: ProjectSession | null;
   activeSessions: SessionActivityMap;
   attentionSessionIds: ReadonlySet<string>;
+  onClearAllAttention: () => void;
   onProjectSelect: (project: Project) => void;
   onSessionSelect: (session: ProjectSession) => void;
   onNewSession: (project: Project) => void;

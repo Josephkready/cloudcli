@@ -44,30 +44,3 @@ export const ATTENTION_EVENT_KINDS: ReadonlySet<string> = new Set([
 export function isAttentionEventKind(kind: string | null | undefined): boolean {
   return typeof kind === 'string' && ATTENTION_EVENT_KINDS.has(kind);
 }
-
-/**
- * True when a `session_upserted` (transcript-file-write) delta should flag its
- * session for attention.
- *
- * A transcript write is a weak signal: a running background session flushes its
- * transcript constantly, so flagging every write is the same still-running
- * misfire as marking streaming events (#44). We therefore only mark a session
- * whose run is NOT active — an out-of-band change (another client, or a session
- * driven directly by the CLI) — and never the session the user is looking at.
- *
- * `activeSessions` mirrors the server's running registry (refreshed every 5s),
- * so a live run is excluded as soon as it is known.
- */
-export function shouldMarkAttentionForUpsert(
-  sessionId: string | null | undefined,
-  activeSessions: ReadonlyMap<string, unknown>,
-  viewedSessionId: string | null | undefined,
-): boolean {
-  if (!sessionId) {
-    return false;
-  }
-  if (sessionId === viewedSessionId) {
-    return false;
-  }
-  return !activeSessions.has(sessionId);
-}

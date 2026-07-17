@@ -4,7 +4,6 @@ import test from 'node:test';
 import {
   ATTENTION_EVENT_KINDS,
   isAttentionEventKind,
-  shouldMarkAttentionForUpsert,
 } from './attentionEvents';
 
 // The core of #44: kinds that fire while the agent is actively running (or that
@@ -52,22 +51,9 @@ test('missing or non-string kinds are ignored', () => {
   assert.equal(isAttentionEventKind(''), false);
 });
 
-// shouldMarkAttentionForUpsert: a transcript write only flags a session that is
-// not running and not the one being viewed.
-test('upsert marks attention only for a non-running, non-viewed session', () => {
-  const running = new Map<string, unknown>([['run-1', {}]]);
-
-  // Not running, not viewed → mark.
-  assert.equal(shouldMarkAttentionForUpsert('idle-1', running, 'viewed-1'), true);
-
-  // Running → never mark (the still-running misfire this guards).
-  assert.equal(shouldMarkAttentionForUpsert('run-1', running, 'viewed-1'), false);
-
-  // Currently viewed → never mark (the user is already looking at it).
-  assert.equal(shouldMarkAttentionForUpsert('viewed-1', running, 'viewed-1'), false);
-
-  // Falsy / missing session id → never mark.
-  assert.equal(shouldMarkAttentionForUpsert(null, running, 'viewed-1'), false);
-  assert.equal(shouldMarkAttentionForUpsert(undefined, running, 'viewed-1'), false);
-  assert.equal(shouldMarkAttentionForUpsert('', running, 'viewed-1'), false);
+// A transcript write (`session_upserted`) is a passive "changed on disk" signal,
+// not a "needs you" one — it must never promote a session to attention (#38).
+test('session_upserted is not an attention event kind', () => {
+  assert.equal(isAttentionEventKind('session_upserted'), false);
+  assert.ok(!ATTENTION_EVENT_KINDS.has('session_upserted'));
 });

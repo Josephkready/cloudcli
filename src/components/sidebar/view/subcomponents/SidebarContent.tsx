@@ -320,6 +320,7 @@ export default function SidebarContent({
             projects={projects}
             activeSessions={projectListProps.activeSessions}
             attentionSessionIds={projectListProps.attentionSessionIds}
+            onClearAllAttention={projectListProps.onClearAllAttention}
             selectedSession={projectListProps.selectedSession}
             currentTime={projectListProps.currentTime}
             onSelect={(session, project) => {

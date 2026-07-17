@@ -14,6 +14,7 @@ type SidebarConversationsListProps = {
   projects: Project[];
   activeSessions: SessionActivityMap;
   attentionSessionIds: ReadonlySet<string>;
+  onClearAllAttention: () => void;
   selectedSession: ProjectSession | null;
   currentTime: Date;
   onSelect: (session: SessionWithProvider, project: Project) => void;
@@ -116,6 +117,7 @@ export default function SidebarConversationsList({
   projects,
   activeSessions,
   attentionSessionIds,
+  onClearAllAttention,
   selectedSession,
   currentTime,
   onSelect,
@@ -166,6 +168,16 @@ export default function SidebarConversationsList({
               <SectionIcon className={cn('h-3 w-3 flex-shrink-0', meta.iconClassName)} />
               <span className="text-xs font-medium text-foreground">{t(meta.labelKey, meta.labelFallback)}</span>
               <span className="text-[11px] text-muted-foreground">{sectionItems.length}</span>
+              {status === 'attention' && (
+                <button
+                  type="button"
+                  onClick={onClearAllAttention}
+                  className="ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  title={t('conversations.markAllReadTooltip', 'Dismiss all attention flags. Sessions still blocked on you stay flagged.')}
+                >
+                  {t('conversations.markAllRead', 'Mark all read')}
+                </button>
+              )}
             </div>
             <div className="space-y-1">
               {sectionItems.map((item) => (
