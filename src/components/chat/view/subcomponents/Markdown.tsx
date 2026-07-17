@@ -169,6 +169,15 @@ const markdownComponents = {
     </blockquote>
   ),
   p: ({ children }: { children?: React.ReactNode }) => <div className="mb-2 last:mb-0">{children}</div>,
+  // Tailwind Typography's stock heading scale is oversized against the chat body
+  // (h1 ~30px vs ~14-16px body). Override h1-h6 with a gentle, proportional
+  // ramp so a `#`/`##` reads as a heading without dwarfing the surrounding text.
+  h1: ({ children }: { children?: React.ReactNode }) => <h1 className="mb-2 mt-4 text-xl font-semibold first:mt-0">{children}</h1>,
+  h2: ({ children }: { children?: React.ReactNode }) => <h2 className="mb-2 mt-4 text-lg font-semibold first:mt-0">{children}</h2>,
+  h3: ({ children }: { children?: React.ReactNode }) => <h3 className="mb-1.5 mt-3 text-base font-semibold first:mt-0">{children}</h3>,
+  h4: ({ children }: { children?: React.ReactNode }) => <h4 className="mb-1 mt-3 text-sm font-semibold first:mt-0">{children}</h4>,
+  h5: ({ children }: { children?: React.ReactNode }) => <h5 className="mb-1 mt-2 text-sm font-semibold first:mt-0">{children}</h5>,
+  h6: ({ children }: { children?: React.ReactNode }) => <h6 className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">{children}</h6>,
   table: ({ children }: { children?: React.ReactNode }) => (
     <div className="my-2 overflow-x-auto">
       <table className="min-w-full border-collapse border border-gray-200 dark:border-gray-700">{children}</table>
