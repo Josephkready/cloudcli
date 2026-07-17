@@ -744,11 +744,11 @@ export function useSidebarController({
           status: response.status,
           error: errorText,
         });
-        alert(t('messages.deleteSessionFailed'));
+        alert(t('messages.archiveSessionFailed', 'Failed to archive session. Please try again.'));
       }
     } catch (error) {
       console.error('[Sidebar] Error archiving session:', error);
-      alert(t('messages.deleteSessionError'));
+      alert(t('messages.archiveSessionError', 'Error archiving session. Please try again.'));
     }
   }, [fetchArchivedSessions, onSessionDelete, t]);
 

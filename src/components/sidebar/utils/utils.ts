@@ -147,9 +147,13 @@ export const sortProjects = (
     }
 
     if (projectSortOrder === 'count') {
-      // The count is `sessionMeta.total` — the same value shown as the badge on
-      // each project row. Sort it descending so the busiest projects lead.
-      const countDiff = Number(projectB.sessionMeta?.total ?? 0) - Number(projectA.sessionMeta?.total ?? 0);
+      // Sort by the same value shown as the count badge on each project row
+      // (`SidebarProjectItem`): the true `sessionMeta.total`, falling back to the
+      // number of loaded sessions when the meta hasn't been populated yet.
+      // Descending so the busiest projects lead.
+      const countA = Number(projectA.sessionMeta?.total ?? projectA.sessions?.length ?? 0);
+      const countB = Number(projectB.sessionMeta?.total ?? projectB.sessions?.length ?? 0);
+      const countDiff = countB - countA;
       if (countDiff !== 0) {
         return countDiff;
       }

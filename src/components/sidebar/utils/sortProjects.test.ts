@@ -72,3 +72,18 @@ test("missing sessionMeta.total is treated as zero", () => {
 
   assert.deepEqual(sorted.map((p) => p.projectId), ['has-sessions', 'no-meta']);
 });
+
+test("falls back to loaded session count when sessionMeta is absent", () => {
+  // Mirrors the count-badge fallback in SidebarProjectItem: with no
+  // `sessionMeta`, the number of loaded `sessions` stands in for the total.
+  const metaless = (projectId: string, loaded: number): Project => ({
+    projectId,
+    displayName: projectId,
+    fullPath: `/repos/${projectId}`,
+    sessions: Array.from({ length: loaded }, (_, i) => ({ id: `${projectId}-${i}`, summary: '' })),
+  });
+
+  const sorted = sortProjects([metaless('few', 2), metaless('many', 9)], 'count');
+
+  assert.deepEqual(sorted.map((p) => p.projectId), ['many', 'few']);
+});
