@@ -327,6 +327,14 @@ export default function SidebarContent({
               projectListProps.onProjectSelect(project);
               projectListProps.onSessionSelect(session, project.projectId);
             }}
+            editingSession={projectListProps.editingSession}
+            editingSessionName={projectListProps.editingSessionName}
+            onEditingSessionNameChange={projectListProps.onEditingSessionNameChange}
+            onStartEditingSession={projectListProps.onStartEditingSession}
+            onCancelEditingSession={projectListProps.onCancelEditingSession}
+            onSaveEditingSession={projectListProps.onSaveEditingSession}
+            onDeleteSession={projectListProps.onDeleteSession}
+            onArchiveSession={projectListProps.onArchiveSession}
             t={t}
           />
         ) : searchMode === 'archived' ? (

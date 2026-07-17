@@ -16,6 +16,13 @@ export type ConversationListItem = {
   project: Project;
   session: SessionWithProvider;
   status: ConversationStatus;
+  /**
+   * True while a run is live for this session. Distinct from `status`, which
+   * reclassifies a blocked-but-running session as `attention` (not `running`);
+   * consumers that must know "is a run in flight" (e.g. to hide the delete
+   * action) key off this, not the ranking band.
+   */
+  isActive: boolean;
   /** Last-activity time in epoch ms; drives the within-status recency sort. */
   activityTime: number;
 };
@@ -77,6 +84,7 @@ export function buildConversationList(
         project,
         session,
         status,
+        isActive: activeSessions.has(String(session.id)),
         activityTime: getSessionDate(session).getTime(),
       });
     }

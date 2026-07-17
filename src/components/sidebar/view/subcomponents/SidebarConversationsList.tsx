@@ -1,16 +1,30 @@
-import { useMemo, type ReactNode } from 'react';
-import { Activity, AlertCircle, Clock, Loader2, MessageSquare } from 'lucide-react';
+import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { Activity, AlertCircle, Check, Clock, Edit2, Loader2, MessageSquare, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { cn } from '../../../../lib/utils';
-import type { Project, ProjectSession } from '../../../../types/app';
+import type { LLMProvider, Project, ProjectSession } from '../../../../types/app';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import type { SessionWithProvider } from '../../types/types';
 import { buildConversationList, formatCompactAge, STATUS_ORDER, type ConversationListItem, type ConversationStatus } from '../../utils/conversationList';
 import { getSessionName } from '../../utils/utils';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 
-type SidebarConversationsListProps = {
+// Rename + archive/delete handlers, shared with the Projects view's
+// SidebarSessionItem. Threaded through unchanged from useSidebarController so a
+// conversation row archives/renames exactly like a project's session row.
+type SessionRowActions = {
+  editingSession: string | null;
+  editingSessionName: string;
+  onEditingSessionNameChange: (value: string) => void;
+  onStartEditingSession: (sessionId: string, initialName: string) => void;
+  onCancelEditingSession: () => void;
+  onSaveEditingSession: (projectName: string, sessionId: string, summary: string, provider: LLMProvider) => void;
+  onDeleteSession: (projectName: string, sessionId: string, sessionTitle: string, provider: LLMProvider) => void;
+  onArchiveSession: (sessionId: string) => void;
+};
+
+type SidebarConversationsListProps = SessionRowActions & {
   projects: Project[];
   activeSessions: SessionActivityMap;
   attentionSessionIds: ReadonlySet<string>;
@@ -41,8 +55,16 @@ function ConversationRow({
   isSelected,
   currentTime,
   onSelect,
+  editingSession,
+  editingSessionName,
+  onEditingSessionNameChange,
+  onStartEditingSession,
+  onCancelEditingSession,
+  onSaveEditingSession,
+  onDeleteSession,
+  onArchiveSession,
   t,
-}: {
+}: SessionRowActions & {
   item: ConversationListItem;
   isSelected: boolean;
   currentTime: Date;
@@ -53,6 +75,43 @@ function ConversationRow({
   const title = getSessionName(session, t);
   const projectName = project.displayName || project.projectId;
   const compactAge = formatCompactAge(item.activityTime, currentTime);
+  const isEditing = editingSession === session.id;
+  const isRunning = status === 'running';
+  // A blocked-but-running session ranks as `attention` (not `running`), so gate
+  // the destructive action on the live-run flag — never on the ranking band —
+  // to avoid exposing archive/delete for an in-flight session (matches the
+  // Projects view, which hides it while processing).
+  const isActive = item.isActive;
+  const editingContainerRef = useRef<HTMLDivElement>(null);
+
+  // The rename panel lives in a group-hover opacity wrapper, so leaving the row
+  // would visually hide it. While editing, dismiss only on a click outside the
+  // panel (matches Escape / cancel). Mirrors SidebarSessionItem.
+  useEffect(() => {
+    if (!isEditing) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const container = editingContainerRef.current;
+      if (container && !container.contains(event.target as Node)) {
+        onCancelEditingSession();
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [isEditing, onCancelEditingSession]);
+
+  const saveEditedSession = () => {
+    onSaveEditingSession(project.projectId, session.id, editingSessionName, session.__provider);
+  };
+  const requestDeleteSession = () => {
+    onDeleteSession(project.projectId, session.id, title, session.__provider);
+  };
+  const requestArchiveSession = () => {
+    onArchiveSession(session.id);
+  };
 
   let statusIndicator: ReactNode = null;
   if (status === 'attention') {
@@ -64,7 +123,7 @@ function ConversationRow({
         className="h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-amber-500"
       />
     );
-  } else if (status === 'running') {
+  } else if (isRunning) {
     statusIndicator = (
       <Loader2
         aria-label={t('conversations.runningStatus', 'Working')}
@@ -76,40 +135,133 @@ function ConversationRow({
   }
 
   return (
-    <a
-      href={`/session/${session.id}`}
-      className={cn(
-        'flex w-full min-w-0 items-center gap-2 rounded-md border p-2 text-left transition-all duration-150',
-        isSelected
-          ? 'border-primary/20 bg-primary/5'
-          : status === 'attention'
-            ? 'border-amber-500/30 bg-amber-50/10 hover:bg-amber-50/20 dark:bg-amber-900/5 dark:hover:bg-amber-900/10'
-            : status === 'running'
-              ? 'border-emerald-500/30 bg-emerald-50/10 hover:bg-emerald-50/20 dark:bg-emerald-900/5 dark:hover:bg-emerald-900/10'
-              : 'border-border/30 bg-card hover:bg-accent/50',
-      )}
-      // Left-click keeps in-app navigation; Ctrl/Cmd/middle-click and the native
-      // context menu use the href to open the session in a new tab.
-      onClick={(event) => {
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-          return;
-        }
-        event.preventDefault();
-        onSelect(session, project);
-      }}
-    >
-      <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-muted/50">
-        <SessionProviderLogo provider={session.__provider} className="h-3 w-3" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-normal text-foreground">{title}</span>
-        <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-          <MessageSquare className="h-2.5 w-2.5 flex-shrink-0 opacity-70" />
-          <span className="truncate">{projectName}</span>
+    <div className="group relative">
+      <a
+        href={`/session/${session.id}`}
+        className={cn(
+          'flex w-full min-w-0 items-center gap-2 rounded-md border p-2 text-left transition-all duration-150',
+          isSelected
+            ? 'border-primary/20 bg-primary/5'
+            : status === 'attention'
+              ? 'border-amber-500/30 bg-amber-50/10 hover:bg-amber-50/20 dark:bg-amber-900/5 dark:hover:bg-amber-900/10'
+              : isRunning
+                ? 'border-emerald-500/30 bg-emerald-50/10 hover:bg-emerald-50/20 dark:bg-emerald-900/5 dark:hover:bg-emerald-900/10'
+                : 'border-border/30 bg-card hover:bg-accent/50',
+        )}
+        // Left-click keeps in-app navigation; Ctrl/Cmd/middle-click and the native
+        // context menu use the href to open the session in a new tab.
+        onClick={(event) => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+            return;
+          }
+          event.preventDefault();
+          onSelect(session, project);
+        }}
+      >
+        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-muted/50">
+          <SessionProviderLogo provider={session.__provider} className="h-3 w-3" />
         </span>
-      </span>
-      {statusIndicator}
-    </a>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-normal text-foreground">{title}</span>
+          <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+            <MessageSquare className="h-2.5 w-2.5 flex-shrink-0 opacity-70" />
+            <span className="truncate">{projectName}</span>
+          </span>
+        </span>
+        {statusIndicator && (
+          <span
+            className={cn(
+              'flex flex-shrink-0 items-center transition-opacity duration-200',
+              isEditing ? 'opacity-0' : 'group-hover:opacity-0',
+            )}
+          >
+            {statusIndicator}
+          </span>
+        )}
+      </a>
+
+      {/* Rename + archive/delete cluster: sibling of the <a> so its clicks never
+          navigate. Fades in on hover (stays visible while editing). */}
+      <div
+        ref={editingContainerRef}
+        className={cn(
+          'absolute right-2 top-1/2 flex -translate-y-1/2 transform items-center gap-1 transition-all duration-200',
+          isEditing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+        )}
+      >
+        {isEditing ? (
+          <>
+            <input
+              type="text"
+              value={editingSessionName}
+              onChange={(event) => onEditingSessionNameChange(event.target.value)}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === 'Enter') {
+                  saveEditedSession();
+                } else if (event.key === 'Escape') {
+                  onCancelEditingSession();
+                }
+              }}
+              onClick={(event) => event.stopPropagation()}
+              className="w-32 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+              autoFocus
+            />
+            <button
+              className="flex h-6 w-6 items-center justify-center rounded bg-green-50 hover:bg-green-100 dark:bg-green-900/20 dark:hover:bg-green-900/40"
+              onClick={(event) => {
+                event.stopPropagation();
+                saveEditedSession();
+              }}
+              title={t('tooltips.save')}
+            >
+              <Check className="h-3 w-3 text-green-600 dark:text-green-400" />
+            </button>
+            <button
+              className="flex h-6 w-6 items-center justify-center rounded bg-gray-50 hover:bg-gray-100 dark:bg-gray-900/20 dark:hover:bg-gray-900/40"
+              onClick={(event) => {
+                event.stopPropagation();
+                onCancelEditingSession();
+              }}
+              title={t('tooltips.cancel')}
+            >
+              <X className="h-3 w-3 text-gray-600 dark:text-gray-400" />
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="flex h-6 w-6 items-center justify-center rounded bg-gray-50 hover:bg-gray-100 dark:bg-gray-900/20 dark:hover:bg-gray-900/40"
+              onClick={(event) => {
+                event.stopPropagation();
+                onStartEditingSession(session.id, title);
+              }}
+              title={t('tooltips.editSessionName')}
+            >
+              <Edit2 className="h-3 w-3 text-gray-600 dark:text-gray-400" />
+            </button>
+            {!isActive && (
+              <button
+                className="flex h-6 w-6 items-center justify-center rounded bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  // Plain click archives in one step (the right default); shift-click
+                  // opens the archive/permanent-delete dialog for a hard delete.
+                  if (event.shiftKey) {
+                    requestDeleteSession();
+                  } else {
+                    requestArchiveSession();
+                  }
+                }}
+                title={t('tooltips.archiveSession', 'Archive session (shift-click to delete permanently)')}
+              >
+                <Trash2 className="h-3 w-3 text-red-600 dark:text-red-400" />
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -121,6 +273,14 @@ export default function SidebarConversationsList({
   selectedSession,
   currentTime,
   onSelect,
+  editingSession,
+  editingSessionName,
+  onEditingSessionNameChange,
+  onStartEditingSession,
+  onCancelEditingSession,
+  onSaveEditingSession,
+  onDeleteSession,
+  onArchiveSession,
   t,
 }: SidebarConversationsListProps) {
   const items = useMemo(
@@ -187,6 +347,14 @@ export default function SidebarConversationsList({
                   isSelected={selectedSession?.id === item.session.id}
                   currentTime={currentTime}
                   onSelect={onSelect}
+                  editingSession={editingSession}
+                  editingSessionName={editingSessionName}
+                  onEditingSessionNameChange={onEditingSessionNameChange}
+                  onStartEditingSession={onStartEditingSession}
+                  onCancelEditingSession={onCancelEditingSession}
+                  onSaveEditingSession={onSaveEditingSession}
+                  onDeleteSession={onDeleteSession}
+                  onArchiveSession={onArchiveSession}
                   t={t}
                 />
               ))}
