@@ -5,19 +5,6 @@
   "description": "A web-based UI for Claude Code CLI",
   "type": "module",
   "main": "dist-server/server/index.js",
-  "bin": {
-    "cloudcli": "dist-server/server/cli.js"
-  },
-  "files": [
-    "electron/",
-    "server/",
-    "shared/",
-    "public/api-docs.html",
-    "dist/",
-    "dist-server/",
-    "scripts/",
-    "README.md"
-  ],
   "homepage": "https://cloudcli.ai",
   "repository": {
     "type": "git",
@@ -52,8 +39,6 @@
     "lint": "eslint src/ server/",
     "lint:fix": "eslint src/ server/ --fix",
     "start": "npm run build && npm run server",
-    "release": "./release.sh",
-    "prepublishOnly": "npm run build",
     "postinstall": "node scripts/fix-node-pty.js",
     "prepare": "husky",
     "update:platform": "./update-platform.sh"
@@ -200,7 +185,6 @@
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
     "@eslint/js": "^9.39.3",
-    "@release-it/conventional-changelog": "^10.0.5",
     "@types/better-sqlite3": "^7.6.13",
     "@types/cross-spawn": "^6.0.6",
     "@types/express": "^5.0.6",
@@ -211,7 +195,6 @@
     "@types/react-dom": "^18.2.17",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.6.0",
-    "auto-changelog": "^2.5.0",
     "autoprefixer": "^10.4.16",
     "concurrently": "^8.2.2",
     "cross-env": "^10.1.0",
@@ -231,7 +214,6 @@
     "lint-staged": "^16.3.2",
     "node-gyp": "^10.0.0",
     "postcss": "^8.4.32",
-    "release-it": "^19.0.5",
     "sharp": "^0.34.2",
     "tailwindcss": "^3.4.0",
     "tsc-alias": "^1.8.16",
