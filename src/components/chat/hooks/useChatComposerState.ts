@@ -155,6 +155,15 @@ const createFakeSubmitEvent = () => {
 let queuedDraftSeq = 0;
 const makeQueuedDraftId = () => `qd_${queuedDraftSeq++}`;
 
+// A queued slash command that resolves to a *custom* (project-defined) command
+// dispatches its real send asynchronously (after a `/api/commands/execute`
+// round trip), so "no run started synchronously" isn't conclusive for
+// command-like input. Hold this long before re-driving the drain, giving a
+// started run time to flip `isLoading` so its completion edge takes over
+// instead of the next item overtaking it. Built-ins (which start no run) just
+// drain after the hold. A custom command slower than this could still race.
+const COMMAND_REDRAIN_HOLD_MS = 1200;
+
 export type QueuedDraft = {
   // Stable key for rendering the queue; never persisted.
   id: string;
@@ -955,12 +964,19 @@ export function useChatComposerState({
             startedRun = (await handleSubmitRef.current?.(createFakeSubmitEvent())) ?? false;
           } finally {
             flushingRef.current = false;
-          }
-          // A real send starts a run whose completion edge drains the next item.
-          // An item that starts no run (a built-in command, or a failed send)
-          // produces no such edge — nudge the drain so the tail doesn't stall.
-          if (!startedRun) {
-            setDrainTick((tick) => tick + 1);
+            // A real send starts a run whose completion edge drains the next
+            // item. An item that starts no run (a built-in command, or a failed
+            // send — including one that threw) produces no such edge, so nudge
+            // the drain to keep going. Command-like input is held longer: a
+            // custom command's real send is async, and the re-drive becomes a
+            // no-op once that run flips isLoading (decideQueueFlush defers to the
+            // completion edge). In `finally` so it still fires if the send threw.
+            if (!startedRun) {
+              const trimmed = head.content.trim();
+              const wasCommandLike = trimmed.startsWith('/') || trimmed.toLowerCase() === 'help';
+              const holdMs = wasCommandLike ? COMMAND_REDRAIN_HOLD_MS : 0;
+              setTimeout(() => setDrainTick((tick) => tick + 1), holdMs);
+            }
           }
         })();
       }, 0);
