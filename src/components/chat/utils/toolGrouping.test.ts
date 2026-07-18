@@ -77,6 +77,14 @@ test('visible thinking DOES break the run (showThinking=true)', () => {
   assert.equal(items.every((i) => !isToolGroupItem(i)), true);
 });
 
+test('tool messages with an unresolved (empty) toolName are not groupable', () => {
+  // isToolUse can be set before the tool name resolves; a falsy toolName must
+  // not let two such messages collapse into a nameless group.
+  const items = groupConsecutiveTools([tool(''), tool('')]);
+  assert.equal(items.length, 2);
+  assert.equal(items.every((i) => !isToolGroupItem(i)), true);
+});
+
 test('subagent-container tool messages are not groupable', () => {
   const items = groupConsecutiveTools([
     tool('Task', { isSubagentContainer: true }),

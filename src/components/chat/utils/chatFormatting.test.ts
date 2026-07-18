@@ -64,6 +64,12 @@ test('formatUsageLimitText passes through non-matching / non-string input', () =
   assert.equal(formatUsageLimitText(123 as unknown as string), 123 as unknown as string);
 });
 
+test('formatUsageLimitText ignores markers whose digit count is out of the 10-13 range', () => {
+  // The marker regex requires \d{10,13}; a short numeric tail must not match.
+  const short = 'Claude AI usage limit reached|123';
+  assert.equal(formatUsageLimitText(short), short);
+});
+
 test('formatUsageLimitText rewrites the "reached|<ts>" marker into human text', () => {
   // 1700000000 s = mid-November 2023 UTC; the day/time are timezone-dependent so
   // we assert only timezone-robust substrings (mid-month keeps the month stable).
