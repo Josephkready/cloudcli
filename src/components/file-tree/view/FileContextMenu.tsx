@@ -1,7 +1,8 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Copy, Download, FileText, FolderPlus, Pencil, RefreshCw, Trash2, type LucideIcon } from 'lucide-react';
 import { cn } from '../../../lib/utils';
+import { useCursorContextMenu } from '../../../shared/view/ui/useCursorContextMenu';
 
 type FileContextItem = {
   name: string;
@@ -25,23 +26,9 @@ type ContextMenuAction = {
   showDividerBefore?: boolean;
 };
 
-const CONTEXT_MENU_WIDTH = 200;
-const CONTEXT_MENU_HEIGHT = 300;
-const VIEWPORT_PADDING = 10;
-
-function calculateViewportSafePosition(clientX: number, clientY: number) {
-  // Keep the context menu inside the visible viewport.
-  const safeX =
-    clientX + CONTEXT_MENU_WIDTH > window.innerWidth
-      ? window.innerWidth - CONTEXT_MENU_WIDTH - VIEWPORT_PADDING
-      : clientX;
-  const safeY =
-    clientY + CONTEXT_MENU_HEIGHT > window.innerHeight
-      ? window.innerHeight - CONTEXT_MENU_HEIGHT - VIEWPORT_PADDING
-      : clientY;
-
-  return { x: Math.max(VIEWPORT_PADDING, safeX), y: Math.max(VIEWPORT_PADDING, safeY) };
-}
+// Narrower than CursorContextMenu's default (220) — preserves the file-tree
+// menu's original horizontal flip threshold.
+const FILE_CONTEXT_MENU_WIDTH = 200;
 
 export default function FileContextMenu({
   children,
@@ -69,21 +56,8 @@ export default function FileContextMenu({
   className?: string;
 }) {
   const { t } = useTranslation();
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  const closeContextMenu = useCallback(() => {
-    setIsMenuOpen(false);
-  }, []);
-
-  const openContextMenuAtCursor = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    setMenuPosition(calculateViewportSafePosition(event.clientX, event.clientY));
-    setIsMenuOpen(true);
-  }, []);
+  const { isMenuOpen, menuPosition, menuRef, openContextMenuAtCursor, closeContextMenu } =
+    useCursorContextMenu({ menuWidth: FILE_CONTEXT_MENU_WIDTH });
 
   const runMenuActionAndClose = useCallback((action?: () => void) => {
     closeContextMenu();
@@ -188,71 +162,6 @@ export default function FileContextMenu({
       },
     ];
   }, [item, onCopyPath, onDelete, onDownload, onNewFile, onNewFolder, onRefresh, onRename, t]);
-
-  useEffect(() => {
-    if (!isMenuOpen) {
-      return;
-    }
-
-    const handleOutsideMouseDown = (event: MouseEvent) => {
-      const menuElement = menuRef.current;
-      if (menuElement && !menuElement.contains(event.target as Node)) {
-        closeContextMenu();
-      }
-    };
-
-    const handleEscapeKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        closeContextMenu();
-      }
-    };
-
-    document.addEventListener('mousedown', handleOutsideMouseDown);
-    document.addEventListener('keydown', handleEscapeKeyDown);
-
-    return () => {
-      document.removeEventListener('mousedown', handleOutsideMouseDown);
-      document.removeEventListener('keydown', handleEscapeKeyDown);
-    };
-  }, [closeContextMenu, isMenuOpen]);
-
-  useEffect(() => {
-    if (!isMenuOpen) {
-      return;
-    }
-
-    // Arrow key support keeps the menu accessible without a mouse.
-    const handleKeyboardMenuNavigation = (event: KeyboardEvent) => {
-      const menuItems = menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])');
-      if (!menuItems || menuItems.length === 0) {
-        return;
-      }
-
-      const activeElement = document.activeElement as HTMLElement | null;
-      const currentIndex = Array.from(menuItems).findIndex((menuItem) => menuItem === activeElement);
-
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        const nextIndex = currentIndex < menuItems.length - 1 ? currentIndex + 1 : 0;
-        menuItems[nextIndex]?.focus();
-      } else if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        const previousIndex = currentIndex > 0 ? currentIndex - 1 : menuItems.length - 1;
-        menuItems[previousIndex]?.focus();
-      } else if (event.key === 'Enter' || event.key === ' ') {
-        if (activeElement?.hasAttribute('role')) {
-          event.preventDefault();
-          activeElement.click();
-        }
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyboardMenuNavigation);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyboardMenuNavigation);
-    };
-  }, [isMenuOpen]);
 
   return (
     <>
