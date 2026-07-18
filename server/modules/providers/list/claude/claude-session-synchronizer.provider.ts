@@ -7,7 +7,7 @@ import { shouldExcludeProjectPath } from '@/shared/project-exclude.js';
 import {
   buildLookupMap,
   extractFirstValidJsonlData,
-  findFilesRecursivelyCreatedAfter,
+  findFilesRecursivelyModifiedAfter,
   normalizeSessionName,
   readFileTimestamps,
 } from '@/shared/utils.js';
@@ -52,7 +52,7 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
    */
   async synchronize(since?: Date): Promise<number> {
     const nameMap = await buildLookupMap(path.join(this.claudeHome, 'history.jsonl'), 'sessionId', 'display');
-    const files = await findFilesRecursivelyCreatedAfter(
+    const files = await findFilesRecursivelyModifiedAfter(
       path.join(this.claudeHome, 'projects'),
       '.jsonl',
       since ?? null
