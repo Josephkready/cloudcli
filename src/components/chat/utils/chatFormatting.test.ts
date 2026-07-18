@@ -23,8 +23,11 @@ test('decodeHtmlEntities decodes &amp; last so escaped entities survive one pass
   assert.equal(decodeHtmlEntities('&amp;lt;'), '&lt;');
 });
 
-test('decodeHtmlEntities returns falsy input unchanged', () => {
+test('decodeHtmlEntities guards falsy input (would throw on null without the guard)', () => {
   assert.equal(decodeHtmlEntities(''), '');
+  // No try/catch here: without the `if (!text)` guard, `null.replace` would throw,
+  // so this genuinely exercises the guard rather than a no-op.
+  assert.equal(decodeHtmlEntities(null as unknown as string), null);
 });
 
 test('normalizeInlineCodeFences collapses a single-line triple-fence to inline code', () => {
@@ -36,6 +39,10 @@ test('normalizeInlineCodeFences collapses a single-line triple-fence to inline c
 test('normalizeInlineCodeFences leaves a real multi-line fenced block alone', () => {
   const block = '```\nline1\nline2\n```';
   assert.equal(normalizeInlineCodeFences(block), block);
+});
+
+test('normalizeInlineCodeFences collapses every single-line fence (global replace)', () => {
+  assert.equal(normalizeInlineCodeFences('```a``` and ```b```'), '`a` and `b`');
 });
 
 test('normalizeInlineCodeFences returns non-strings unchanged', () => {
@@ -55,6 +62,13 @@ test('unescapeWithMathProtection preserves backslash sequences inside $...$ / $$
 
 test('unescapeWithMathProtection returns non-strings unchanged', () => {
   assert.equal(unescapeWithMathProtection(null as unknown as string), null);
+});
+
+test('empty string is a no-op / early return across the helpers', () => {
+  assert.equal(normalizeInlineCodeFences(''), '');
+  assert.equal(unescapeWithMathProtection(''), '');
+  assert.equal(formatUsageLimitText(''), '');
+  assert.equal(escapeRegExp(''), '');
 });
 
 test('escapeRegExp escapes all regex metacharacters', () => {
@@ -90,6 +104,18 @@ test('formatUsageLimitText leaves text without the marker untouched', () => {
   assert.equal(formatUsageLimitText('just a normal message'), 'just a normal message');
 });
 
-test('formatUsageLimitText returns non-strings unchanged', () => {
-  assert.equal(formatUsageLimitText(undefined as unknown as string), undefined);
+test('formatUsageLimitText falls back to the raw text when formatting throws', () => {
+  // Force the inner date formatting to throw so the try/catch fallback runs; the
+  // matched marker must survive verbatim rather than the message being dropped.
+  const intl = Intl as { DateTimeFormat: unknown };
+  const original = intl.DateTimeFormat;
+  intl.DateTimeFormat = () => {
+    throw new Error('boom');
+  };
+  try {
+    const input = 'Claude AI usage limit reached|1700000000';
+    assert.equal(formatUsageLimitText(input), input);
+  } finally {
+    intl.DateTimeFormat = original;
+  }
 });
