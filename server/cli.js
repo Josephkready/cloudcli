@@ -7,7 +7,6 @@
  * Commands:
  *   (no args)     - Start the server (default)
  *   start         - Start the server
- *   browser-use-mcp - Run Browser MCP stdio server
  *   status        - Show configuration and data locations
  *   help          - Show help information
  *   version       - Show version information
@@ -155,7 +154,6 @@ Usage:
 
 Commands:
   start            Start the CloudCLI server (default)
-  browser-use-mcp  Run the Browser MCP stdio server
   status           Show configuration and data locations
   update           Update to the latest version
   help             Show this help information
@@ -259,10 +257,6 @@ async function startServer() {
     await import('./index.js');
 }
 
-async function startBrowserUseMcp() {
-    await import('./browser-use-mcp.js');
-}
-
 // Parse CLI arguments
 function parseArgs(args) {
     const parsed = { command: 'start', options: {} };
@@ -308,9 +302,6 @@ async function main() {
     switch (command) {
         case 'start':
             await startServer();
-            break;
-        case 'browser-use-mcp':
-            await startBrowserUseMcp();
             break;
         case 'status':
         case 'info':

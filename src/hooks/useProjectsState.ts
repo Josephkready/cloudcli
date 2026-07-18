@@ -828,7 +828,7 @@ export function useProjectsState({
       markSessionViewed(session.id);
       setSelectedSession(session);
 
-      if (activeTab === 'tasks' || activeTab === 'browser') {
+      if (activeTab === 'tasks') {
         setActiveTab('chat');
       }
 
