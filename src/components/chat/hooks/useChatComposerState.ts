@@ -454,7 +454,6 @@ export function useChatComposerState({
 
   const {
     slashCommands,
-    slashCommandsCount,
     filteredCommands,
     frequentCommands,
     commandQuery,
@@ -1176,7 +1175,6 @@ export function useChatComposerState({
     textareaRef,
     inputHighlightRef,
     isTextareaExpanded,
-    slashCommandsCount,
     filteredCommands,
     frequentCommands,
     commandQuery,
