@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-import { clearQueuedMessage, readQueuedMessage } from '../components/chat/utils/chatStorage';
+import { readQueuedMessages, writeQueuedMessages } from '../components/chat/utils/chatStorage';
 
 import type { MarkSessionProcessing, SessionActivityMap } from './useSessionProtection';
 
@@ -24,8 +24,10 @@ interface UseQueuedMessageAutoSendArgs {
  * queue time) under `queued_message_<sessionId>`. When a session's run leaves
  * the processing map — its previous response completed — this hook sends that
  * session's queued message immediately instead of waiting for the user to
- * open the session again. Removing the storage key before sending is the
- * claim that keeps the composer's own flush from double-sending.
+ * open the session again. Removing the dispatched message from storage before
+ * sending is the claim that keeps the composer's own flush from double-sending.
+ * The queue is FIFO: one message is dispatched per completion and the rest stay
+ * queued for subsequent completions.
  */
 export function useQueuedMessageAutoSend({
   processingSessions,
@@ -46,23 +48,26 @@ export function useQueuedMessageAutoSend({
         continue;
       }
 
-      const queued = readQueuedMessage(sessionId);
-      if (!queued) {
+      const queued = readQueuedMessages(sessionId);
+      if (queued.length === 0) {
         continue;
       }
 
-      // A closed socket would drop the send silently; keep the draft so the
+      // A closed socket would drop the send silently; keep the queue so the
       // composer (or a later completion) can retry once we're connected.
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         continue;
       }
 
-      clearQueuedMessage(sessionId);
+      // Dispatch the head; persist the tail (the claim: remove before send) so
+      // the next completion drains the following message, in order.
+      const [head, ...rest] = queued;
+      writeQueuedMessages(sessionId, rest);
       sendMessage({
         type: 'chat.send',
         sessionId,
-        content: queued.content,
-        options: { ...(queued.options ?? {}), images: [] },
+        content: head.content,
+        options: { ...(head.options ?? {}), images: [] },
       });
       markSessionProcessing(sessionId, { statusText: null, canInterrupt: true });
     }
