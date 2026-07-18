@@ -1,12 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Check, Edit2, Loader2, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
-import { Badge, Tooltip, buttonVariants } from '../../../../shared/view/ui';
+import { Badge, CursorContextMenu, Tooltip, buttonVariants } from '../../../../shared/view/ui';
 import { cn } from '../../../../lib/utils';
 import type { Project, ProjectSession, LLMProvider } from '../../../../types/app';
 import type { SessionWithProvider } from '../../types/types';
 import { createSessionViewModel } from '../../utils/utils';
+import { buildSessionContextMenuActions } from '../../utils/sessionContextMenu';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 
 type SidebarSessionItemProps = {
@@ -127,6 +128,30 @@ export default function SidebarSessionItem({
     onArchiveSession(session.id);
   };
 
+  // Right-click menu mirrors the hover cluster's actions and gating: rename plus,
+  // for an idle session, archive/delete. It also keeps the "open in new tab"
+  // affordance the row's <a href> otherwise gives up when we intercept the menu.
+  const contextMenuActions = useMemo(
+    () =>
+      buildSessionContextMenuActions({
+        isActive: isProcessing,
+        labels: {
+          openInNewTab: t('sessionContext.openInNewTab', 'Open in new tab'),
+          rename: t('sessionContext.rename', 'Rename'),
+          archive: t('sessionContext.archive', 'Archive'),
+          delete: t('sessionContext.delete', 'Delete permanently'),
+        },
+        handlers: {
+          onOpenInNewTab: () => window.open(`/session/${session.id}`, '_blank', 'noopener,noreferrer'),
+          onRename: () => onStartEditingSession(session.id, sessionView.sessionName),
+          onArchive: requestArchiveSession,
+          onDelete: requestDeleteSession,
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isProcessing, session.id, sessionView.sessionName, t],
+  );
+
   return (
     <div className="group relative">
       {(showAttentionIndicator || showRecentIndicator) && (
@@ -215,6 +240,10 @@ export default function SidebarSessionItem({
       </div>
 
       <div className="hidden md:block">
+        <CursorContextMenu
+          items={contextMenuActions}
+          ariaLabel={t('sessionContext.menuLabel', 'Session actions')}
+        >
         <a
           href={`/session/${session.id}`}
           className={cn(
@@ -227,8 +256,9 @@ export default function SidebarSessionItem({
                 ? 'border-green-500/30 bg-green-50/5 hover:bg-green-50/10 dark:bg-green-900/5 dark:hover:bg-green-900/10'
                 : 'hover:bg-accent/50',
           )}
-          // Left-click keeps in-app navigation; Ctrl/Cmd/middle-click and the
-          // native right-click menu use the href to open a new tab/window.
+          // Left-click keeps in-app navigation; Ctrl/Cmd/middle-click still use the
+          // href to open a new tab. Right-click opens the custom session menu, which
+          // offers "Open in new tab" so that affordance isn't lost.
           onClick={(event) => {
             if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault();
@@ -277,6 +307,7 @@ export default function SidebarSessionItem({
             </div>
           </div>
         </a>
+        </CursorContextMenu>
 
         <div
           ref={editingContainerRef}

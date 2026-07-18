@@ -3,10 +3,12 @@ import { Activity, AlertCircle, Check, CheckCircle2, Clock, Edit2, Loader2, Mess
 import type { TFunction } from 'i18next';
 
 import { cn } from '../../../../lib/utils';
+import { CursorContextMenu } from '../../../../shared/view/ui';
 import type { LLMProvider, Project, ProjectSession } from '../../../../types/app';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import type { SessionWithProvider } from '../../types/types';
 import { buildConversationList, formatCompactAge, STATUS_ORDER, type ConversationListItem, type ConversationStatus } from '../../utils/conversationList';
+import { buildSessionContextMenuActions } from '../../utils/sessionContextMenu';
 import { getSessionName } from '../../utils/utils';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 
@@ -117,6 +119,30 @@ function ConversationRow({
     onArchiveSession(session.id);
   };
 
+  // Right-click menu mirrors the hover cluster's actions and gating: rename plus,
+  // for an idle session, archive/delete. It also keeps the "open in new tab"
+  // affordance the row's <a href> otherwise gives up when we intercept the menu.
+  const contextMenuActions = useMemo(
+    () =>
+      buildSessionContextMenuActions({
+        isActive,
+        labels: {
+          openInNewTab: t('sessionContext.openInNewTab', 'Open in new tab'),
+          rename: t('sessionContext.rename', 'Rename'),
+          archive: t('sessionContext.archive', 'Archive'),
+          delete: t('sessionContext.delete', 'Delete permanently'),
+        },
+        handlers: {
+          onOpenInNewTab: () => window.open(`/session/${session.id}`, '_blank', 'noopener,noreferrer'),
+          onRename: () => onStartEditingSession(session.id, title),
+          onArchive: requestArchiveSession,
+          onDelete: requestDeleteSession,
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isActive, session.id, title, t],
+  );
+
   let statusIndicator: ReactNode = null;
   if (status === 'blocked') {
     statusIndicator = (
@@ -147,6 +173,10 @@ function ConversationRow({
 
   return (
     <div className="group relative">
+      <CursorContextMenu
+        items={contextMenuActions}
+        ariaLabel={t('sessionContext.menuLabel', 'Session actions')}
+      >
       <a
         href={`/session/${session.id}`}
         className={cn(
@@ -161,8 +191,9 @@ function ConversationRow({
                   ? 'border-sky-500/30 bg-sky-50/10 hover:bg-sky-50/20 dark:bg-sky-900/5 dark:hover:bg-sky-900/10'
                   : 'border-border/30 bg-card hover:bg-accent/50',
         )}
-        // Left-click keeps in-app navigation; Ctrl/Cmd/middle-click and the native
-        // context menu use the href to open the session in a new tab.
+        // Left-click keeps in-app navigation; Ctrl/Cmd/middle-click still open the
+        // session in a new tab via the href. Right-click opens the custom session
+        // menu, which offers "Open in new tab" so that affordance isn't lost.
         onClick={(event) => {
           if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
             return;
@@ -210,6 +241,7 @@ function ConversationRow({
           </span>
         )}
       </a>
+      </CursorContextMenu>
 
       {/* Rename + archive/delete cluster: sibling of the <a> so its clicks never
           navigate. Fades in on hover (stays visible while editing). */}

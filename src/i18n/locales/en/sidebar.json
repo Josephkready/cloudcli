@@ -145,6 +145,13 @@
     "cliOriginBadge": "CLI",
     "cliOriginTooltip": "Not driven by cloudcli — started from a terminal/CLI (or created before session tracking), so its live status is unknown"
   },
+  "sessionContext": {
+    "menuLabel": "Session actions",
+    "openInNewTab": "Open in new tab",
+    "rename": "Rename",
+    "archive": "Archive",
+    "delete": "Delete permanently"
+  },
   "deleteConfirmation": {
     "deleteProject": "Remove Project",
     "deleteSession": "Delete Session",
