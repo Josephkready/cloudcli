@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isSpawnRaceError } from './claude-sdk.js';
+import { isSpawnRaceError, resolveToolApproval, waitForToolApproval } from './claude-sdk.js';
 
 // The spawn-retry (#43) hinges on classifying the transient "the `claude` bin
 // briefly vanished" errors apart from genuine failures. Only the former may be
@@ -35,4 +35,43 @@ test('does not classify unrelated errors as a spawn race', () => {
 test('is false for null/undefined', () => {
   assert.equal(isSpawnRaceError(null), false);
   assert.equal(isSpawnRaceError(undefined), false);
+});
+
+// #62: a tool-approval prompt must not auto-deny mid-task. The default wait is
+// now indefinite (terminal parity) — it only settles on an explicit decision,
+// an abort, or a finite timeout that must be opted into via the env var.
+
+test('waitForToolApproval auto-denies (resolves null) after a finite timeout', async () => {
+  const decision = await waitForToolApproval('req-finite-timeout', { timeoutMs: 15 });
+  assert.equal(decision, null, 'a positive timeout must resolve to null (deny)');
+});
+
+test('waitForToolApproval with timeoutMs 0 stays pending until explicitly resolved', async () => {
+  const requestId = 'req-indefinite';
+  const approval = waitForToolApproval(requestId, { timeoutMs: 0 });
+
+  // Must NOT settle on its own within a generous window.
+  const first = await Promise.race([
+    approval.then(() => 'settled'),
+    new Promise((resolve) => setTimeout(() => resolve('pending'), 40)),
+  ]);
+  assert.equal(first, 'pending', 'timeoutMs 0 must not auto-deny');
+
+  resolveToolApproval(requestId, { allow: true });
+  assert.deepEqual(await approval, { allow: true });
+});
+
+test('the default approval wait is indefinite (no auto-deny) — #62', async () => {
+  // No timeoutMs => TOOL_APPROVAL_TIMEOUT_MS, which now defaults to 0.
+  const requestId = 'req-default';
+  const approval = waitForToolApproval(requestId);
+
+  const first = await Promise.race([
+    approval.then(() => 'settled'),
+    new Promise((resolve) => setTimeout(() => resolve('pending'), 40)),
+  ]);
+  assert.equal(first, 'pending', 'the default must not auto-deny mid-task');
+
+  resolveToolApproval(requestId, { allow: false, message: 'denied by user' });
+  assert.deepEqual(await approval, { allow: false, message: 'denied by user' });
 });

@@ -40,7 +40,16 @@ const pendingToolApprovals = new Map();
 // emit a second one when its generator winds down.
 const abortedSessionIds = new Set();
 
-const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS, 10) || 55000;
+// Default to waiting indefinitely for a tool-approval decision (0 = no timeout),
+// matching a plain terminal `claude`, which never auto-denies. The old 55s
+// auto-deny fired mid-task when the user hadn't approved in time — halting the
+// agent and forcing a manual "continue" — a cloudcli-only divergence from the
+// terminal (#62). Blocked-on-approval runs are now surfaced in the sidebar (#50)
+// and the run is abortable, so an unanswered prompt just stays pending (the same
+// behavior the interactive AskUserQuestion/ExitPlanMode tools already used). Set
+// CLAUDE_TOOL_APPROVAL_TIMEOUT_MS to a positive value to restore a finite
+// auto-deny timeout.
+const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS, 10) || 0;
 
 const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion', 'ExitPlanMode']);
 
@@ -592,9 +601,11 @@ async function queryClaudeSDK(command, options = {}, ws) {
       }));
 
       // Mark the run blocked so the sidebar ranks it "needs attention" while it
-      // waits on the user (the indefinite timeoutMs:0 path is exactly the
-      // plan-mode / AskUserQuestion case). The finally clears it on every exit
-      // (allow/deny/timeout/cancel/abort).
+      // waits on the user. By default the wait is indefinite (terminal parity,
+      // #62): interaction tools always (timeoutMs:0), and other tools via
+      // TOOL_APPROVAL_TIMEOUT_MS, which now defaults to 0 (no auto-deny) but can
+      // be set to a positive value to restore a finite timeout. The finally
+      // clears the blocked flag on every exit (allow/deny/timeout/cancel/abort).
       ws.setBlocked?.(true);
       let decision;
       try {
@@ -906,6 +917,7 @@ export {
   isClaudeSDKSessionActive,
   getActiveClaudeSDKSessions,
   resolveToolApproval,
+  waitForToolApproval,
   getPendingApprovalsForSession,
   reconnectSessionWriter,
   isSpawnRaceError
