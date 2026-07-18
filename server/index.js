@@ -30,6 +30,8 @@ import {
     abortClaudeSDKSession,
     resolveToolApproval,
     getPendingApprovalsForSession,
+    startStaleToolApprovalReaper,
+    stopStaleToolApprovalReaper,
 } from './claude-sdk.js';
 import {
     spawnCursor,
@@ -1408,11 +1410,19 @@ async function startServer() {
             pruneOrphanedBrowserMcp().catch(err => {
                 console.error('[MCP cleanup] Error pruning orphaned browser MCP:', err?.message || err);
             });
+
+            // Reap runs abandoned mid-approval (idle child processes) (#86).
+            startStaleToolApprovalReaper();
         });
 
         await closeSessionsWatcher();
         // Clean up plugin processes on shutdown
         const shutdownRuntimeServices = async () => {
+            try {
+                stopStaleToolApprovalReaper();
+            } catch (err) {
+                console.error('[approval reaper] Error stopping reaper during shutdown:', err?.message || err);
+            }
             try {
                 stopAiSessionTitler();
             } catch (err) {

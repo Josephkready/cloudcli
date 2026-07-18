@@ -49,7 +49,36 @@ const abortedSessionIds = new Set();
 // behavior the interactive AskUserQuestion/ExitPlanMode tools already used). Set
 // CLAUDE_TOOL_APPROVAL_TIMEOUT_MS to a positive value to restore a finite
 // auto-deny timeout.
-const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS, 10) || 0;
+// Parse a millisecond env override, warning (rather than silently falling back)
+// on a malformed non-empty value so a typo in e.g. CLAUDE_TOOL_APPROVAL_TIMEOUT_MS
+// doesn't quietly restore indefinite waiting with no signal to the operator.
+function parseMsEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') {
+    return fallback;
+  }
+  // Number() (not parseInt) so typos like "45m" or "10abc" become NaN and warn,
+  // rather than parseInt silently truncating them to a bogus millisecond value.
+  const parsed = Number(raw.trim());
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    console.warn(`[WARN] ${name}="${raw}" is not a valid non-negative integer (ms); using ${fallback}.`);
+    return fallback;
+  }
+  return parsed;
+}
+
+const TOOL_APPROVAL_TIMEOUT_MS = parseMsEnv('CLAUDE_TOOL_APPROVAL_TIMEOUT_MS', 0);
+
+// Background safety net for runs abandoned mid-approval (#86). Since #62 removed
+// the 55s auto-deny, a run blocked on an unanswered approval whose client never
+// reconnects would stay resident forever (idle `claude` child + ChatRun +
+// pending entry): it never reaches `completed`, so `evictRunLater` never frees
+// it. The reaper force-denies approvals idle past a very generous window
+// (default 45 min — far beyond any legitimate "reading the diff" pause, so it
+// never reintroduces the #62 mid-task halt), letting the run finish and evict.
+// Set CLAUDE_TOOL_APPROVAL_REAP_MS=0 to disable.
+const STALE_APPROVAL_REAP_MS = parseMsEnv('CLAUDE_TOOL_APPROVAL_REAP_MS', 45 * 60 * 1000);
+const STALE_APPROVAL_REAP_INTERVAL_MS = 5 * 60 * 1000;
 
 const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion', 'ExitPlanMode']);
 
@@ -129,6 +158,85 @@ function resolveToolApproval(requestId, decision) {
   const resolver = pendingToolApprovals.get(requestId);
   if (resolver) {
     resolver(decision);
+  }
+}
+
+/**
+ * Selects pending tool approvals idle for at least `thresholdMs`, keyed off the
+ * `_receivedAt` timestamp stored with each resolver. Pure over the passed map so
+ * the reap policy is unit-testable in isolation; a non-positive threshold
+ * disables reaping (returns []).
+ * @param {Map<string, Function>} pendingMap
+ * @param {number} now - current epoch ms
+ * @param {number} thresholdMs - idle window before an approval is reapable
+ * @returns {Array<{requestId: string, sessionId: string|null, toolName: string|null, idleMs: number}>}
+ */
+function findStaleToolApprovals(pendingMap, now, thresholdMs) {
+  const stale = [];
+  if (!(thresholdMs > 0)) {
+    return stale;
+  }
+  for (const [requestId, resolver] of pendingMap.entries()) {
+    const receivedAt = resolver?._receivedAt instanceof Date ? resolver._receivedAt.getTime() : NaN;
+    if (Number.isFinite(receivedAt) && now - receivedAt >= thresholdMs) {
+      stale.push({
+        requestId,
+        sessionId: resolver._sessionId ?? null,
+        toolName: resolver._toolName ?? null,
+        idleMs: now - receivedAt,
+      });
+    }
+  }
+  return stale;
+}
+
+/**
+ * Force-denies tool approvals idle past the reap window. Denying (not aborting)
+ * reuses the existing null-deny path — the same one waitForToolApproval's own
+ * auto-deny timeout uses: the tool is rejected, the agent finishes its turn
+ * naturally, and the run reaches `completed` so the registry evicts it.
+ * Calling abortClaudeSDKSession here would instead suppress the terminal
+ * `complete` (that signal is the chat.abort handler's job), leaving the run stuck.
+ * @returns {number} how many approvals were reaped
+ */
+function reapStaleToolApprovals(now = Date.now(), thresholdMs = STALE_APPROVAL_REAP_MS) {
+  const stale = findStaleToolApprovals(pendingToolApprovals, now, thresholdMs);
+  for (const { requestId, sessionId, toolName, idleMs } of stale) {
+    console.warn(
+      `[approval reaper] Force-denying tool approval ${requestId} (${toolName ?? 'unknown'}) `
+      + `for session ${sessionId ?? 'unknown'} after ${Math.round(idleMs / 60000)} min idle`,
+    );
+    resolveToolApproval(requestId, null);
+  }
+  return stale.length;
+}
+
+let staleApprovalReaperTimer = null;
+
+/**
+ * Starts the periodic stale-approval reaper. No-op when disabled
+ * (CLAUDE_TOOL_APPROVAL_REAP_MS=0) or already running.
+ */
+function startStaleToolApprovalReaper(intervalMs = STALE_APPROVAL_REAP_INTERVAL_MS) {
+  if (staleApprovalReaperTimer || !(STALE_APPROVAL_REAP_MS > 0)) {
+    return;
+  }
+  staleApprovalReaperTimer = setInterval(() => {
+    try {
+      reapStaleToolApprovals();
+    } catch (error) {
+      console.error('[approval reaper] Error while reaping stale approvals:', error?.message || error);
+    }
+  }, intervalMs);
+  // Don't keep the event loop alive just for the reaper.
+  staleApprovalReaperTimer.unref?.();
+}
+
+/** Stops the reaper (used on shutdown and in tests). */
+function stopStaleToolApprovalReaper() {
+  if (staleApprovalReaperTimer) {
+    clearInterval(staleApprovalReaperTimer);
+    staleApprovalReaperTimer = null;
   }
 }
 
@@ -920,5 +1028,10 @@ export {
   waitForToolApproval,
   getPendingApprovalsForSession,
   reconnectSessionWriter,
-  isSpawnRaceError
+  isSpawnRaceError,
+  parseMsEnv,
+  findStaleToolApprovals,
+  reapStaleToolApprovals,
+  startStaleToolApprovalReaper,
+  stopStaleToolApprovalReaper
 };
