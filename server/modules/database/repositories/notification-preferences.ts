@@ -10,7 +10,6 @@ type NotificationPreferences = {
   channels: {
     inApp: boolean;
     webPush: boolean;
-    desktop: boolean;
     sound: boolean;
     [key: string]: boolean;
   };
@@ -25,7 +24,6 @@ const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   channels: {
     inApp: false,
     webPush: false,
-    desktop: false,
     sound: true,
   },
   events: {
@@ -40,6 +38,10 @@ function normalizeNotificationPreferences(value: unknown): NotificationPreferenc
   const sourceChannels = source.channels && typeof source.channels === 'object'
     ? source.channels as Record<string, unknown>
     : {};
+  // 'desktop' stays in this exclude list (even though it is no longer a live
+  // channel) so a persisted `desktop` preference from the removed Electron
+  // desktop-notification channel is dropped on read rather than resurrected as
+  // an extra channel.
   const extraChannels = Object.fromEntries(
     Object.entries(sourceChannels)
       .filter(([key, channelValue]) => !['inApp', 'webPush', 'desktop', 'sound'].includes(key) && typeof channelValue === 'boolean')
@@ -50,7 +52,6 @@ function normalizeNotificationPreferences(value: unknown): NotificationPreferenc
       ...extraChannels,
       inApp: source.channels?.inApp === true,
       webPush: source.channels?.webPush === true,
-      desktop: source.channels?.desktop === true,
       sound: source.channels?.sound !== false,
     },
     events: {
