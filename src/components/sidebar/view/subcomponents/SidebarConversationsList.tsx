@@ -152,7 +152,7 @@ function ConversationRow({
         className={cn(
           'flex w-full min-w-0 items-center gap-2 rounded-md border p-2 text-left transition-all duration-150',
           isSelected
-            ? 'border-primary/20 bg-primary/5'
+            ? 'border-primary bg-primary/15 ring-1 ring-primary/50 dark:bg-primary/25'
             : status === 'blocked'
               ? 'border-amber-500/30 bg-amber-50/10 hover:bg-amber-50/20 dark:bg-amber-900/5 dark:hover:bg-amber-900/10'
               : status === 'running'
