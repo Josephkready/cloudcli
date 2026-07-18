@@ -535,8 +535,8 @@ export const sessionsDb = {
    * would move for the same cutoff, without touching any rows. Powers the
    * sidebar's pre-archive preview ("Archive N conversations…?"). Uses the exact
    * same `isArchived = 0 AND datetime(COALESCE(updated_at, created_at)) <
-   * datetime(?)` predicate so the previewed count can't drift from what the
-   * archive actually flips.
+   * datetime(?)` predicate, so for a given cutoff the count reflects precisely
+   * the rows the archive would flip.
    */
   countSessionsOlderThan(cutoffIso: string): number {
     const db = getConnection();

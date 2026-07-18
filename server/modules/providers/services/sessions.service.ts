@@ -332,7 +332,10 @@ export const sessionsService = {
    * for the same `olderThanDays`, without archiving anything. Lets the sidebar
    * show the affected count in its confirmation before the user commits. Shares
    * the cutoff computation and age semantics with the archive itself, so the
-   * preview can't disagree with what actually gets archived.
+   * preview reflects the same selection the archive uses. (It is a point-in-time
+   * estimate: because preview and archive are separate requests, a session that
+   * crosses the age boundary in between can differ — expected and harmless for a
+   * reversible declutter.)
    */
   countArchivableSessionsOlderThan(olderThanDays: number): { archivableCount: number } {
     if (!Number.isFinite(olderThanDays) || olderThanDays <= 0) {

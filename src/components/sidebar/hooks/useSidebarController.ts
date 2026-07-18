@@ -22,6 +22,7 @@ import {
   readProjectSortOrder,
   sortProjects,
 } from '../utils/utils';
+import { buildBulkArchivePrompt } from '../utils/bulkArchivePrompt';
 
 type SnippetHighlight = {
   start: number;
@@ -892,8 +893,9 @@ export function useSidebarController({
   // previewing how many conversations qualify so the confirmation names the count.
   const bulkArchiveSessionsByAge = useCallback(async (olderThanDays: number) => {
     // Preview the affected count so the user knows whether they're about to
-    // archive 2 or 200 sessions. Best-effort: if the preview fails we fall back
-    // to the generic (count-less) confirmation rather than blocking the action.
+    // archive 2 or 200 sessions. Best-effort: on failure `archivableCount` stays
+    // null and the prompt falls back to the generic (count-less) confirmation
+    // rather than blocking the action.
     let archivableCount: number | null = null;
     try {
       const countResponse = await api.getArchivableSessionCountByAge(olderThanDays);
@@ -903,39 +905,20 @@ export function useSidebarController({
         if (typeof count === 'number' && Number.isFinite(count)) {
           archivableCount = count;
         }
+      } else {
+        console.error('[Sidebar] Failed to preview archivable session count:', countResponse.status);
       }
     } catch (error) {
       console.error('[Sidebar] Failed to preview archivable session count:', error);
     }
 
+    const prompt = buildBulkArchivePrompt(archivableCount, olderThanDays, t);
     // Nothing qualifies — say so instead of confirming (and then running) a no-op.
-    if (archivableCount === 0) {
-      if (typeof window !== 'undefined') {
-        window.alert(
-          t('archive.bulkByAgeNoneIdle', {
-            days: olderThanDays,
-            defaultValue: 'No conversations have been idle for more than {{days}} days.',
-          }),
-        );
-      }
+    if (prompt.kind === 'inform') {
+      alert(prompt.message);
       return;
     }
-
-    const confirmMessage =
-      archivableCount === null
-        ? t('archive.bulkByAgeConfirm', {
-            days: olderThanDays,
-            defaultValue:
-              'Archive all conversations with no activity in the last {{days}} days? You can restore them anytime from the archived view.',
-          })
-        : t('archive.bulkByAgeConfirmCount', {
-            count: archivableCount,
-            days: olderThanDays,
-            defaultValue:
-              'Archive {{count}} conversations with no activity in the last {{days}} days? You can restore them anytime from the archived view.',
-          });
-
-    if (typeof window !== 'undefined' && !window.confirm(confirmMessage)) {
+    if (!confirm(prompt.message)) {
       return;
     }
 
