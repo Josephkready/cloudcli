@@ -140,7 +140,10 @@
     "emptyTitle": "No conversations yet",
     "emptyDescription": "Start a new conversation and it will appear here.",
     "newConversation": "New conversation",
-    "newConversationNewProject": "New project…"
+    "newConversationNewProject": "New project…",
+    "cliOrigin": "Session not driven by cloudcli",
+    "cliOriginBadge": "CLI",
+    "cliOriginTooltip": "Not driven by cloudcli — started from a terminal/CLI (or created before session tracking), so its live status is unknown"
   },
   "deleteConfirmation": {
     "deleteProject": "Remove Project",

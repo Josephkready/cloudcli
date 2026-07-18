@@ -48,3 +48,32 @@ test('getProjectsWithSessions surfaces last_completed_at / last_viewed_at', asyn
     assert.equal(session?.last_viewed_at, null, 'unviewed session keeps last_viewed_at null');
   });
 });
+
+// The sidebar badges externally-driven sessions (#71). Origin is derived from
+// whether the row's provider id matches its app id, so assert it against the
+// three real ways a session row is created.
+test('getProjectsWithSessions derives origin: cli for disk-discovered, cloudcli for app-created', async () => {
+  await withIsolatedDatabase(async () => {
+    projectsDb.createProjectPath('/workspace/origin-proj', null);
+
+    // Disk-discovered (terminal/CLI): session_id === provider_session_id.
+    sessionsDb.createSession('cli-sess', 'claude', '/workspace/origin-proj');
+
+    // cloudcli-created, provider id not yet assigned: provider_session_id null.
+    sessionsDb.createAppSession('app-pending', 'claude', '/workspace/origin-proj');
+
+    // cloudcli-created, provider id later mapped on: the two ids now differ.
+    sessionsDb.createAppSession('app-mapped', 'claude', '/workspace/origin-proj');
+    sessionsDb.assignProviderSessionId('app-mapped', 'claude-provider-xyz');
+
+    const byId = new Map(
+      (await getProjectsWithSessions({ skipSynchronization: true }))
+        .flatMap((project) => project.sessions)
+        .map((s) => [s.id, s]),
+    );
+
+    assert.equal(byId.get('cli-sess')?.origin, 'cli', 'disk-discovered session is cli-driven');
+    assert.equal(byId.get('app-pending')?.origin, 'cloudcli', 'app session with no provider id is cloudcli-driven');
+    assert.equal(byId.get('app-mapped')?.origin, 'cloudcli', 'app session with a mapped provider id stays cloudcli-driven');
+  });
+});

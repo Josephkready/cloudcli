@@ -40,6 +40,10 @@ export interface ProjectSession {
   last_completed_at?: string | null;
   last_viewed_at?: string | null;
   messageCount?: number;
+  // Where the session is driven from (#71): `cloudcli` = created through cloudcli,
+  // `cli` = discovered on disk from a terminal/CLI run. Server-derived; the
+  // sidebar badges `cli` sessions since cloudcli can't know their live status.
+  origin?: 'cli' | 'cloudcli';
   provider?: LLMProvider;
   __provider?: LLMProvider;
   // Tags the session with the owning project's DB `projectId` so UI handlers

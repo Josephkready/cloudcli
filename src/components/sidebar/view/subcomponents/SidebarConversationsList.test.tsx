@@ -18,12 +18,12 @@ import SidebarConversationsList from './SidebarConversationsList';
 const t = ((key: string, fallback?: string) => fallback ?? key) as never;
 const noop = () => {};
 
-function projectWith(sessionId: string): Project {
+function projectWith(sessionId: string, sessionExtra: Record<string, unknown> = {}): Project {
   return {
     projectId: 'p1',
     displayName: 'p1',
     fullPath: '/repos/p1',
-    sessions: [{ id: sessionId, summary: sessionId, lastActivity: '2026-07-16T00:00:00Z', __provider: 'claude' }],
+    sessions: [{ id: sessionId, summary: sessionId, lastActivity: '2026-07-16T00:00:00Z', __provider: 'claude', ...sessionExtra }],
   } as unknown as Project;
 }
 
@@ -31,10 +31,14 @@ function activity(blocked: boolean): SessionActivity {
   return { statusText: null, canInterrupt: true, startedAt: 0, blocked };
 }
 
-function render(activeSessions: SessionActivityMap, sessionId: string): string {
+function render(
+  activeSessions: SessionActivityMap,
+  sessionId: string,
+  sessionExtra: Record<string, unknown> = {},
+): string {
   return renderToStaticMarkup(
     React.createElement(SidebarConversationsList, {
-      projects: [projectWith(sessionId)],
+      projects: [projectWith(sessionId, sessionExtra)],
       activeSessions,
       selectedSession: null,
       currentTime: new Date('2026-07-17T00:00:00Z'),
@@ -70,6 +74,16 @@ test('shows the archive/delete button for an idle session', () => {
 test('renders a New conversation button above the list', () => {
   const html = render(new Map(), 's');
   assert.ok(html.includes('New conversation'), 'the New conversation action should render in the populated view');
+});
+
+test('badges a CLI-driven session with the origin chip (#71)', () => {
+  const html = render(new Map(), 's', { origin: 'cli' });
+  assert.ok(html.includes('Session not driven by cloudcli'), 'a cli-origin session shows the CLI origin badge');
+});
+
+test('leaves a cloudcli-driven session unbadged (#71)', () => {
+  const html = render(new Map(), 's', { origin: 'cloudcli' });
+  assert.ok(!html.includes('Session not driven by cloudcli'), 'a cloudcli-origin session has no CLI origin badge');
 });
 
 test('renders a New conversation button in the empty state (no projects/sessions)', () => {
