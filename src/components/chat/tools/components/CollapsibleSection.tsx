@@ -79,7 +79,11 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
       )}
 
       <CollapsibleContent>
-        <div className="mt-1.5 pl-[18px]">
+        {/* Cap expanded tool output so a large result can't dominate the chat
+            (#58). Renderers with their own tighter cap (TextContent max-h-80,
+            Bash max-h-80) scroll first, so this outer bound only binds for
+            otherwise-uncapped children. */}
+        <div className="mt-1.5 max-h-[32rem] overflow-y-auto pl-[18px]">
           {children}
         </div>
       </CollapsibleContent>
