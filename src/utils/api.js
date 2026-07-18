@@ -107,6 +107,11 @@ export const api = {
   },
   getArchivedSessions: () =>
     authenticatedFetch('/api/providers/sessions/archived'),
+  // Read-only preview of `bulkArchiveSessionsByAge`: how many active sessions
+  // idle for more than `days` days would be archived. Used to show the affected
+  // count in the confirmation before committing.
+  getArchivableSessionCountByAge: (days) =>
+    authenticatedFetch(`/api/providers/sessions/archivable-count?days=${encodeURIComponent(days)}`),
   // Bulk soft-archive every active session idle for more than `days` days.
   bulkArchiveSessionsByAge: (days) =>
     authenticatedFetch('/api/providers/sessions/archive-by-age', {

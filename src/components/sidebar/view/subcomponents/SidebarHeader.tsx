@@ -60,26 +60,13 @@ export default function SidebarHeader({
   const runningBadgeText = runningSessionsCount > 99 ? '99+' : String(runningSessionsCount);
 
   // Bulk "declutter old conversations" action. Each preset maps to a day
-  // threshold; archiving is reversible from the archived view, so we confirm
-  // once (naming the chosen age) rather than raising the per-session dialog.
+  // threshold; the controller previews the affected count and confirms once
+  // (naming the count and age) before archiving, so the menu just signals intent.
   const bulkArchiveItems: ActionMenuItem[] = [7, 30, 90].map((days) => ({
     key: `older-than-${days}`,
     icon: Archive,
     label: t('archive.bulkByAgeOption', { days, defaultValue: 'Older than {{days}} days' }),
-    onSelect: () => {
-      const confirmed =
-        typeof window === 'undefined' ||
-        window.confirm(
-          t('archive.bulkByAgeConfirm', {
-            days,
-            defaultValue:
-              'Archive all conversations with no activity in the last {{days}} days? You can restore them anytime from the archived view.',
-          }),
-        );
-      if (confirmed) {
-        onBulkArchiveOlderThanDays(days);
-      }
-    },
+    onSelect: () => onBulkArchiveOlderThanDays(days),
   }));
 
   // Only offer the declutter action when the sidebar has projects (and thus

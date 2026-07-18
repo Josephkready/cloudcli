@@ -328,6 +328,25 @@ export const sessionsService = {
   },
 
   /**
+   * Reports how many active sessions `bulkArchiveSessionsOlderThan` would move
+   * for the same `olderThanDays`, without archiving anything. Lets the sidebar
+   * show the affected count in its confirmation before the user commits. Shares
+   * the cutoff computation and age semantics with the archive itself, so the
+   * preview can't disagree with what actually gets archived.
+   */
+  countArchivableSessionsOlderThan(olderThanDays: number): { archivableCount: number } {
+    if (!Number.isFinite(olderThanDays) || olderThanDays <= 0) {
+      throw new AppError('olderThanDays must be a positive number.', {
+        code: 'INVALID_ARCHIVE_AGE',
+        statusCode: 400,
+      });
+    }
+
+    const cutoffIso = computeArchiveCutoff(new Date(), olderThanDays);
+    return { archivableCount: sessionsDb.countSessionsOlderThan(cutoffIso) };
+  },
+
+  /**
    * Restores one archived session back into the active sidebar lists.
    */
   restoreSessionById(sessionId: string): { sessionId: string; isArchived: false } {

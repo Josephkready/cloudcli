@@ -888,9 +888,57 @@ export function useSidebarController({
   // Bulk declutter: soft-archive every active conversation idle for more than
   // `olderThanDays` days in one call, then refresh both the active lists and the
   // archived view so the moved rows land in their new home. Archiving is
-  // reversible from the archived view, so the header confirms once before this
-  // runs.
+  // reversible from the archived view, so we confirm once before it runs — first
+  // previewing how many conversations qualify so the confirmation names the count.
   const bulkArchiveSessionsByAge = useCallback(async (olderThanDays: number) => {
+    // Preview the affected count so the user knows whether they're about to
+    // archive 2 or 200 sessions. Best-effort: if the preview fails we fall back
+    // to the generic (count-less) confirmation rather than blocking the action.
+    let archivableCount: number | null = null;
+    try {
+      const countResponse = await api.getArchivableSessionCountByAge(olderThanDays);
+      if (countResponse.ok) {
+        const payload = (await countResponse.json()) as { data?: { archivableCount?: number } };
+        const count = payload.data?.archivableCount;
+        if (typeof count === 'number' && Number.isFinite(count)) {
+          archivableCount = count;
+        }
+      }
+    } catch (error) {
+      console.error('[Sidebar] Failed to preview archivable session count:', error);
+    }
+
+    // Nothing qualifies — say so instead of confirming (and then running) a no-op.
+    if (archivableCount === 0) {
+      if (typeof window !== 'undefined') {
+        window.alert(
+          t('archive.bulkByAgeNoneIdle', {
+            days: olderThanDays,
+            defaultValue: 'No conversations have been idle for more than {{days}} days.',
+          }),
+        );
+      }
+      return;
+    }
+
+    const confirmMessage =
+      archivableCount === null
+        ? t('archive.bulkByAgeConfirm', {
+            days: olderThanDays,
+            defaultValue:
+              'Archive all conversations with no activity in the last {{days}} days? You can restore them anytime from the archived view.',
+          })
+        : t('archive.bulkByAgeConfirmCount', {
+            count: archivableCount,
+            days: olderThanDays,
+            defaultValue:
+              'Archive {{count}} conversations with no activity in the last {{days}} days? You can restore them anytime from the archived view.',
+          });
+
+    if (typeof window !== 'undefined' && !window.confirm(confirmMessage)) {
+      return;
+    }
+
     try {
       const response = await api.bulkArchiveSessionsByAge(olderThanDays);
 

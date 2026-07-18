@@ -104,3 +104,56 @@ test('archiveSessionsOlderThan excludes a session updated exactly at the cutoff'
     assert.equal(sessionsDb.getSessionById('at-cutoff')?.isArchived, 0);
   });
 });
+
+test('countSessionsOlderThan matches what archiveSessionsOlderThan would move, without mutating rows', async () => {
+  await withIsolatedDatabase(async () => {
+    seedSession('old-1', { updated: OLD });
+    seedSession('old-2', { updated: OLD });
+    seedSession('recent-1', { updated: RECENT });
+
+    const count = sessionsDb.countSessionsOlderThan(CUTOFF);
+
+    assert.equal(count, 2, 'counts exactly the aged, active sessions');
+    // The preview is read-only: nothing should have been archived yet.
+    assert.equal(sessionsDb.getSessionById('old-1')?.isArchived, 0);
+    assert.equal(sessionsDb.getSessionById('old-2')?.isArchived, 0);
+    assert.equal(sessionsDb.getSessionById('recent-1')?.isArchived, 0);
+    // And it agrees with the archive it previews.
+    assert.equal(sessionsDb.archiveSessionsOlderThan(CUTOFF).length, count);
+  });
+});
+
+test('countSessionsOlderThan judges age by updated_at, not created_at', async () => {
+  await withIsolatedDatabase(async () => {
+    seedSession('revived', { created: OLD, updated: RECENT });
+
+    assert.equal(sessionsDb.countSessionsOlderThan(CUTOFF), 0);
+  });
+});
+
+test('countSessionsOlderThan excludes already-archived rows', async () => {
+  await withIsolatedDatabase(async () => {
+    seedSession('old-1', { updated: OLD });
+    seedSession('old-2', { updated: OLD });
+
+    sessionsDb.archiveSessionsOlderThan(CUTOFF);
+
+    assert.equal(sessionsDb.countSessionsOlderThan(CUTOFF), 0, 'a second preview counts nothing left to archive');
+  });
+});
+
+test('countSessionsOlderThan excludes a session updated exactly at the cutoff', async () => {
+  await withIsolatedDatabase(async () => {
+    seedSession('at-cutoff', { updated: CUTOFF });
+
+    assert.equal(sessionsDb.countSessionsOlderThan(CUTOFF), 0);
+  });
+});
+
+test('countSessionsOlderThan returns 0 when nothing qualifies', async () => {
+  await withIsolatedDatabase(async () => {
+    seedSession('recent-1', { updated: RECENT });
+
+    assert.equal(sessionsDb.countSessionsOlderThan(CUTOFF), 0);
+  });
+});
