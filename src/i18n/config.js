@@ -23,7 +23,6 @@ import enAuth from './locales/en/auth.json';
 import enSidebar from './locales/en/sidebar.json';
 import enChat from './locales/en/chat.json';
 import enCodeEditor from './locales/en/codeEditor.json';
-
 // Import supported languages configuration
 import { languages } from './languages.js';
 

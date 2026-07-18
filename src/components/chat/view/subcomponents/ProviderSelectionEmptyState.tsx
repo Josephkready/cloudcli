@@ -59,7 +59,6 @@ type ProviderSelectionEmptyStateProps = {
   setOpenCodeModel: (model: string) => void;
   providerModelCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>>;
   providerModelsLoading: boolean;
-  setInput: React.Dispatch<React.SetStateAction<string>>;
 };
 
 type ProviderGroup = {
