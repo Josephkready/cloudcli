@@ -10,7 +10,8 @@ import MessageCopyControl from './MessageCopyControl';
 // The error variant must (1) render a copy button and (2) stay text-only — the
 // markdown/text format dropdown is meaningless for raw stderr/stack traces and
 // only appears for assistant messages. These render the real component to
-// static markup and assert on the structure.
+// static markup and assert on the structure. (The clipboard payload itself is
+// covered by the pure resolveCopyPayload tests in ../../utils/copyPayload.test.)
 
 test('error variant renders a copy button', () => {
   const html = renderToStaticMarkup(
