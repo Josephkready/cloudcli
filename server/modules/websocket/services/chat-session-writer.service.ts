@@ -26,6 +26,13 @@ type ChatSessionWriterOptions = {
    */
   onBlockedChange?: (blocked: boolean) => void;
   /**
+   * Whether this run is still live (registry status `running`). Providers use it
+   * to bail out of internal retries once the run has been completed/aborted out
+   * from under them, so they don't stream into a session the client believes is
+   * finished.
+   */
+  isRunActive?: () => boolean;
+  /**
    * Remaps/sequences/buffers one outbound live event. Implemented by the chat
    * run registry; the writer never forwards a provider event untouched.
    * Returns `null` when the event must be dropped (duplicate terminal
@@ -141,6 +148,15 @@ export class ChatSessionWriter {
    */
   setBlocked(blocked: boolean): void {
     this.options.onBlockedChange?.(blocked);
+  }
+
+  /**
+   * Whether this run is still live. Defaults to true when the host didn't wire a
+   * status source (e.g. non-registry writers), so a provider only bails when it
+   * is explicitly told the run is no longer active.
+   */
+  isRunActive(): boolean {
+    return this.options.isRunActive?.() ?? true;
   }
 
   private captureProviderSessionId(providerSessionId: string): void {

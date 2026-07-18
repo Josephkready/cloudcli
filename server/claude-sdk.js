@@ -740,11 +740,13 @@ async function queryClaudeSDK(command, options = {}, ws) {
         }
         console.warn(`[Claude SDK] Claude spawn raced the CLI auto-updater (attempt ${spawnAttempt}/${CLAUDE_SPAWN_MAX_ATTEMPTS}); retrying in ${CLAUDE_SPAWN_RETRY_DELAY_MS}ms:`, error?.message || error);
         await new Promise((resolve) => setTimeout(resolve, CLAUDE_SPAWN_RETRY_DELAY_MS));
-        // A resumed session can be aborted while we sleep; the abort path already
-        // sent the terminal complete, so bail instead of starting a fresh stream
-        // the client believes is finished. Re-throwing hits the outer catch,
-        // which suppresses the error for aborted runs.
-        if (capturedSessionId && abortedSessionIds.has(capturedSessionId)) {
+        // The run can be aborted while we sleep. `chat.abort` always completes
+        // the run in the registry (regardless of provider-session id or whether
+        // interrupt() succeeded), which flips `isRunActive()` to false — a more
+        // reliable signal than abortedSessionIds. Bail rather than start a fresh
+        // stream into a session the client already believes is finished; the
+        // outer catch suppresses the error for aborted runs.
+        if (ws?.isRunActive?.() === false) {
           throw error;
         }
       }

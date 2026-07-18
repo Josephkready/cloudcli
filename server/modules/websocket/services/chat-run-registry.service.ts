@@ -286,6 +286,7 @@ export const chatRunRegistry = {
       onBlockedChange: (blocked) => {
         setRunBlocked(run, blocked);
       },
+      isRunActive: () => run.status === 'running',
       decorateOutboundEvent: (message) => decorateAndRecordEvent(run, message),
     });
 
