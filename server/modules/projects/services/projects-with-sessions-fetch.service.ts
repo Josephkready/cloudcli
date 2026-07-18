@@ -18,11 +18,18 @@ type SessionSummary = {
   // completed / never viewed.
   last_completed_at: string | null;
   last_viewed_at: string | null;
+  // Where the session is driven from (#71). `cloudcli` = created through cloudcli
+  // (an app id was allocated, so it differs from the provider-native id, or the
+  // provider id isn't assigned yet); `cli` = discovered on disk by the sessions
+  // watcher (the row's provider id equals its app id). Lets the sidebar mark
+  // externally-driven sessions whose live status cloudcli can't know.
+  origin: 'cli' | 'cloudcli';
 };
 
 type SessionRepositoryRow = {
   provider: string;
   session_id: string;
+  provider_session_id?: string | null;
   custom_name?: string | null;
   updated_at?: string | null;
   created_at?: string | null;
@@ -133,6 +140,11 @@ function mapSessionRowToSummary(row: SessionRepositoryRow): SessionSummary {
     lastActivity: row.updated_at ?? row.created_at ?? new Date().toISOString(),
     last_completed_at: row.last_completed_at ?? null,
     last_viewed_at: row.last_viewed_at ?? null,
+    // Disk-discovered sessions are inserted with provider_session_id === session_id;
+    // cloudcli-created ones keep a distinct app id (or a not-yet-assigned null
+    // provider id). Anything that isn't a confirmed id match is treated as
+    // cloudcli-driven.
+    origin: row.provider_session_id === row.session_id ? 'cli' : 'cloudcli',
   };
 }
 

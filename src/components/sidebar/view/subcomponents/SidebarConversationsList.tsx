@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
-import { Activity, AlertCircle, Check, CheckCircle2, Clock, Edit2, Loader2, MessageSquare, Trash2, X } from 'lucide-react';
+import { Activity, AlertCircle, Check, CheckCircle2, Clock, Edit2, Loader2, MessageSquare, Terminal, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { cn } from '../../../../lib/utils';
@@ -177,6 +177,22 @@ function ConversationRow({
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-normal text-foreground">{title}</span>
           <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+            {/* Mark sessions cloudcli only sees through the transcript file (#71):
+                started from a terminal/CLI, so their live status is unknown.
+                cloudcli-driven sessions stay unbadged (the common in-app case). */}
+            {session.origin === 'cli' && (
+              <span
+                className="flex flex-shrink-0 items-center gap-0.5 rounded-sm bg-muted px-1 text-[9px] font-medium uppercase leading-tight tracking-wide text-muted-foreground/80"
+                title={t(
+                  'conversations.cliOriginTooltip',
+                  'Started from a terminal — cloudcli only sees it via the transcript file, so its live status is unknown',
+                )}
+                aria-label={t('conversations.cliOrigin', 'Terminal / CLI session')}
+              >
+                <Terminal className="h-2 w-2" aria-hidden="true" />
+                {t('conversations.cliOriginBadge', 'CLI')}
+              </span>
+            )}
             <MessageSquare className="h-2.5 w-2.5 flex-shrink-0 opacity-70" />
             <span className="truncate">{projectName}</span>
           </span>
