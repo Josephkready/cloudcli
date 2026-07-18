@@ -18,10 +18,11 @@ type BuildNewConversationItemsArgs = {
  *
  * The Conversations view is project-agnostic (it often has no selected project),
  * so a new conversation must first be pointed at a folder. We list the existing
- * projects — ordered exactly like the Projects tab's default (starred first, then
- * by name, via {@link sortProjects}) so the two views stay consistent — and always
- * append a "New project…" escape hatch so a brand-new folder can be added when the
- * target isn't a project yet. Picking a project launches the chat composer there.
+ * projects in a stable, scannable order — starred first, then alphabetically by
+ * name (via {@link sortProjects} with `'name'`) so the menu reads predictably
+ * regardless of the Projects tab's current sort setting — and always append a
+ * "New project…" escape hatch so a brand-new folder can be added when the target
+ * isn't a project yet. Picking a project launches the chat composer there.
  */
 export function buildNewConversationItems({
   projects,

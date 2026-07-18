@@ -33,9 +33,23 @@ test('lists each project then a trailing "New project…" escape hatch', () => {
     items.map((item) => item.label),
     ['Alpha', 'Bravo', 'New project…'],
   );
+  // Each project item carries its folder path as the menu description.
+  assert.equal(items[0].description, '/repos/a');
+  assert.equal(items[1].description, '/repos/b');
   assert.equal(items[2].key, 'new-project');
   // Divider separates the create action from the project list above it.
   assert.equal(items[2].showDividerBefore, true);
+});
+
+test('falls back to projectId for the label when displayName is empty', () => {
+  const items = buildNewConversationItems({
+    projects: [project('lonely-repo', '')],
+    onPickProject: () => {},
+    onCreateProject: () => {},
+    t,
+  });
+
+  assert.equal(items[0].label, 'lonely-repo');
 });
 
 test('orders projects starred-first, then by name (matches the Projects tab default)', () => {
@@ -52,7 +66,7 @@ test('orders projects starred-first, then by name (matches the Projects tab defa
   );
 });
 
-test('picking a project item invokes onPickProject with that exact project', () => {
+test('each project item invokes onPickProject with its own project (no closure crosstalk)', () => {
   const picked: string[] = [];
   const projects = [project('a', 'Alpha'), project('b', 'Bravo')];
   const items = buildNewConversationItems({
@@ -62,8 +76,11 @@ test('picking a project item invokes onPickProject with that exact project', () 
     t,
   });
 
+  // Select both, in reverse order, to catch a map closure wiring every item to
+  // the same (e.g. last) project.
   items.find((item) => item.key === 'project:b')?.onSelect();
-  assert.deepEqual(picked, ['b']);
+  items.find((item) => item.key === 'project:a')?.onSelect();
+  assert.deepEqual(picked, ['b', 'a']);
 });
 
 test('the create item invokes onCreateProject, not onPickProject', () => {

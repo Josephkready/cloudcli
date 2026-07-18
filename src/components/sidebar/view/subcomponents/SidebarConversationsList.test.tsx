@@ -73,3 +73,32 @@ test('renders a New conversation button above the list', () => {
   const html = render(new Map(), 's');
   assert.ok(html.includes('New conversation'), 'the New conversation action should render in the populated view');
 });
+
+test('renders a New conversation button in the empty state (no projects/sessions)', () => {
+  // No projects => no conversations => the empty-state branch renders. That branch
+  // also mounts the button, so a fresh user can still start their first chat.
+  const html = renderToStaticMarkup(
+    React.createElement(SidebarConversationsList, {
+      projects: [],
+      activeSessions: new Map(),
+      attentionSessionIds: new Set<string>(),
+      onClearAllAttention: noop,
+      selectedSession: null,
+      currentTime: new Date('2026-07-17T00:00:00Z'),
+      onSelect: noop,
+      onNewConversation: noop,
+      onCreateProject: noop,
+      editingSession: null,
+      editingSessionName: '',
+      onEditingSessionNameChange: noop,
+      onStartEditingSession: noop,
+      onCancelEditingSession: noop,
+      onSaveEditingSession: noop,
+      onDeleteSession: noop,
+      onArchiveSession: noop,
+      t,
+    }),
+  );
+  assert.ok(html.includes('No conversations yet'), 'the empty state should render');
+  assert.ok(html.includes('New conversation'), 'the empty state should still offer the New conversation action');
+});
