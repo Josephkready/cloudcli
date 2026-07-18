@@ -140,10 +140,14 @@ function mapSessionRowToSummary(row: SessionRepositoryRow): SessionSummary {
     lastActivity: row.updated_at ?? row.created_at ?? new Date().toISOString(),
     last_completed_at: row.last_completed_at ?? null,
     last_viewed_at: row.last_viewed_at ?? null,
-    // Disk-discovered sessions are inserted with provider_session_id === session_id;
-    // cloudcli-created ones keep a distinct app id (or a not-yet-assigned null
-    // provider id). Anything that isn't a confirmed id match is treated as
-    // cloudcli-driven.
+    // Best-effort origin heuristic (#71): disk-discovered sessions are inserted
+    // with provider_session_id === session_id, while cloudcli-created ones keep a
+    // distinct app id (or a not-yet-assigned null provider id). Anything that
+    // isn't a confirmed id match is treated as cloudcli-driven.
+    // Caveat: the provider_session_id column was backfilled to session_id for all
+    // rows predating it (migrations.ts), so sessions created through cloudcli
+    // before that migration read as 'cli'. The badge copy is deliberately hedged
+    // ("not driven by cloudcli") rather than asserting a terminal origin.
     origin: row.provider_session_id === row.session_id ? 'cli' : 'cloudcli',
   };
 }

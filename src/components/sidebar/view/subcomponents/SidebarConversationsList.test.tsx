@@ -78,12 +78,12 @@ test('renders a New conversation button above the list', () => {
 
 test('badges a CLI-driven session with the origin chip (#71)', () => {
   const html = render(new Map(), 's', { origin: 'cli' });
-  assert.ok(html.includes('Terminal / CLI session'), 'a cli-origin session shows the CLI origin badge');
+  assert.ok(html.includes('Session not driven by cloudcli'), 'a cli-origin session shows the CLI origin badge');
 });
 
 test('leaves a cloudcli-driven session unbadged (#71)', () => {
   const html = render(new Map(), 's', { origin: 'cloudcli' });
-  assert.ok(!html.includes('Terminal / CLI session'), 'a cloudcli-origin session has no CLI origin badge');
+  assert.ok(!html.includes('Session not driven by cloudcli'), 'a cloudcli-origin session has no CLI origin badge');
 });
 
 test('renders a New conversation button in the empty state (no projects/sessions)', () => {

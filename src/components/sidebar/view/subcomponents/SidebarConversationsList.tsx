@@ -177,17 +177,19 @@ function ConversationRow({
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-normal text-foreground">{title}</span>
           <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-            {/* Mark sessions cloudcli only sees through the transcript file (#71):
-                started from a terminal/CLI, so their live status is unknown.
-                cloudcli-driven sessions stay unbadged (the common in-app case). */}
+            {/* Mark sessions cloudcli isn't driving (#71): cloudcli only sees them
+                through the transcript file, so their live status is unknown.
+                cloudcli-driven sessions stay unbadged (the common in-app case).
+                Copy is hedged because the id-match heuristic also catches rows
+                that predate provider-id tracking — see mapSessionRowToSummary. */}
             {session.origin === 'cli' && (
               <span
                 className="flex flex-shrink-0 items-center gap-0.5 rounded-sm bg-muted px-1 text-[9px] font-medium uppercase leading-tight tracking-wide text-muted-foreground/80"
                 title={t(
                   'conversations.cliOriginTooltip',
-                  'Started from a terminal — cloudcli only sees it via the transcript file, so its live status is unknown',
+                  "Not driven by cloudcli — started from a terminal/CLI (or created before session tracking), so its live status is unknown",
                 )}
-                aria-label={t('conversations.cliOrigin', 'Terminal / CLI session')}
+                aria-label={t('conversations.cliOrigin', 'Session not driven by cloudcli')}
               >
                 <Terminal className="h-2 w-2" aria-hidden="true" />
                 {t('conversations.cliOriginBadge', 'CLI')}
