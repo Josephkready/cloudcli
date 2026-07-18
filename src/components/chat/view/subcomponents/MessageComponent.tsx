@@ -216,7 +216,11 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                         </svg>
                         <span className="text-xs font-medium text-red-700 dark:text-red-300">{t('messageTypes.error')}</span>
                       </div>
-                      <div className="relative text-sm text-red-900 dark:text-red-100">
+                      {/* Cap the error body so a long stderr/stack-trace dump
+                          can't dominate the chat (#58); the "Error" header above
+                          stays pinned and the body scrolls, mirroring Bash's
+                          auto-expand-on-error max-h-80. */}
+                      <div className="relative max-h-80 overflow-y-auto text-sm text-red-900 dark:text-red-100">
                         <Markdown className="prose prose-sm prose-red max-w-none font-serif dark:prose-invert">
                           {String(message.toolResult.content || '')}
                         </Markdown>
