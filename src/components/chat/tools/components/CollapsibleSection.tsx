@@ -79,7 +79,9 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
       )}
 
       <CollapsibleContent>
-        <div className="mt-1.5 pl-[18px]">
+        {/* Cap expanded tool output so a single block can't dominate the chat;
+            mirrors BashCommandDisplay's max-h-80 and scrolls past that. */}
+        <div className="mt-1.5 max-h-80 overflow-y-auto pl-[18px]">
           {children}
         </div>
       </CollapsibleContent>
