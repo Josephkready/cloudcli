@@ -57,9 +57,11 @@ function parseMsEnv(name, fallback) {
   if (raw === undefined || raw.trim() === '') {
     return fallback;
   }
-  const parsed = parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    console.warn(`[WARN] ${name}="${raw}" is not a valid non-negative integer; using ${fallback}.`);
+  // Number() (not parseInt) so typos like "45m" or "10abc" become NaN and warn,
+  // rather than parseInt silently truncating them to a bogus millisecond value.
+  const parsed = Number(raw.trim());
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    console.warn(`[WARN] ${name}="${raw}" is not a valid non-negative integer (ms); using ${fallback}.`);
     return fallback;
   }
   return parsed;
@@ -190,8 +192,9 @@ function findStaleToolApprovals(pendingMap, now, thresholdMs) {
 
 /**
  * Force-denies tool approvals idle past the reap window. Denying (not aborting)
- * reuses the well-tested user-deny path: the tool is rejected, the agent finishes
- * its turn naturally, and the run reaches `completed` so the registry evicts it.
+ * reuses the existing null-deny path — the same one waitForToolApproval's own
+ * auto-deny timeout uses: the tool is rejected, the agent finishes its turn
+ * naturally, and the run reaches `completed` so the registry evicts it.
  * Calling abortClaudeSDKSession here would instead suppress the terminal
  * `complete` (that signal is the chat.abort handler's job), leaving the run stuck.
  * @returns {number} how many approvals were reaped

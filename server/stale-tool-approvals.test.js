@@ -7,6 +7,8 @@ import {
   waitForToolApproval,
   resolveToolApproval,
   parseMsEnv,
+  startStaleToolApprovalReaper,
+  stopStaleToolApprovalReaper,
 } from './claude-sdk.js';
 
 // Reaper for runs abandoned mid tool-approval (#86). Since #62 made approvals
@@ -94,15 +96,18 @@ test('reapStaleToolApprovals force-denies a stale approval and leaves fresh ones
     return d;
   });
 
-  const reaped = reapStaleToolApprovals(now, 45 * MINUTE);
+  try {
+    const reaped = reapStaleToolApprovals(now, 45 * MINUTE);
 
-  assert.equal(reaped, 1);
-  // The stale approval resolves to null — the same value a user "deny" produces.
-  assert.equal(await stalePromise, null);
-  assert.equal(freshSettled, false, 'a fresh approval must not be reaped');
-
-  // Clean up the still-pending fresh entry so it does not leak across tests.
-  resolveToolApproval('reap-test-fresh', { approved: true });
+    assert.equal(reaped, 1);
+    // The stale approval resolves to null — the same value an auto-deny produces.
+    assert.equal(await stalePromise, null);
+    assert.equal(freshSettled, false, 'a fresh approval must not be reaped');
+  } finally {
+    // Always clean up the still-pending fresh entry so a mid-test failure can't
+    // leak a permanently-pending entry into the module-global approvals map.
+    resolveToolApproval('reap-test-fresh', { approved: true });
+  }
   assert.deepEqual(await freshPromise, { approved: true });
 });
 
@@ -131,15 +136,42 @@ test('parseMsEnv warns and falls back on a malformed or negative value', () => {
   const originalWarn = console.warn;
   console.warn = (msg) => warnings.push(String(msg));
   try {
-    process.env[NAME] = 'not-a-number';
-    assert.equal(parseMsEnv(NAME, 99), 99);
-    process.env[NAME] = '-5';
-    assert.equal(parseMsEnv(NAME, 99), 99);
-    assert.equal(warnings.length, 2);
+    // Unit-suffixed typos (the classic "45m" instead of 2700000) and floats
+    // must warn, not silently truncate to a bogus ms value.
+    for (const bad of ['not-a-number', '-5', '45m', '10abc', '1.5']) {
+      process.env[NAME] = bad;
+      assert.equal(parseMsEnv(NAME, 99), 99, `"${bad}" should fall back`);
+    }
+    assert.equal(warnings.length, 5);
     assert.ok(warnings.every((w) => w.includes(NAME)), 'each warning names the offending env var');
   } finally {
     console.warn = originalWarn;
     if (original === undefined) delete process.env[NAME];
     else process.env[NAME] = original;
   }
+});
+
+test('startStaleToolApprovalReaper fires the reaper on its interval; stop halts it', async () => {
+  const now = Date.now();
+  // 90 min idle — well past the default 45 min reap window used by the timer.
+  const pending = waitForToolApproval('reaper-timer-test', {
+    metadata: { _receivedAt: new Date(now - 90 * MINUTE), _sessionId: 's-timer', _toolName: 'Bash' },
+  });
+  try {
+    startStaleToolApprovalReaper(10); // fast interval so the test doesn't wait long
+    // Resolves to null once an interval tick force-denies the stale approval.
+    assert.equal(await pending, null);
+  } finally {
+    stopStaleToolApprovalReaper();
+  }
+});
+
+test('startStaleToolApprovalReaper is idempotent and stop is safe when not running', () => {
+  // Starting twice must not throw or spin up a second timer; stopping repeatedly
+  // (including when never started) must be a safe no-op.
+  startStaleToolApprovalReaper(60_000);
+  startStaleToolApprovalReaper(60_000);
+  stopStaleToolApprovalReaper();
+  stopStaleToolApprovalReaper();
+  assert.ok(true);
 });
