@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 
-import { sessionsService } from './sessions.service.js';
+import { computeArchiveCutoff, sessionsService } from './sessions.service.js';
 
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
@@ -72,5 +72,47 @@ test('fetchHistory treats a missing offset as a fresh open', async () => {
       sessionsDb.getSessionById('view-default')?.last_viewed_at,
       'a fetch with no offset defaults to 0 and stamps viewed',
     );
+  });
+});
+
+test('computeArchiveCutoff subtracts whole days from the reference instant', () => {
+  const now = new Date('2026-07-18T12:00:00.000Z');
+
+  assert.equal(computeArchiveCutoff(now, 7), '2026-07-11T12:00:00.000Z');
+  assert.equal(computeArchiveCutoff(now, 30), '2026-06-18T12:00:00.000Z');
+  assert.equal(computeArchiveCutoff(now, 90), '2026-04-19T12:00:00.000Z');
+});
+
+test('computeArchiveCutoff keeps the time-of-day across a month boundary', () => {
+  const now = new Date('2026-03-05T08:30:00.000Z');
+
+  assert.equal(computeArchiveCutoff(now, 10), '2026-02-23T08:30:00.000Z');
+});
+
+test('bulkArchiveSessionsOlderThan archives only the stale sessions and reports the count', async () => {
+  await withIsolatedDatabase(async () => {
+    // Years old: comfortably beyond any realistic cutoff.
+    sessionsDb.createSession('stale', 'claude', '/workspace/demo', 'Stale', '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:00.000Z');
+    // Freshly created (CURRENT_TIMESTAMP): well within the cutoff.
+    sessionsDb.createAppSession('fresh', 'claude', '/workspace/demo');
+
+    const result = sessionsService.bulkArchiveSessionsOlderThan(30);
+
+    assert.equal(result.archivedCount, 1);
+    assert.deepEqual(result.sessionIds, ['stale']);
+    assert.equal(sessionsDb.getSessionById('stale')?.isArchived, 1);
+    assert.equal(sessionsDb.getSessionById('fresh')?.isArchived, 0);
+  });
+});
+
+test('bulkArchiveSessionsOlderThan rejects a non-positive age', async () => {
+  await withIsolatedDatabase(async () => {
+    for (const badDays of [0, -5, Number.NaN]) {
+      assert.throws(
+        () => sessionsService.bulkArchiveSessionsOlderThan(badDays),
+        /positive number/,
+        `days=${badDays} should be rejected`,
+      );
+    }
   });
 });

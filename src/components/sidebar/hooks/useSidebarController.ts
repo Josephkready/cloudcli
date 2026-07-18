@@ -888,6 +888,32 @@ export function useSidebarController({
     }
   }, [fetchArchivedSessions, onRefresh]);
 
+  // Bulk declutter: soft-archive every active conversation idle for more than
+  // `olderThanDays` days in one call, then refresh both the active lists and the
+  // archived view so the moved rows land in their new home. Archiving is
+  // reversible from the archived view, so the header confirms once before this
+  // runs.
+  const bulkArchiveSessionsByAge = useCallback(async (olderThanDays: number) => {
+    try {
+      const response = await api.bulkArchiveSessionsByAge(olderThanDays);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Sidebar] Failed to bulk-archive sessions by age:', {
+          status: response.status,
+          error: errorText,
+        });
+        alert(t('messages.archiveSessionFailed', 'Failed to archive session. Please try again.'));
+        return;
+      }
+
+      await refreshProjects();
+    } catch (error) {
+      console.error('[Sidebar] Error bulk-archiving sessions by age:', error);
+      alert(t('messages.archiveSessionError', 'Error archiving session. Please try again.'));
+    }
+  }, [refreshProjects, t]);
+
   const updateSessionSummary = useCallback(
     // `_projectId` and `_provider` are preserved for compatibility with
     // existing sidebar callback signatures; backend rename only needs sessionId.
@@ -967,6 +993,7 @@ export function useSidebarController({
     restoreArchivedProject,
     restoreArchivedSession,
     refreshProjects,
+    bulkArchiveSessionsByAge,
     updateSessionSummary,
     collapseSidebar,
     expandSidebar,

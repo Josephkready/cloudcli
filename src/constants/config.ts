@@ -1,8 +1,12 @@
 /**
  * Environment Flag: Is Platform
  * Indicates if the app is running in Platform mode (hosted) or OSS mode (self-hosted)
+ *
+ * `import.meta.env` is injected by Vite at build time; guard against it being
+ * absent so importing these constants doesn't crash in non-Vite runtimes such
+ * as unit tests (`tsx --test`) or any server-side render of a shared component.
  */
-export const IS_PLATFORM = import.meta.env.VITE_IS_PLATFORM === 'true';
+export const IS_PLATFORM = import.meta.env?.VITE_IS_PLATFORM === 'true';
 
 /**
  * Environment Flag: Auth Disabled
@@ -10,7 +14,7 @@ export const IS_PLATFORM = import.meta.env.VITE_IS_PLATFORM === 'true';
  * default user. Unlike IS_PLATFORM, it does not alter workspace paths, the
  * WebSocket URL, or any other platform behavior — it only removes login.
  */
-export const AUTH_DISABLED = import.meta.env.VITE_AUTH_DISABLED === 'true';
+export const AUTH_DISABLED = import.meta.env?.VITE_AUTH_DISABLED === 'true';
 
 /**
  * For empty shell instances where no project is provided,

@@ -109,6 +109,12 @@ export const api = {
   },
   getArchivedSessions: () =>
     authenticatedFetch('/api/providers/sessions/archived'),
+  // Bulk soft-archive every active session idle for more than `days` days.
+  bulkArchiveSessionsByAge: (days) =>
+    authenticatedFetch('/api/providers/sessions/archive-by-age', {
+      method: 'POST',
+      body: JSON.stringify({ days }),
+    }),
   runningSessions: () =>
     authenticatedFetch('/api/providers/sessions/running'),
   restoreSession: (sessionId) =>

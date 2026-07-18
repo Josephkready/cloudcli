@@ -32,6 +32,19 @@ type ArchivedSessionListItem = {
   isProjectArchived: boolean;
 };
 
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Computes the ISO cutoff instant for a bulk "archive older than N days"
+ * request: sessions last active strictly before this instant are eligible.
+ *
+ * Exported and pure so the age arithmetic is unit-testable without a database
+ * or a real clock — the service supplies `new Date()` in production.
+ */
+export function computeArchiveCutoff(now: Date, olderThanDays: number): string {
+  return new Date(now.getTime() - olderThanDays * MILLISECONDS_PER_DAY).toISOString();
+}
+
 /**
  * Removes one file if it exists.
  */
@@ -286,6 +299,29 @@ export const sessionsService = {
       action: 'deleted',
       deletedFromDisk: removedFromDisk,
     };
+  },
+
+  /**
+   * Soft-archives every active session that has been idle for more than
+   * `olderThanDays` days, in a single pass, and returns how many moved.
+   *
+   * Archiving is reversible (rows keep their transcript and metadata), so this
+   * is a safe bulk declutter: the sidebar surfaces the moved sessions in its
+   * archived view where they can be restored or permanently deleted.
+   */
+  bulkArchiveSessionsOlderThan(
+    olderThanDays: number,
+  ): { archivedCount: number; sessionIds: string[] } {
+    if (!Number.isFinite(olderThanDays) || olderThanDays <= 0) {
+      throw new AppError('olderThanDays must be a positive number.', {
+        code: 'INVALID_ARCHIVE_AGE',
+        statusCode: 400,
+      });
+    }
+
+    const cutoffIso = computeArchiveCutoff(new Date(), olderThanDays);
+    const sessionIds = sessionsDb.archiveSessionsOlderThan(cutoffIso);
+    return { archivedCount: sessionIds.length, sessionIds };
   },
 
   /**

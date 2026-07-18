@@ -489,6 +489,48 @@ export const sessionsDb = {
   },
 
   /**
+   * Bulk soft-archives every active (non-archived) session whose last activity
+   * (`updated_at`, falling back to `created_at`) predates the given cutoff, and
+   * returns the ids that were archived. Powers the sidebar's "archive old
+   * conversations" declutter action.
+   *
+   * The matching ids are captured before the flip (in one transaction, so the
+   * SELECT and UPDATE see the same rows) which lets callers report or refresh
+   * exactly what moved without a follow-up read. The
+   * `datetime(COALESCE(updated_at, created_at))` comparison mirrors the ordered
+   * reads above so "age" means the same thing everywhere, regardless of whether
+   * a row stores a raw SQLite timestamp or a normalized ISO string.
+   */
+  archiveSessionsOlderThan(cutoffIso: string): string[] {
+    const db = getConnection();
+
+    const archive = db.transaction((cutoff: string): string[] => {
+      const rows = db
+        .prepare(
+          `SELECT session_id FROM sessions
+           WHERE isArchived = 0
+             AND datetime(COALESCE(updated_at, created_at)) < datetime(?)`
+        )
+        .all(cutoff) as Array<{ session_id: string }>;
+
+      if (rows.length === 0) {
+        return [];
+      }
+
+      db.prepare(
+        `UPDATE sessions
+         SET isArchived = 1
+         WHERE isArchived = 0
+           AND datetime(COALESCE(updated_at, created_at)) < datetime(?)`
+      ).run(cutoff);
+
+      return rows.map((row) => row.session_id);
+    });
+
+    return archive(cutoffIso);
+  },
+
+  /**
    * Stamps when a run for this session finished. Drives the "Done" state
    * (finished-but-unviewed): set on the terminal `complete`, compared against
    * `last_viewed_at`. Uses SQLite CURRENT_TIMESTAMP (UTC); readers normalize it.

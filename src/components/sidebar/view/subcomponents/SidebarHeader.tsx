@@ -1,7 +1,7 @@
-import { Archive, Folder, FolderPlus, MessageSquare, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
+import { Archive, Clock, Folder, FolderPlus, MessageSquare, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
-import { Button, Input, Tooltip } from '../../../../shared/view/ui';
+import { ActionMenu, Button, Input, Tooltip, type ActionMenuItem } from '../../../../shared/view/ui';
 import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '../../../../constants/branding';
 import { IS_PLATFORM } from '../../../../constants/config';
 import { cn } from '../../../../lib/utils';
@@ -27,6 +27,7 @@ type SidebarHeaderProps = {
   isRefreshing: boolean;
   onCreateProject: () => void;
   onCollapseSidebar: () => void;
+  onBulkArchiveOlderThanDays: (days: number) => void;
   t: TFunction;
 };
 
@@ -47,6 +48,7 @@ export default function SidebarHeader({
   isRefreshing,
   onCreateProject,
   onCollapseSidebar,
+  onBulkArchiveOlderThanDays,
   t,
 }: SidebarHeaderProps) {
   const showSearchTools = (projectsCount > 0 || runningSessionsCount > 0 || archivedSessionsCount > 0 || isArchivedSessionsLoading) && !isLoading;
@@ -56,6 +58,45 @@ export default function SidebarHeader({
       ? t('search.archivedPlaceholder', 'Search archived sessions...')
       : t('projects.searchPlaceholder');
   const runningBadgeText = runningSessionsCount > 99 ? '99+' : String(runningSessionsCount);
+
+  // Bulk "declutter old conversations" action. Each preset maps to a day
+  // threshold; archiving is reversible from the archived view, so we confirm
+  // once (naming the chosen age) rather than raising the per-session dialog.
+  const bulkArchiveItems: ActionMenuItem[] = [7, 30, 90].map((days) => ({
+    key: `older-than-${days}`,
+    icon: Archive,
+    label: t('archive.bulkByAgeOption', { days, defaultValue: 'Older than {{days}} days' }),
+    onSelect: () => {
+      const confirmed =
+        typeof window === 'undefined' ||
+        window.confirm(
+          t('archive.bulkByAgeConfirm', {
+            days,
+            defaultValue:
+              'Archive all conversations with no activity in the last {{days}} days? You can restore them anytime from the archived view.',
+          }),
+        );
+      if (confirmed) {
+        onBulkArchiveOlderThanDays(days);
+      }
+    },
+  }));
+
+  // Only offer the declutter action when there are active sessions to archive.
+  const bulkArchiveMenu = projectsCount > 0 ? (
+    <div className="flex justify-end">
+      <ActionMenu
+        label={t('archive.bulkByAgeLabel', 'Archive older…')}
+        ariaLabel={t('archive.bulkByAgeAriaLabel', 'Archive old conversations')}
+        icon={Clock}
+        items={bulkArchiveItems}
+        variant="ghost"
+        size="sm"
+        align="right"
+        triggerClassName="h-7 gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/80 hover:text-foreground"
+      />
+    </div>
+  ) : null;
 
   const LogoBlock = () => (
     <div className="flex min-w-0 items-center gap-2.5">
@@ -213,6 +254,7 @@ export default function SidebarHeader({
                 </kbd>
               )}
             </div>
+            {bulkArchiveMenu}
           </div>
         )}
       </div>
@@ -329,6 +371,7 @@ export default function SidebarHeader({
                 </button>
               )}
             </div>
+            {bulkArchiveMenu}
           </div>
         )}
       </div>

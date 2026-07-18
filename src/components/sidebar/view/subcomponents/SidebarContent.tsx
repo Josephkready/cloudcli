@@ -140,6 +140,7 @@ type SidebarContentProps = {
   isRefreshing: boolean;
   onCreateProject: () => void;
   onCollapseSidebar: () => void;
+  onBulkArchiveOlderThanDays: (days: number) => void;
   restartRequired: boolean;
   currentVersion: string;
   onShowSettings: () => void;
@@ -174,6 +175,7 @@ export default function SidebarContent({
   isRefreshing,
   onCreateProject,
   onCollapseSidebar,
+  onBulkArchiveOlderThanDays,
   restartRequired,
   currentVersion,
   onShowSettings,
@@ -206,6 +208,7 @@ export default function SidebarContent({
         isRefreshing={isRefreshing}
         onCreateProject={onCreateProject}
         onCollapseSidebar={onCollapseSidebar}
+        onBulkArchiveOlderThanDays={onBulkArchiveOlderThanDays}
         t={t}
       />
 

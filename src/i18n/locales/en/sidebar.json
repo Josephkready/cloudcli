@@ -111,7 +111,9 @@
     "restoreProjectFailed": "Failed to restore project. Please try again.",
     "restoreProjectError": "Error restoring project. Please try again.",
     "restoreSessionFailed": "Failed to restore session. Please try again.",
-    "restoreSessionError": "Error restoring session. Please try again."
+    "restoreSessionError": "Error restoring session. Please try again.",
+    "archiveSessionFailed": "Failed to archive session. Please try again.",
+    "archiveSessionError": "Error archiving session. Please try again."
   },
   "version": {
     "restartRequired": "Update installed — restart the server to apply"
@@ -127,6 +129,12 @@
     "matches_other": "{{count}} matches",
     "projectsScanned_one": "{{count}} project scanned",
     "projectsScanned_other": "{{count}} projects scanned"
+  },
+  "archive": {
+    "bulkByAgeLabel": "Archive older…",
+    "bulkByAgeAriaLabel": "Archive old conversations",
+    "bulkByAgeOption": "Older than {{days}} days",
+    "bulkByAgeConfirm": "Archive all conversations with no activity in the last {{days}} days? You can restore them anytime from the archived view."
   },
   "conversations": {
     "blockedHeader": "Blocked",
