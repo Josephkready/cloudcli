@@ -261,6 +261,28 @@ test('a completed run stamps last_completed_at for the durable Done state', asyn
   });
 });
 
+test('writer.isRunActive reflects the run status (drives provider retry bail-out)', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('app-run-active', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const run = chatRunRegistry.startRun({
+      appSessionId: 'app-run-active',
+      provider: 'claude',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(run);
+
+    assert.equal(run.writer.isRunActive(), true);
+
+    // chat.abort completes the run in the registry; isRunActive must flip so a
+    // provider mid-retry stops instead of streaming into a finished session.
+    chatRunRegistry.completeRun('app-run-active', { exitCode: 1 });
+    assert.equal(run.writer.isRunActive(), false);
+  });
+});
+
 test('replayEvents returns only events after the requested seq', async () => {
   await withIsolatedDatabase(() => {
     sessionsDb.createAppSession('app-run-4', 'claude', '/workspace/demo');

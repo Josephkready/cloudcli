@@ -450,6 +450,36 @@ async function loadMcpConfig(cwd) {
   }
 }
 
+// The Claude CLI auto-updates itself in the background; during the brief window
+// where it swaps the `claude` bin symlink, spawn() can hit ENOENT and the SDK
+// surfaces "native binary not found". These bound a one-shot retry of the spawn
+// so a single racy turn doesn't surface as a hard error (#43).
+const CLAUDE_SPAWN_MAX_ATTEMPTS = 2;
+const CLAUDE_SPAWN_RETRY_DELAY_MS = 600;
+
+/**
+ * True when an error looks like the `claude` binary briefly disappearing
+ * (auto-updater symlink swap, an npm reinstall, ...) rather than a genuine
+ * failure — an ENOENT spawn error or the SDK's "native binary not found".
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isSpawnRaceError(error) {
+  if (!error) {
+    return false;
+  }
+  const message = typeof error.message === 'string' ? error.message : String(error);
+  // The SDK's own message when the `claude` bin can't be resolved at launch.
+  if (/native binary not found/i.test(message)) {
+    return true;
+  }
+  // A spawn-time ENOENT (the executable vanished mid-launch), distinguished by
+  // its syscall from an unrelated file-I/O ENOENT (e.g. reading a missing file),
+  // which must not be mistaken for a spawn race.
+  const syscall = typeof error.syscall === 'string' ? error.syscall : '';
+  return error.code === 'ENOENT' && syscall.startsWith('spawn');
+}
+
 /**
  * Executes a Claude query using the SDK
  * @param {string} command - User prompt/command
@@ -607,80 +637,118 @@ async function queryClaudeSDK(command, options = {}, ws) {
       return { behavior: 'deny', message: decision.message ?? 'User denied tool use' };
     };
 
-    // Query constructor reads this synchronously.
-    const prevStreamTimeout = process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
-    process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = '300000';
+    // Whether the SDK stream has yielded anything yet. A spawn race fails
+    // immediately (nothing streamed), so it is only safe to retry the spawn
+    // while this is false — never mid-stream.
+    let anyOutputEmitted = false;
 
-    let queryInstance;
-    try {
-      queryInstance = query({
-        prompt: await createPrompt(),
-        options: sdkOptions
-      });
-    } catch (hookError) {
-      // Older/newer SDK versions may not accept hook shapes yet.
-      // Keep notification behavior operational via runtime events even if hook registration fails.
-      console.warn('Failed to initialize Claude query with hooks, retrying without hooks:', hookError?.message || hookError);
-      delete sdkOptions.hooks;
-      queryInstance = query({
-        prompt: await createPrompt(),
-        options: sdkOptions
-      });
-    }
+    // Build and fully drain the SDK generator once. Recreates the prompt and
+    // query on each call because a consumed async generator cannot be replayed.
+    const runQueryOnce = async () => {
+      // Query constructor reads this synchronously.
+      const prevStreamTimeout = process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
+      process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = '300000';
 
-    // Restore immediately — Query constructor already captured the value
-    if (prevStreamTimeout !== undefined) {
-      process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = prevStreamTimeout;
-    } else {
-      delete process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
-    }
+      let queryInstance;
+      try {
+        queryInstance = query({
+          prompt: await createPrompt(),
+          options: sdkOptions
+        });
+      } catch (hookError) {
+        // Older/newer SDK versions may not accept hook shapes yet.
+        // Keep notification behavior operational via runtime events even if hook registration fails.
+        console.warn('Failed to initialize Claude query with hooks, retrying without hooks:', hookError?.message || hookError);
+        delete sdkOptions.hooks;
+        queryInstance = query({
+          prompt: await createPrompt(),
+          options: sdkOptions
+        });
+      }
 
-    // Track the query instance for abort capability
-    if (capturedSessionId) {
-      addSession(capturedSessionId, queryInstance, ws);
-    }
-
-    // Process streaming messages
-    console.log('Starting async generator loop for session:', capturedSessionId || 'NEW');
-    for await (const message of queryInstance) {
-      // Capture session ID from first message
-      if (message.session_id && !capturedSessionId) {
-
-        capturedSessionId = message.session_id;
-        addSession(capturedSessionId, queryInstance, ws);
-
-        // Set session ID on writer
-        if (ws.setSessionId && typeof ws.setSessionId === 'function') {
-          ws.setSessionId(capturedSessionId);
-        }
-
-        // Send session-created event only once for new sessions
-        if (!sessionId && !sessionCreatedSent) {
-          sessionCreatedSent = true;
-          ws.send(createNormalizedMessage({ kind: 'session_created', newSessionId: capturedSessionId, sessionId: capturedSessionId, provider: 'claude' }));
-        }
+      // Restore immediately — Query constructor already captured the value
+      if (prevStreamTimeout !== undefined) {
+        process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = prevStreamTimeout;
       } else {
-        // session_id already captured
+        delete process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
       }
 
-      // Transform and normalize message via adapter
-      const transformedMessage = transformMessage(message);
-      const sid = capturedSessionId || sessionId || null;
+      // Track the query instance for abort capability
+      if (capturedSessionId) {
+        addSession(capturedSessionId, queryInstance, ws);
+      }
 
-      // Use adapter to normalize SDK events into NormalizedMessage[]
-      const normalized = sessionsService.normalizeMessage('claude', transformedMessage, sid);
-      for (const msg of normalized) {
-        // Preserve parentToolUseId from SDK wrapper for subagent tool grouping
-        if (transformedMessage.parentToolUseId && !msg.parentToolUseId) {
-          msg.parentToolUseId = transformedMessage.parentToolUseId;
+      // Process streaming messages
+      console.log('Starting async generator loop for session:', capturedSessionId || 'NEW');
+      for await (const message of queryInstance) {
+        // The spawn succeeded and the stream is live; past here a failure must
+        // never trigger a spawn retry (it would duplicate already-sent output).
+        anyOutputEmitted = true;
+
+        // Capture session ID from first message
+        if (message.session_id && !capturedSessionId) {
+
+          capturedSessionId = message.session_id;
+          addSession(capturedSessionId, queryInstance, ws);
+
+          // Set session ID on writer
+          if (ws.setSessionId && typeof ws.setSessionId === 'function') {
+            ws.setSessionId(capturedSessionId);
+          }
+
+          // Send session-created event only once for new sessions
+          if (!sessionId && !sessionCreatedSent) {
+            sessionCreatedSent = true;
+            ws.send(createNormalizedMessage({ kind: 'session_created', newSessionId: capturedSessionId, sessionId: capturedSessionId, provider: 'claude' }));
+          }
+        } else {
+          // session_id already captured
         }
-        ws.send(msg);
-      }
 
-      // Extract and send token budget updates from assistant/result usage payloads
-      const tokenBudgetData = extractTokenBudget(message);
-      if (tokenBudgetData) {
-        ws.send(createNormalizedMessage({ kind: 'status', text: 'token_budget', tokenBudget: tokenBudgetData, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+        // Transform and normalize message via adapter
+        const transformedMessage = transformMessage(message);
+        const sid = capturedSessionId || sessionId || null;
+
+        // Use adapter to normalize SDK events into NormalizedMessage[]
+        const normalized = sessionsService.normalizeMessage('claude', transformedMessage, sid);
+        for (const msg of normalized) {
+          // Preserve parentToolUseId from SDK wrapper for subagent tool grouping
+          if (transformedMessage.parentToolUseId && !msg.parentToolUseId) {
+            msg.parentToolUseId = transformedMessage.parentToolUseId;
+          }
+          ws.send(msg);
+        }
+
+        // Extract and send token budget updates from assistant/result usage payloads
+        const tokenBudgetData = extractTokenBudget(message);
+        if (tokenBudgetData) {
+          ws.send(createNormalizedMessage({ kind: 'status', text: 'token_budget', tokenBudget: tokenBudgetData, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+        }
+      }
+    };
+
+    // Retry the spawn once if it races the Claude CLI's background auto-updater
+    // (a transient ENOENT while the bin symlink is swapped). Only before any
+    // output — see anyOutputEmitted — so a live stream is never restarted.
+    for (let spawnAttempt = 1; ; spawnAttempt++) {
+      try {
+        await runQueryOnce();
+        break;
+      } catch (error) {
+        if (!(spawnAttempt < CLAUDE_SPAWN_MAX_ATTEMPTS && !anyOutputEmitted && isSpawnRaceError(error))) {
+          throw error;
+        }
+        console.warn(`[Claude SDK] Claude spawn raced the CLI auto-updater (attempt ${spawnAttempt}/${CLAUDE_SPAWN_MAX_ATTEMPTS}); retrying in ${CLAUDE_SPAWN_RETRY_DELAY_MS}ms:`, error?.message || error);
+        await new Promise((resolve) => setTimeout(resolve, CLAUDE_SPAWN_RETRY_DELAY_MS));
+        // The run can be aborted while we sleep. `chat.abort` always completes
+        // the run in the registry (regardless of provider-session id or whether
+        // interrupt() succeeded), which flips `isRunActive()` to false — a more
+        // reliable signal than abortedSessionIds. Bail rather than start a fresh
+        // stream into a session the client already believes is finished; the
+        // outer catch suppresses the error for aborted runs.
+        if (ws?.isRunActive?.() === false) {
+          throw error;
+        }
       }
     }
 
@@ -839,5 +907,6 @@ export {
   getActiveClaudeSDKSessions,
   resolveToolApproval,
   getPendingApprovalsForSession,
-  reconnectSessionWriter
+  reconnectSessionWriter,
+  isSpawnRaceError
 };
