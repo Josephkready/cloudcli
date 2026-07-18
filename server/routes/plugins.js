@@ -96,6 +96,22 @@ router.get('/:name/assets/*', (req, res) => {
   stream.pipe(res);
 });
 
+// ============================================================================
+// Agent-facing HTTP API (no in-app UI caller)
+//
+// The enable / install / update (below) and delete (further down) routes are
+// intentionally kept after the graphical plugin-management UI was removed
+// (#84 / PR #138). Their only frontend consumer, PluginSettingsTab.tsx, is
+// gone — they are now reachable solely via direct HTTP, giving agents a
+// git-based install/update/enable/uninstall flow as an alternative to dropping
+// files into the plugins directory. Documented in docs/plugins.md. Kept
+// deliberately rather than removed for the lean-the-fork epic (#85); rationale
+// in #143. Do NOT delete these as "dead code": that would also orphan
+// installPluginFromGit / updatePluginFromGit / uninstallPlugin
+// in plugin-loader.js. (The /:name/rpc/* proxy that sits between these routes IS
+// app-facing — it backs api.rpc(...) — and is unrelated to this note.)
+// ============================================================================
+
 // PUT /:name/enable — Toggle plugin enabled/disabled (starts/stops server if applicable)
 router.put('/:name/enable', async (req, res) => {
   try {
@@ -282,7 +298,8 @@ router.all('/:name/rpc/*', async (req, res) => {
   proxyReq.end();
 });
 
-// DELETE /:name — Uninstall plugin (stops server first)
+// DELETE /:name — Uninstall plugin (stops server first).
+// Part of the agent-facing HTTP API described above (no in-app caller; kept per #143).
 router.delete('/:name', async (req, res) => {
   try {
     const pluginName = req.params.name;
