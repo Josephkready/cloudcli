@@ -22,6 +22,7 @@ import {
   readProjectSortOrder,
   sortProjects,
 } from '../utils/utils';
+import { buildBulkArchivePrompt } from '../utils/bulkArchivePrompt';
 
 type SnippetHighlight = {
   start: number;
@@ -888,9 +889,39 @@ export function useSidebarController({
   // Bulk declutter: soft-archive every active conversation idle for more than
   // `olderThanDays` days in one call, then refresh both the active lists and the
   // archived view so the moved rows land in their new home. Archiving is
-  // reversible from the archived view, so the header confirms once before this
-  // runs.
+  // reversible from the archived view, so we confirm once before it runs — first
+  // previewing how many conversations qualify so the confirmation names the count.
   const bulkArchiveSessionsByAge = useCallback(async (olderThanDays: number) => {
+    // Preview the affected count so the user knows whether they're about to
+    // archive 2 or 200 sessions. Best-effort: on failure `archivableCount` stays
+    // null and the prompt falls back to the generic (count-less) confirmation
+    // rather than blocking the action.
+    let archivableCount: number | null = null;
+    try {
+      const countResponse = await api.getArchivableSessionCountByAge(olderThanDays);
+      if (countResponse.ok) {
+        const payload = (await countResponse.json()) as { data?: { archivableCount?: number } };
+        const count = payload.data?.archivableCount;
+        if (typeof count === 'number' && Number.isFinite(count)) {
+          archivableCount = count;
+        }
+      } else {
+        console.error('[Sidebar] Failed to preview archivable session count:', countResponse.status);
+      }
+    } catch (error) {
+      console.error('[Sidebar] Failed to preview archivable session count:', error);
+    }
+
+    const prompt = buildBulkArchivePrompt(archivableCount, olderThanDays, t);
+    // Nothing qualifies — say so instead of confirming (and then running) a no-op.
+    if (prompt.kind === 'inform') {
+      alert(prompt.message);
+      return;
+    }
+    if (!confirm(prompt.message)) {
+      return;
+    }
+
     try {
       const response = await api.bulkArchiveSessionsByAge(olderThanDays);
 

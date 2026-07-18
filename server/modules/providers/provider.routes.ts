@@ -346,6 +346,22 @@ const parseArchiveByAgeDays = (payload: unknown): number => {
   return days;
 };
 
+// Query-string twin of `parseArchiveByAgeDays` for the GET preview endpoint:
+// query params always arrive as strings, so here we parse-then-validate a
+// numeric `?days=` rather than requiring a JSON number.
+const parseArchiveByAgeDaysQuery = (value: unknown): number => {
+  const raw = readOptionalQueryString(value);
+  const days = raw === undefined ? NaN : Number(raw);
+  if (!Number.isFinite(days) || days <= 0) {
+    throw new AppError('days must be a positive number.', {
+      code: 'INVALID_ARCHIVE_AGE',
+      statusCode: 400,
+    });
+  }
+
+  return days;
+};
+
 const parseSessionSearchQuery = (value: unknown): string => {
   const query = readOptionalQueryString(value) ?? '';
   if (query.length < 2) {
@@ -576,6 +592,18 @@ router.get(
   asyncHandler(async (_req: Request, res: Response) => {
     const sessions = sessionsService.listArchivedSessions();
     res.json(createApiSuccessResponse({ sessions }));
+  }),
+);
+
+// Read-only preview for the bulk archive-by-age confirmation: how many active
+// sessions the matching POST would move. Registered before `/sessions/:sessionId`
+// so the literal path is never shadowed by the id param.
+router.get(
+  '/sessions/archivable-count',
+  asyncHandler(async (req: Request, res: Response) => {
+    const days = parseArchiveByAgeDaysQuery(req.query.days);
+    const result = sessionsService.countArchivableSessionsOlderThan(days);
+    res.json(createApiSuccessResponse(result));
   }),
 );
 

@@ -125,3 +125,32 @@ test('bulkArchiveSessionsOlderThan rejects a non-positive age', async () => {
     }
   });
 });
+
+test('countArchivableSessionsOlderThan previews the archive count without archiving', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createSession('stale', 'claude', '/workspace/demo', 'Stale', '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:00.000Z');
+    sessionsDb.createAppSession('fresh', 'claude', '/workspace/demo');
+
+    const preview = sessionsService.countArchivableSessionsOlderThan(30);
+
+    assert.equal(preview.archivableCount, 1);
+    // Preview is read-only: the stale session is still active until archived.
+    assert.equal(sessionsDb.getSessionById('stale')?.isArchived, 0);
+
+    // The preview must equal what the archive then actually moves.
+    const archived = sessionsService.bulkArchiveSessionsOlderThan(30);
+    assert.equal(archived.archivedCount, preview.archivableCount);
+  });
+});
+
+test('countArchivableSessionsOlderThan rejects a non-positive age', async () => {
+  await withIsolatedDatabase(async () => {
+    for (const badDays of [0, -5, Number.NaN]) {
+      assert.throws(
+        () => sessionsService.countArchivableSessionsOlderThan(badDays),
+        /positive number/,
+        `days=${badDays} should be rejected`,
+      );
+    }
+  });
+});

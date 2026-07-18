@@ -531,6 +531,28 @@ export const sessionsDb = {
   },
 
   /**
+   * Counts how many active (non-archived) sessions `archiveSessionsOlderThan`
+   * would move for the same cutoff, without touching any rows. Powers the
+   * sidebar's pre-archive preview ("Archive N conversations…?"). Uses the exact
+   * same `isArchived = 0 AND datetime(COALESCE(updated_at, created_at)) <
+   * datetime(?)` predicate, so for a given cutoff the count reflects precisely
+   * the rows the archive would flip.
+   */
+  countSessionsOlderThan(cutoffIso: string): number {
+    const db = getConnection();
+
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM sessions
+         WHERE isArchived = 0
+           AND datetime(COALESCE(updated_at, created_at)) < datetime(?)`
+      )
+      .get(cutoffIso) as { count: number };
+
+    return row.count;
+  },
+
+  /**
    * Stamps when a run for this session finished. Drives the "Done" state
    * (finished-but-unviewed): set on the terminal `complete`, compared against
    * `last_viewed_at`. Uses SQLite CURRENT_TIMESTAMP (UTC); readers normalize it.
