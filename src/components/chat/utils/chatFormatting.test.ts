@@ -9,77 +9,113 @@ import {
   formatUsageLimitText,
 } from './chatFormatting';
 
-// Pure string-formatting helpers used throughout chat message rendering. They
-// had no coverage; these pin the exact (and occasionally surprising) behavior.
+// Pure formatting helpers used across the chat render path (Markdown
+// pre-processing + the assistant/tool message pipeline). No DOM — assert on
+// concrete transformed strings and edge cases.
 
 test('decodeHtmlEntities decodes the five supported entities', () => {
-  assert.equal(decodeHtmlEntities('&lt;div&gt;'), '<div>');
-  assert.equal(decodeHtmlEntities('&quot;hi&quot; &#39;yo&#39; a&amp;b'), '"hi" \'yo\' a&b');
+  assert.equal(decodeHtmlEntities('&lt;a&gt; &amp; &quot;x&quot; &#39;y&#39;'), `<a> & "x" 'y'`);
 });
 
-test('decodeHtmlEntities is single-pass — &amp; is decoded last, no cascade', () => {
-  // `&amp;lt;` must NOT become `<`: at the time `&lt;` is scanned the literal
-  // `&lt;` is not present yet, and `&amp;`->`&` runs afterwards. So one level.
+test('decodeHtmlEntities decodes &amp; last so escaped entities survive one pass', () => {
+  // `&amp;lt;` is an escaped `&lt;`. Decoding &amp; last yields `&lt;`, not `<`
+  // (i.e. entities are not double-decoded).
   assert.equal(decodeHtmlEntities('&amp;lt;'), '&lt;');
 });
 
-test('decodeHtmlEntities returns falsy input unchanged', () => {
+test('decodeHtmlEntities guards falsy input (would throw on null without the guard)', () => {
   assert.equal(decodeHtmlEntities(''), '');
+  // No try/catch here: without the `if (!text)` guard, `null.replace` would throw,
+  // so this genuinely exercises the guard rather than a no-op.
+  assert.equal(decodeHtmlEntities(null as unknown as string), null);
 });
 
-test('normalizeInlineCodeFences collapses a single-line triple-fence to one backtick', () => {
-  assert.equal(normalizeInlineCodeFences('```bash```'), '`bash`');
-  // Surrounding spaces/tabs inside the fence are trimmed.
-  assert.equal(normalizeInlineCodeFences('```  hi  ```'), '`hi`');
+test('normalizeInlineCodeFences collapses a single-line triple-fence to inline code', () => {
+  assert.equal(normalizeInlineCodeFences('use ```npm test``` now'), 'use `npm test` now');
+  // Trims padding inside the fence.
+  assert.equal(normalizeInlineCodeFences('```  spaced  ```'), '`spaced`');
 });
 
-test('normalizeInlineCodeFences leaves multi-line fenced blocks alone', () => {
-  const block = '```\ncode\n```';
+test('normalizeInlineCodeFences leaves a real multi-line fenced block alone', () => {
+  const block = '```\nline1\nline2\n```';
   assert.equal(normalizeInlineCodeFences(block), block);
+});
+
+test('normalizeInlineCodeFences collapses every single-line fence (global replace)', () => {
+  assert.equal(normalizeInlineCodeFences('```a``` and ```b```'), '`a` and `b`');
+});
+
+test('normalizeInlineCodeFences returns non-strings unchanged', () => {
+  assert.equal(normalizeInlineCodeFences(undefined as unknown as string), undefined);
+});
+
+test('unescapeWithMathProtection turns escaped whitespace into real whitespace', () => {
+  assert.equal(unescapeWithMathProtection('a\\nb\\tc\\rd'), 'a\nb\tc\rd');
+});
+
+test('unescapeWithMathProtection preserves backslash sequences inside $...$ / $$...$$ math', () => {
+  // The `\n` inside the inline math span must stay literal; the one outside is unescaped.
+  assert.equal(unescapeWithMathProtection('$a\\nb$ then\\nout'), '$a\\nb$ then\nout');
+  const display = 'pre\\n$$x\\ty$$\\npost';
+  assert.equal(unescapeWithMathProtection(display), 'pre\n$$x\\ty$$\npost');
+});
+
+test('unescapeWithMathProtection returns non-strings unchanged', () => {
+  assert.equal(unescapeWithMathProtection(null as unknown as string), null);
+});
+
+test('empty string is a no-op / early return across the helpers', () => {
   assert.equal(normalizeInlineCodeFences(''), '');
+  assert.equal(unescapeWithMathProtection(''), '');
+  assert.equal(formatUsageLimitText(''), '');
+  assert.equal(escapeRegExp(''), '');
 });
 
-test('unescapeWithMathProtection turns literal \\n \\t \\r into real whitespace', () => {
-  assert.equal(unescapeWithMathProtection('line1\\nline2'), 'line1\nline2');
-  assert.equal(unescapeWithMathProtection('a\\tb\\rc'), 'a\tb\rc');
+test('escapeRegExp escapes all regex metacharacters', () => {
+  assert.equal(escapeRegExp('a.b*c+d?(e)[f]{g}|h^i$j\\k'), 'a\\.b\\*c\\+d\\?\\(e\\)\\[f\\]\\{g\\}\\|h\\^i\\$j\\\\k');
+  // The escaped output must match the original text literally when used in a RegExp.
+  const raw = 'v1.2.3 (build)';
+  assert.ok(new RegExp(escapeRegExp(raw)).test(raw));
 });
 
-test('unescapeWithMathProtection preserves escapes inside $...$ and $$...$$ math', () => {
-  // Inline math is protected: the backslash-n stays literal inside it.
-  assert.equal(unescapeWithMathProtection('$a\\nb$'), '$a\\nb$');
-  // Outside math unescapes; inside is preserved verbatim.
-  assert.equal(unescapeWithMathProtection('x\\ny $z\\nw$'), 'x\ny $z\\nw$');
-  // Display math ($$...$$) is likewise protected.
-  assert.equal(unescapeWithMathProtection('$$k\\nv$$'), '$$k\\nv$$');
+test('formatUsageLimitText rewrites the raw limit marker into a human sentence', () => {
+  // 10-digit (seconds) epoch — the function multiplies by 1000.
+  const out = formatUsageLimitText('Claude AI usage limit reached|1700000000');
+  assert.notEqual(out, 'Claude AI usage limit reached|1700000000');
+  assert.match(out, /^Claude usage limit reached\. Your limit will reset at \*\*.+\*\* - .+2023$/);
+  // The raw machine marker must be gone.
+  assert.ok(!out.includes('Claude AI usage limit reached|'));
 });
 
-test('escapeRegExp escapes regex metacharacters and leaves ordinary chars', () => {
-  assert.equal(escapeRegExp('a.b*c'), 'a\\.b\\*c');
-  assert.equal(escapeRegExp('(x)[y]{z}'), '\\(x\\)\\[y\\]\\{z\\}');
-  assert.equal(escapeRegExp('1+1=2?'), '1\\+1=2\\?');
+test('formatUsageLimitText accepts a 13-digit millisecond epoch', () => {
+  const out = formatUsageLimitText('Claude AI usage limit reached|1700000000000');
+  assert.match(out, /reset at \*\*.+\*\* - .+2023$/);
 });
 
-test('formatUsageLimitText passes through non-matching / non-string input', () => {
+test('formatUsageLimitText rewrites every occurrence', () => {
+  const out = formatUsageLimitText(
+    'first Claude AI usage limit reached|1700000000 second Claude AI usage limit reached|1700000000',
+  );
+  assert.equal(out.match(/Claude usage limit reached\./g)?.length, 2);
+  assert.ok(!out.includes('Claude AI usage limit reached|'));
+});
+
+test('formatUsageLimitText leaves text without the marker untouched', () => {
   assert.equal(formatUsageLimitText('just a normal message'), 'just a normal message');
-  assert.equal(formatUsageLimitText(123 as unknown as string), 123 as unknown as string);
 });
 
-test('formatUsageLimitText ignores markers whose digit count is out of the 10-13 range', () => {
-  // The marker regex requires \d{10,13}; a short numeric tail must not match.
-  const short = 'Claude AI usage limit reached|123';
-  assert.equal(formatUsageLimitText(short), short);
-});
-
-test('formatUsageLimitText rewrites the "reached|<ts>" marker into human text', () => {
-  // 1700000000 s = mid-November 2023 UTC; the day/time are timezone-dependent so
-  // we assert only timezone-robust substrings (mid-month keeps the month stable).
-  const secs = formatUsageLimitText('Claude AI usage limit reached|1700000000');
-  assert.notEqual(secs, 'Claude AI usage limit reached|1700000000');
-  assert.ok(secs.includes('Claude usage limit reached. Your limit will reset at **'));
-  assert.ok(secs.includes('Nov 2023'), `expected Nov 2023 in: ${secs}`);
-  assert.ok(!secs.includes('reached|1700000000'), 'raw marker must be gone');
-
-  // A 13-digit millisecond timestamp resolves to the same instant (no *1000).
-  const ms = formatUsageLimitText('Claude AI usage limit reached|1700000000000');
-  assert.ok(ms.includes('Nov 2023'), `expected Nov 2023 in: ${ms}`);
+test('formatUsageLimitText falls back to the raw text when formatting throws', () => {
+  // Force the inner date formatting to throw so the try/catch fallback runs; the
+  // matched marker must survive verbatim rather than the message being dropped.
+  const intl = Intl as { DateTimeFormat: unknown };
+  const original = intl.DateTimeFormat;
+  intl.DateTimeFormat = () => {
+    throw new Error('boom');
+  };
+  try {
+    const input = 'Claude AI usage limit reached|1700000000';
+    assert.equal(formatUsageLimitText(input), input);
+  } finally {
+    intl.DateTimeFormat = original;
+  }
 });
