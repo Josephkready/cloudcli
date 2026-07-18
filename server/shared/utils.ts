@@ -1124,11 +1124,19 @@ export function sanitizeLeafDirectoryName(inputName: string, label = 'directory 
  * Recursively discovers files that match one extension, with optional incremental filtering.
  *
  * Provider synchronizers call this to find transcript artifacts under provider
- * home directories. Pass `lastScanAt` to include only files created after the
+ * home directories. Pass `lastScanAt` to include only files modified after the
  * previous scan, or pass `null` to perform a full rescan. Missing directories
  * are treated as empty because not every provider exists on every machine.
+ *
+ * Incremental filtering keys off `max(mtime, birthtime)`: provider transcripts
+ * are appended to across a session's life (new turns, ai-title, last-prompt,
+ * task_complete), so a file created before `lastScanAt` but appended afterward
+ * must still be picked up. Keying off `birthtime` (creation) alone skipped
+ * those — and `birthtime` is unreliable on some Linux filesystems (0 or equal
+ * to ctime). `max()` biases toward inclusion; a false positive only triggers a
+ * harmless re-index, whereas a false negative leaves stale titles/metadata.
  */
-export async function findFilesRecursivelyCreatedAfter(
+export async function findFilesRecursivelyModifiedAfter(
   rootDir: string,
   extension: string,
   lastScanAt: Date | null,
@@ -1140,7 +1148,7 @@ export async function findFilesRecursivelyCreatedAfter(
       const fullPath = path.join(rootDir, entry.name);
 
       if (entry.isDirectory()) {
-        await findFilesRecursivelyCreatedAfter(fullPath, extension, lastScanAt, fileList);
+        await findFilesRecursivelyModifiedAfter(fullPath, extension, lastScanAt, fileList);
         continue;
       }
 
@@ -1154,7 +1162,8 @@ export async function findFilesRecursivelyCreatedAfter(
       }
 
       const fileStat = await stat(fullPath);
-      if (fileStat.birthtime > lastScanAt) {
+      const changedAt = fileStat.mtime > fileStat.birthtime ? fileStat.mtime : fileStat.birthtime;
+      if (changedAt > lastScanAt) {
         fileList.push(fullPath);
       }
     }

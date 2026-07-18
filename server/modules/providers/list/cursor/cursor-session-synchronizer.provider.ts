@@ -9,7 +9,7 @@ import { sessionsDb } from '@/modules/database/index.js';
 import { shouldExcludeProjectPath } from '@/shared/project-exclude.js';
 import {
   extractFirstValidJsonlData,
-  findFilesRecursivelyCreatedAfter,
+  findFilesRecursivelyModifiedAfter,
   normalizeSessionName,
   readFileTimestamps,
 } from '@/shared/utils.js';
@@ -49,7 +49,7 @@ export class CursorSessionSynchronizer implements IProviderSessionSynchronizer {
 
     let processed = 0;
 
-    const files = await findFilesRecursivelyCreatedAfter(projectsDir, '.jsonl', since ?? null);
+    const files = await findFilesRecursivelyModifiedAfter(projectsDir, '.jsonl', since ?? null);
 
     for (const filePath of files) {
       const parsed = await this.processSessionFile(filePath);
