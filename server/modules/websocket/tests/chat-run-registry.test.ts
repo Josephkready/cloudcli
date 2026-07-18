@@ -235,6 +235,32 @@ test('listRunningRuns reports blocked and refcounts concurrent approvals', async
   });
 });
 
+test('a completed run stamps last_completed_at for the durable Done state', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('app-run-done', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const run = chatRunRegistry.startRun({
+      appSessionId: 'app-run-done',
+      provider: 'claude',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(run);
+
+    assert.equal(sessionsDb.getSessionById('app-run-done')?.last_completed_at, null);
+
+    // The terminal complete flows through decorateAndRecordEvent, the single
+    // completion choke point, which persists the finish time.
+    run.writer.send({ kind: 'complete', provider: 'claude', sessionId: 'native-done', exitCode: 0 });
+
+    assert.ok(
+      sessionsDb.getSessionById('app-run-done')?.last_completed_at,
+      'completion should stamp last_completed_at',
+    );
+  });
+});
+
 test('replayEvents returns only events after the requested seq', async () => {
   await withIsolatedDatabase(() => {
     sessionsDb.createAppSession('app-run-4', 'claude', '/workspace/demo');

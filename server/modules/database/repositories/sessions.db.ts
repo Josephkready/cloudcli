@@ -13,10 +13,12 @@ type SessionRow = {
   isArchived: number;
   created_at: string;
   updated_at: string;
+  last_completed_at: string | null;
+  last_viewed_at: string | null;
 };
 
 const SESSION_ROW_COLUMNS =
-  'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, name_source, isArchived, created_at, updated_at';
+  'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, name_source, isArchived, created_at, updated_at, last_completed_at, last_viewed_at';
 
 const SQLITE_UTC_TIMESTAMP_REGEX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
@@ -47,6 +49,10 @@ function normalizeSessionRow<T extends SessionRow | null | undefined>(row: T): T
     ...row,
     created_at: normalizeTimestamp(row.created_at) ?? row.created_at,
     updated_at: normalizeTimestamp(row.updated_at) ?? row.updated_at,
+    // Nullable: NULL means never completed / never viewed. Normalize to ISO like
+    // created_at/updated_at so the client can compare the two directly.
+    last_completed_at: normalizeTimestamp(row.last_completed_at ?? undefined),
+    last_viewed_at: normalizeTimestamp(row.last_viewed_at ?? undefined),
   };
 }
 
@@ -480,6 +486,33 @@ export const sessionsDb = {
        SET isArchived = ?
        WHERE session_id = ?`
     ).run(isArchived ? 1 : 0, sessionId);
+  },
+
+  /**
+   * Stamps when a run for this session finished. Drives the "Done" state
+   * (finished-but-unviewed): set on the terminal `complete`, compared against
+   * `last_viewed_at`. Uses SQLite CURRENT_TIMESTAMP (UTC); readers normalize it.
+   */
+  setLastCompletedAt(sessionId: string): void {
+    const db = getConnection();
+    db.prepare(
+      `UPDATE sessions
+       SET last_completed_at = CURRENT_TIMESTAMP
+       WHERE session_id = ?`
+    ).run(sessionId);
+  },
+
+  /**
+   * Stamps when the user last opened this session. Clears "Done" once
+   * `last_viewed_at` catches up to `last_completed_at`.
+   */
+  setLastViewedAt(sessionId: string): void {
+    const db = getConnection();
+    db.prepare(
+      `UPDATE sessions
+       SET last_viewed_at = CURRENT_TIMESTAMP
+       WHERE session_id = ?`
+    ).run(sessionId);
   },
 
   deleteSessionById(sessionId: string): boolean {

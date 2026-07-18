@@ -35,6 +35,10 @@ export interface ProjectSession {
   created_at?: string;
   updated_at?: string;
   lastActivity?: string;
+  // Durable "Done" (finished-but-unviewed) state timestamps from the server:
+  // Done when last_completed_at is set and newer than last_viewed_at.
+  last_completed_at?: string | null;
+  last_viewed_at?: string | null;
   messageCount?: number;
   provider?: LLMProvider;
   __provider?: LLMProvider;

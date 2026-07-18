@@ -161,6 +161,19 @@ export const sessionsService = {
       });
     }
 
+    // A fresh open (offset 0) counts as viewing the session, clearing the
+    // durable "Done" state; paginating older messages (offset > 0) does not.
+    if ((options.offset ?? 0) === 0) {
+      try {
+        sessionsDb.setLastViewedAt(sessionId);
+      } catch (error) {
+        console.error('[SessionsService] Failed to stamp last_viewed_at', {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     // App-created sessions that never produced a provider transcript yet
     // (e.g. first message still streaming) simply have no history.
     if (!session.provider_session_id) {

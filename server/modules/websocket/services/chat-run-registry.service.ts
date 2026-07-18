@@ -101,6 +101,10 @@ async function broadcastCanonicalSessionUpsert(appSessionId: string): Promise<vo
       summary: row.custom_name || '',
       messageCount: 0,
       lastActivity: row.updated_at ?? row.created_at ?? new Date().toISOString(),
+      // Carry the Done-state timestamps so a live upsert never wipes them from
+      // the client's session row (the sidebar derives Done from these).
+      last_completed_at: row.last_completed_at,
+      last_viewed_at: row.last_viewed_at,
     },
     project: project
       ? {
@@ -167,6 +171,28 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
     run.status = 'completed';
     run.completedAt = Date.now();
     evictRunLater(run.appSessionId);
+
+    // Persist the finish time so the sidebar can show a durable "Done"
+    // (finished-but-unviewed) state that survives reload/eviction, then
+    // broadcast the updated row so clients reflect Done live rather than only
+    // on the next projects refresh. This is the single completion choke point
+    // (natural end, abort, and synthetic safety-net all funnel through here).
+    try {
+      sessionsDb.setLastCompletedAt(run.appSessionId);
+      void broadcastCanonicalSessionUpsert(run.appSessionId).catch((error) => {
+        const messageText = error instanceof Error ? error.message : String(error);
+        console.error('[ChatRunRegistry] Failed to broadcast Done-state upsert', {
+          appSessionId: run.appSessionId,
+          error: messageText,
+        });
+      });
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      console.error('[ChatRunRegistry] Failed to persist session completion time', {
+        appSessionId: run.appSessionId,
+        error: messageText,
+      });
+    }
   }
 
   run.events.push(outbound);

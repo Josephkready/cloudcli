@@ -52,6 +52,31 @@ test('session archive queries hide archived rows from active project views', asy
   });
 });
 
+test('last_completed_at / last_viewed_at back the durable Done state', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createSession('session-done', 'claude', '/workspace/demo-project', 'Done Session');
+
+    // Fresh row: never completed, never viewed.
+    const initial = sessionsDb.getSessionById('session-done');
+    assert.equal(initial?.last_completed_at, null);
+    assert.equal(initial?.last_viewed_at, null);
+
+    // A run finishes → last_completed_at set (Done, since never viewed).
+    sessionsDb.setLastCompletedAt('session-done');
+    const completed = sessionsDb.getSessionById('session-done');
+    assert.ok(completed?.last_completed_at, 'last_completed_at should be set on completion');
+    assert.equal(completed?.last_viewed_at, null);
+    // Normalized to canonical ISO like created_at/updated_at, not raw SQLite.
+    assert.match(completed!.last_completed_at!, /^\d{4}-\d{2}-\d{2}T.*Z$/);
+
+    // Opening the session stamps last_viewed_at → clears Done.
+    sessionsDb.setLastViewedAt('session-done');
+    const viewed = sessionsDb.getSessionById('session-done');
+    assert.ok(viewed?.last_viewed_at, 'last_viewed_at should be set on view');
+    assert.match(viewed!.last_viewed_at!, /^\d{4}-\d{2}-\d{2}T.*Z$/);
+  });
+});
+
 test('createSession preserves archived state on re-sync (fork: startup rescan must not un-archive)', async () => {
   await withIsolatedDatabase(() => {
     sessionsDb.createSession('session-reused', 'claude', '/workspace/demo-project', 'First Name');

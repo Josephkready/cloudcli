@@ -416,6 +416,19 @@ const addSessionNameSourceColumn = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'sessions', columnNames, 'name_source', 'TEXT');
 };
 
+/**
+ * Adds `last_completed_at` / `last_viewed_at`, the durable timestamps behind the
+ * sidebar's "Done" (finished-but-unviewed) state: Done ⇔ `last_completed_at` is
+ * set and newer than `last_viewed_at`. Both DATETIME, left NULL for existing
+ * rows (never completed / never viewed). No-op once present.
+ */
+const addSessionDoneStateColumns = (db: Database): void => {
+  const sessionsTableInfo = getTableInfo(db, 'sessions');
+  const columnNames = sessionsTableInfo.map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'sessions', columnNames, 'last_completed_at', 'DATETIME');
+  addColumnToTableIfNotExists(db, 'sessions', columnNames, 'last_viewed_at', 'DATETIME');
+};
+
 const ensureProjectsForSessionPaths = (db: Database): void => {
   if (!tableExists(db, 'sessions')) {
     return;
@@ -467,6 +480,7 @@ export const runMigrations = (db: Database) => {
     migrateLegacySessionNames(db);
     addProviderSessionIdMapping(db);
     addSessionNameSourceColumn(db);
+    addSessionDoneStateColumns(db);
     ensureProjectsForSessionPaths(db);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');
