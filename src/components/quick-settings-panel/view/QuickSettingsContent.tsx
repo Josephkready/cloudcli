@@ -2,7 +2,6 @@ import { Moon, Sun } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { DarkModeToggle } from '../../../shared/view/ui';
-import LanguageSelector from '../../../shared/view/ui/LanguageSelector';
 import {
   INPUT_SETTING_TOGGLES,
   SETTING_ROW_CLASS,
@@ -59,7 +58,6 @@ export default function QuickSettingsContent({
           </span>
           <DarkModeToggle />
         </div>
-        <LanguageSelector compact />
       </QuickSettingsSection>
 
       <QuickSettingsSection title={t('quickSettings.sections.toolDisplay')}>
