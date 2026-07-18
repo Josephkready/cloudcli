@@ -468,11 +468,16 @@ function isSpawnRaceError(error) {
   if (!error) {
     return false;
   }
-  if (error.code === 'ENOENT') {
+  const message = typeof error.message === 'string' ? error.message : String(error);
+  // The SDK's own message when the `claude` bin can't be resolved at launch.
+  if (/native binary not found/i.test(message)) {
     return true;
   }
-  const message = typeof error.message === 'string' ? error.message : String(error);
-  return /native binary not found|ENOENT/i.test(message);
+  // A spawn-time ENOENT (the executable vanished mid-launch), distinguished by
+  // its syscall from an unrelated file-I/O ENOENT (e.g. reading a missing file),
+  // which must not be mistaken for a spawn race.
+  const syscall = typeof error.syscall === 'string' ? error.syscall : '';
+  return error.code === 'ENOENT' && syscall.startsWith('spawn');
 }
 
 /**
@@ -730,12 +735,18 @@ async function queryClaudeSDK(command, options = {}, ws) {
         await runQueryOnce();
         break;
       } catch (error) {
-        if (spawnAttempt < CLAUDE_SPAWN_MAX_ATTEMPTS && !anyOutputEmitted && isSpawnRaceError(error)) {
-          console.warn(`[Claude SDK] Claude spawn raced the CLI auto-updater (attempt ${spawnAttempt}/${CLAUDE_SPAWN_MAX_ATTEMPTS}); retrying in ${CLAUDE_SPAWN_RETRY_DELAY_MS}ms:`, error?.message || error);
-          await new Promise((resolve) => setTimeout(resolve, CLAUDE_SPAWN_RETRY_DELAY_MS));
-          continue;
+        if (!(spawnAttempt < CLAUDE_SPAWN_MAX_ATTEMPTS && !anyOutputEmitted && isSpawnRaceError(error))) {
+          throw error;
         }
-        throw error;
+        console.warn(`[Claude SDK] Claude spawn raced the CLI auto-updater (attempt ${spawnAttempt}/${CLAUDE_SPAWN_MAX_ATTEMPTS}); retrying in ${CLAUDE_SPAWN_RETRY_DELAY_MS}ms:`, error?.message || error);
+        await new Promise((resolve) => setTimeout(resolve, CLAUDE_SPAWN_RETRY_DELAY_MS));
+        // A resumed session can be aborted while we sleep; the abort path already
+        // sent the terminal complete, so bail instead of starting a fresh stream
+        // the client believes is finished. Re-throwing hits the outer catch,
+        // which suppresses the error for aborted runs.
+        if (capturedSessionId && abortedSessionIds.has(capturedSessionId)) {
+          throw error;
+        }
       }
     }
 
