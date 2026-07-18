@@ -104,9 +104,10 @@ router.get('/:name/assets/*', (req, res) => {
 // (#84 / PR #138). Their only frontend consumer, PluginSettingsTab.tsx, is
 // gone — they are now reachable solely via direct HTTP, giving agents a
 // git-based install/update/enable/uninstall flow as an alternative to dropping
-// files into the plugins directory. Documented in docs/plugins.md. The decision
-// to keep rather than remove is #143. Do NOT delete these as "dead code": that
-// would also orphan installPluginFromGit / updatePluginFromGit / uninstallPlugin
+// files into the plugins directory. Documented in docs/plugins.md. Kept
+// deliberately rather than removed for the lean-the-fork epic (#85); rationale
+// in #143. Do NOT delete these as "dead code": that would also orphan
+// installPluginFromGit / updatePluginFromGit / uninstallPlugin
 // in plugin-loader.js. (The /:name/rpc/* proxy that sits between these routes IS
 // app-facing — it backs api.rpc(...) — and is unrelated to this note.)
 // ============================================================================
