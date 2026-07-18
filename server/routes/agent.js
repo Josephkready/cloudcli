@@ -668,13 +668,28 @@ class SSEStreamWriter {
  *
  * Streaming Response (stream=true):
  *   Content-Type: text/event-stream
- *   Events:
+ *   Each SSE `data:` line is one JSON frame. Two frame families are emitted:
+ *
+ *   1. Route control frames (keyed by `type`), sent by this endpoint:
  *     - { type: "status", message: "...", projectPath: "..." }
- *     - { type: "claude-response", data: {...} }
+ *     - { type: "session-id", sessionId: "..." }
  *     - { type: "github-branch", branch: { name: "...", url: "..." } }
  *     - { type: "github-pr", pullRequest: { number: 42, url: "..." } }
  *     - { type: "github-error", error: "..." }
+ *     - { type: "error", error: "...", message: "Failed: ..." }  // run-level failure
  *     - { type: "done" }
+ *
+ *   2. Provider message frames (keyed by `kind`), forwarded verbatim from the
+ *      provider runtime's normalizeMessage() — normalized envelopes built by
+ *      createNormalizedMessage(), each carrying { id, sessionId, timestamp,
+ *      provider, kind, ... }. The legacy { type: "claude-response", data } shape
+ *      is no longer produced (see #96 / #123). `kind` is one of:
+ *        text | tool_use | tool_result | thinking | status (e.g. token_budget)
+ *        | complete | session_created | error | stream_delta | stream_end
+ *        | permission_request | permission_cancelled | interactive_prompt
+ *        | task_notification
+ *      e.g. { kind: "text", role: "assistant", content: "...", provider, ... }
+ *           { kind: "complete", success: true, exitCode: 0, provider, ... }
  *
  * Non-Streaming Response (stream=false):
  *   Content-Type: application/json
