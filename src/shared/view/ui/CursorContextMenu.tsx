@@ -1,40 +1,16 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type MouseEvent as ReactMouseEvent,
-  type ReactNode,
-} from 'react';
+import { Fragment, useCallback, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
 
 import type { ActionMenuItem } from './ActionMenu';
-
-const CONTEXT_MENU_WIDTH = 220;
-const CONTEXT_MENU_HEIGHT = 300;
-const VIEWPORT_PADDING = 10;
-
-function calculateViewportSafePosition(clientX: number, clientY: number) {
-  // Keep the context menu inside the visible viewport.
-  const safeX =
-    clientX + CONTEXT_MENU_WIDTH > window.innerWidth
-      ? window.innerWidth - CONTEXT_MENU_WIDTH - VIEWPORT_PADDING
-      : clientX;
-  const safeY =
-    clientY + CONTEXT_MENU_HEIGHT > window.innerHeight
-      ? window.innerHeight - CONTEXT_MENU_HEIGHT - VIEWPORT_PADDING
-      : clientY;
-
-  return { x: Math.max(VIEWPORT_PADDING, safeX), y: Math.max(VIEWPORT_PADDING, safeY) };
-}
+import { useCursorContextMenu } from './useCursorContextMenu';
 
 /**
  * Reusable right-click context menu positioned at the cursor. Wraps `children`
  * and opens a menu of `items` on contextmenu, closing on outside-click, Escape,
- * or selection. Modeled on the file-tree FileContextMenu chrome, but generic over
+ * or selection. Shares its chrome (positioning, dismissal, keyboard nav) with
+ * the file-tree FileContextMenu via `useCursorContextMenu`, but is generic over
  * the shared ActionMenuItem shape so any surface can supply its own actions.
  *
  * When `disabled` or `items` is empty the native browser menu is left intact
@@ -53,27 +29,8 @@ export default function CursorContextMenu({
   disabled?: boolean;
   className?: string;
 }) {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  const closeContextMenu = useCallback(() => {
-    setIsMenuOpen(false);
-  }, []);
-
-  const openContextMenuAtCursor = useCallback(
-    (event: ReactMouseEvent<HTMLDivElement>) => {
-      if (disabled || items.length === 0) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-
-      setMenuPosition(calculateViewportSafePosition(event.clientX, event.clientY));
-      setIsMenuOpen(true);
-    },
-    [disabled, items.length],
-  );
+  const { isMenuOpen, menuPosition, menuRef, openContextMenuAtCursor, closeContextMenu } =
+    useCursorContextMenu({ disabled: disabled || items.length === 0 });
 
   const runItemAndClose = useCallback(
     (item: ActionMenuItem) => {
@@ -85,77 +42,6 @@ export default function CursorContextMenu({
     },
     [closeContextMenu],
   );
-
-  useEffect(() => {
-    if (!isMenuOpen) {
-      return;
-    }
-
-    const handleOutsideMouseDown = (event: MouseEvent) => {
-      const menuElement = menuRef.current;
-      if (menuElement && !menuElement.contains(event.target as Node)) {
-        closeContextMenu();
-      }
-    };
-
-    const handleEscapeKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        closeContextMenu();
-      }
-    };
-
-    document.addEventListener('mousedown', handleOutsideMouseDown);
-    document.addEventListener('keydown', handleEscapeKeyDown);
-
-    return () => {
-      document.removeEventListener('mousedown', handleOutsideMouseDown);
-      document.removeEventListener('keydown', handleEscapeKeyDown);
-    };
-  }, [closeContextMenu, isMenuOpen]);
-
-  useEffect(() => {
-    if (!isMenuOpen) {
-      return;
-    }
-
-    // Arrow key support keeps the menu accessible without a mouse.
-    const handleKeyboardMenuNavigation = (event: KeyboardEvent) => {
-      const menuItems = menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])');
-      if (!menuItems || menuItems.length === 0) {
-        return;
-      }
-
-      const activeElement = document.activeElement as HTMLElement | null;
-      const currentIndex = Array.from(menuItems).findIndex((menuItem) => menuItem === activeElement);
-
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        const nextIndex = currentIndex < menuItems.length - 1 ? currentIndex + 1 : 0;
-        menuItems[nextIndex]?.focus();
-      } else if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        const previousIndex = currentIndex > 0 ? currentIndex - 1 : menuItems.length - 1;
-        menuItems[previousIndex]?.focus();
-      } else if (event.key === 'Enter' || event.key === ' ') {
-        // Only activate a focused menu item inside this menu — never some other
-        // role-bearing element that happened to hold focus when the menu opened.
-        if (
-          activeElement &&
-          menuRef.current?.contains(activeElement) &&
-          activeElement.getAttribute('role') === 'menuitem'
-        ) {
-          event.preventDefault();
-          activeElement.click();
-        }
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyboardMenuNavigation);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyboardMenuNavigation);
-    };
-  }, [isMenuOpen]);
 
   return (
     <>
