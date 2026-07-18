@@ -2,40 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+
 import { copyTextToClipboard } from '../../../../utils/clipboard';
+import { resolveCopyPayload } from '../../utils/copyPayload';
+import type { CopyFormat, CopyMessageType } from '../../utils/copyPayload';
 
 const COPY_SUCCESS_TIMEOUT_MS = 2000;
-
-type CopyFormat = 'text' | 'markdown';
 
 type CopyFormatOption = {
   format: CopyFormat;
   label: string;
-};
-
-// Converts markdown into readable plain text for "Copy as text".
-const convertMarkdownToPlainText = (markdown: string): string => {
-  let plainText = markdown.replace(/\r\n/g, '\n');
-  const codeBlocks: string[] = [];
-  plainText = plainText.replace(/```[\w-]*\n([\s\S]*?)```/g, (_match, code: string) => {
-    const placeholder = `@@CODEBLOCK${codeBlocks.length}@@`;
-    codeBlocks.push(code.replace(/\n$/, ''));
-    return placeholder;
-  });
-  plainText = plainText.replace(/`([^`]+)`/g, '$1');
-  plainText = plainText.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1');
-  plainText = plainText.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
-  plainText = plainText.replace(/^>\s?/gm, '');
-  plainText = plainText.replace(/^#{1,6}\s+/gm, '');
-  plainText = plainText.replace(/^[-*+]\s+/gm, '');
-  plainText = plainText.replace(/^\d+\.\s+/gm, '');
-  plainText = plainText.replace(/(\*\*|__)(.*?)\1/g, '$2');
-  plainText = plainText.replace(/(\*|_)(.*?)\1/g, '$2');
-  plainText = plainText.replace(/~~(.*?)~~/g, '$1');
-  plainText = plainText.replace(/<\/?[^>]+(>|$)/g, '');
-  plainText = plainText.replace(/\n{3,}/g, '\n\n');
-  plainText = plainText.replace(/@@CODEBLOCK(\d+)@@/g, (_match, index: string) => codeBlocks[Number(index)] ?? '');
-  return plainText.trim();
 };
 
 const MessageCopyControl = ({
@@ -43,7 +19,7 @@ const MessageCopyControl = ({
   messageType,
 }: {
   content: string;
-  messageType: 'user' | 'assistant';
+  messageType: CopyMessageType;
 }) => {
   const { t } = useTranslation('chat');
   const canSelectCopyFormat = messageType === 'assistant';
@@ -95,12 +71,10 @@ const MessageCopyControl = ({
     ? t('copyMessage.markdownShort', { defaultValue: 'MD' })
     : t('copyMessage.textShort', { defaultValue: 'TXT' });
 
-  const copyPayload = useMemo(() => {
-    if (selectedFormat === 'markdown') {
-      return content;
-    }
-    return convertMarkdownToPlainText(content);
-  }, [content, selectedFormat]);
+  const copyPayload = useMemo(
+    () => resolveCopyPayload(content, selectedFormat, messageType),
+    [content, selectedFormat, messageType]
+  );
 
   useEffect(() => {
     setSelectedFormat(defaultFormat);
@@ -162,7 +136,9 @@ const MessageCopyControl = ({
 
   const toneClass = messageType === 'user'
     ? 'text-blue-100 hover:text-white'
-    : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300';
+    : messageType === 'error'
+      ? 'text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-200'
+      : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300';
   const copyTitle = copied ? t('copyMessage.copied') : t('copyMessage.copy');
   const rootClassName = canSelectCopyFormat
     ? 'relative flex min-w-0 flex-1 items-center gap-0.5 sm:min-w-max sm:flex-none sm:w-auto'

@@ -17,7 +17,7 @@ import { Reasoning, ReasoningTrigger, ReasoningContent } from '../../../../share
 
 import ChatMessageImages from './ChatMessageImages';
 import { Markdown } from './Markdown';
-import { ErrorResultContent } from './ErrorResultContent';
+import { ErrorToolResult } from './ErrorToolResult';
 import MessageCopyControl from './MessageCopyControl';
 import MessageSpeakControl from './MessageSpeakControl';
 
@@ -64,6 +64,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
   const assistantCopyContent = message.isToolUse
     ? String(message.displayText || message.content || '')
     : formattedMessageContent;
+  const errorCopyContent = String(message.toolResult?.content || '');
   const isCommandOrFileEditToolResponse = Boolean(
     message.isToolUse && COPY_HIDDEN_TOOL_NAMES.has(String(message.toolName || ''))
   );
@@ -206,26 +207,8 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 {/* Tool Result Section — Bash renders its output inside the command row above. */}
                 {message.toolResult && message.toolName !== 'Bash' && !shouldHideToolResult(message.toolName || 'UnknownTool', message.toolResult) && (
                   message.toolResult.isError ? (
-                    // Error results - red error box with content
-                    <div
-                      id={`tool-result-${message.toolId}`}
-                      className="relative mt-2 scroll-mt-4 rounded border border-red-200/60 bg-red-50/50 p-3 dark:border-red-800/40 dark:bg-red-950/10"
-                    >
-                      <div className="relative mb-2 flex items-center gap-1.5">
-                        <svg className="h-4 w-4 text-red-500 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                        <span className="text-xs font-medium text-red-700 dark:text-red-300">{t('messageTypes.error')}</span>
-                      </div>
-                      {/* Cap the error body so a long stderr/stack-trace dump
-                          can't dominate the chat (#58); the "Error" header above
-                          stays pinned and the body scrolls, mirroring Bash's
-                          auto-expand-on-error max-h-80. */}
-                      {/* Error/stderr is preformatted monospace, not prose Markdown (#145). */}
-                      <div className="relative max-h-80 overflow-y-auto text-sm text-red-900 dark:text-red-100">
-                        <ErrorResultContent content={String(message.toolResult.content || '')} />
-                      </div>
-                    </div>
+                    // Error results - red error box with content (#151)
+                    <ErrorToolResult content={errorCopyContent} toolId={message.toolId} />
                   ) : (
                     // Non-error results - route through ToolRenderer (single source of truth)
                     <div id={`tool-result-${message.toolId}`} className="scroll-mt-4">
