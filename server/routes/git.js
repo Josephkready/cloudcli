@@ -6,6 +6,7 @@ import { promises as fs } from 'fs';
 import { projectsDb } from '../modules/database/index.js';
 import { queryClaudeSDK } from '../claude-sdk.js';
 import { spawnCursor } from '../cursor-cli.js';
+import { ResponseCollector } from './response-collector.js';
 
 const router = express.Router();
 const COMMIT_DIFF_CHARACTER_LIMIT = 500_000;
@@ -1080,49 +1081,13 @@ ${diffContext.substring(0, 4000)}
 Generate the commit message:`;
 
   try {
-    // Create a simple writer that collects the response
-    let responseText = '';
-    const writer = {
-      send: (data) => {
-        try {
-          const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-          console.log('🔍 Writer received message type:', parsed.type);
-
-          // Handle different message formats from Claude SDK and Cursor CLI
-          // Claude SDK sends: {type: 'claude-response', data: {message: {content: [...]}}}
-          if (parsed.type === 'claude-response' && parsed.data) {
-            const message = parsed.data.message || parsed.data;
-            console.log('📦 Claude response message:', JSON.stringify(message, null, 2).substring(0, 500));
-            if (message.content && Array.isArray(message.content)) {
-              // Extract text from content array
-              for (const item of message.content) {
-                if (item.type === 'text' && item.text) {
-                  console.log('✅ Extracted text chunk:', item.text.substring(0, 100));
-                  responseText += item.text;
-                }
-              }
-            }
-          }
-          // Cursor CLI sends: {type: 'cursor-output', output: '...'}
-          else if (parsed.type === 'cursor-output' && parsed.output) {
-            console.log('✅ Cursor output:', parsed.output.substring(0, 100));
-            responseText += parsed.output;
-          }
-          // Also handle direct text messages
-          else if (parsed.type === 'text' && parsed.text) {
-            console.log('✅ Direct text:', parsed.text.substring(0, 100));
-            responseText += parsed.text;
-          }
-        } catch (e) {
-          // Ignore parse errors
-          console.error('Error parsing writer data:', e);
-        }
-      },
-      setSessionId: () => {}, // No-op for this use case
-    };
-
-    console.log('🚀 Calling AI agent with provider:', provider);
-    console.log('📝 Prompt length:', prompt.length);
+    // Buffer the run's normalized frames and pull the assistant prose back out.
+    // Providers stream `createNormalizedMessage()` envelopes keyed by `kind`;
+    // assistant text arrives as `kind:'text'` with `role:'assistant'`. The old
+    // inline writer matched the legacy `claude-response`/`cursor-output`/`text`
+    // shapes, which no provider emits anymore — so it collected nothing and this
+    // always returned the fallback. See #96 (same root cause) / #129.
+    const collector = new ResponseCollector();
 
     // Call the appropriate agent
     if (provider === 'claude') {
@@ -1130,20 +1095,18 @@ Generate the commit message:`;
         cwd: projectPath,
         permissionMode: 'bypassPermissions',
         model: 'sonnet'
-      }, writer);
+      }, collector);
     } else if (provider === 'cursor') {
       await spawnCursor(prompt, {
         cwd: projectPath,
         skipPermissions: true
-      }, writer);
+      }, collector);
     }
 
-    console.log('📊 Total response text collected:', responseText.length, 'characters');
-    console.log('📄 Response preview:', responseText.substring(0, 200));
+    const responseText = collector.getAssistantText();
 
     // Clean up the response
     const cleanedMessage = cleanCommitMessage(responseText);
-    console.log('🧹 Cleaned message:', cleanedMessage.substring(0, 200));
 
     return cleanedMessage || 'chore: update files';
   } catch (error) {

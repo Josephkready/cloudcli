@@ -98,6 +98,21 @@ export class ResponseCollector {
   }
 
   /**
+   * Concatenate the assistant prose from the run into a single string.
+   *
+   * Each assistant text part arrives as its own `kind:'text'` frame (the Claude
+   * adapter splits a message's content array into one frame per text block), so
+   * joining their `content` reconstructs the full reply. Handy for callers that
+   * want the raw text rather than the per-frame objects (e.g. AI commit-message
+   * generation). Returns '' when the run produced no assistant text.
+   */
+  getAssistantText() {
+    return this.getAssistantMessages()
+      .map((msg) => (typeof msg.content === 'string' ? msg.content : ''))
+      .join('');
+  }
+
+  /**
    * Calculate total tokens for the run.
    *
    * Usage is reported via `kind:'status'` frames tagged `token_budget`, each
