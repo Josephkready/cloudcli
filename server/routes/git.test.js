@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseGitLogWithStats, parseGitStatusOutput } from './git.js';
+import { cleanCommitMessage, parseGitLogWithStats, parseGitStatusOutput } from './git.js';
 
 // Builds `git status --porcelain=v1 -z` output: NUL-separated entries with a
 // trailing NUL, exactly as git emits it.
@@ -103,4 +103,25 @@ test('parseGitLogWithStats parses commits with parents, refs, and shortstat line
 
 test('parseGitLogWithStats handles empty output', () => {
   assert.deepEqual(parseGitLogWithStats(''), []);
+});
+
+test('cleanCommitMessage returns empty string for empty/whitespace input', () => {
+  assert.equal(cleanCommitMessage(''), '');
+  assert.equal(cleanCommitMessage('   \n  '), '');
+  assert.equal(cleanCommitMessage(null), '');
+});
+
+test('cleanCommitMessage strips code fences and keeps subject + body', () => {
+  const raw = '```\nfeat(api): add endpoint\n\nAdds the thing.\n```';
+  assert.equal(cleanCommitMessage(raw), 'feat(api): add endpoint\n\nAdds the thing.');
+});
+
+test('cleanCommitMessage drops preamble before the conventional-commit line', () => {
+  const raw = 'Here is your commit message:\n\nfix: correct the off-by-one';
+  assert.equal(cleanCommitMessage(raw), 'fix: correct the off-by-one');
+});
+
+test('cleanCommitMessage removes wrapping quotes and markdown headers', () => {
+  assert.equal(cleanCommitMessage('"chore: update deps"'), 'chore: update deps');
+  assert.equal(cleanCommitMessage('# chore: bump version'), 'chore: bump version');
 });

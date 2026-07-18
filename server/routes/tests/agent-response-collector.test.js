@@ -42,6 +42,41 @@ test('getAssistantMessages returns assistant text and ignores everything else', 
   assert.ok(msgs.every((m) => m.kind === 'text' && m.role === 'assistant'));
 });
 
+test('getAssistantText concatenates assistant frames and ignores the rest', () => {
+  const c = new ResponseCollector();
+  c.send(textMsg('user', 'the prompt')); // excluded
+  c.send(textMsg('assistant', 'fix(git): '));
+  c.send({ kind: 'tool_use', toolName: 'Bash', toolId: 't1', provider: 'claude' }); // excluded
+  c.send(textMsg('assistant', 'do the thing'));
+  // The Claude adapter splits one message's content array into a frame per text
+  // block, so joining reconstructs the full reply.
+  assert.equal(c.getAssistantText(), 'fix(git): do the thing');
+});
+
+test('getAssistantText falls back to stream_delta chunks (Cursor live path)', () => {
+  // Cursor's live normalizeMessage emits only kind:'stream_delta' (no terminal
+  // role:'assistant' text frame), so getAssistantText must recover the reply
+  // from the deltas.
+  const c = new ResponseCollector();
+  c.send({ kind: 'stream_delta', content: 'fix(git): ', provider: 'cursor' });
+  c.send({ kind: 'stream_delta', content: 'collect deltas', provider: 'cursor' });
+  assert.equal(c.getAssistantText(), 'fix(git): collect deltas');
+});
+
+test('getAssistantText prefers assistant text frames over stream_delta when both exist', () => {
+  const c = new ResponseCollector();
+  c.send({ kind: 'stream_delta', content: 'partial', provider: 'claude' });
+  c.send(textMsg('assistant', 'final answer'));
+  assert.equal(c.getAssistantText(), 'final answer');
+});
+
+test('getAssistantText returns empty string when the run produced no assistant text', () => {
+  const c = new ResponseCollector();
+  c.send(textMsg('user', 'the prompt'));
+  c.send({ kind: 'thinking', content: 'hmm', provider: 'claude' });
+  assert.equal(c.getAssistantText(), '');
+});
+
 test('getAssistantMessages returns [] when the run produced no assistant text', () => {
   const c = new ResponseCollector();
   c.send({ kind: 'status', text: 'thinking', provider: 'claude' });
