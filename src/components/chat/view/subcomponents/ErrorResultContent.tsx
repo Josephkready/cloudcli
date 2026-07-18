@@ -17,5 +17,5 @@ interface ErrorResultContentProps {
  * overflow horizontally. Color is inherited from the surrounding error box.
  */
 export const ErrorResultContent: React.FC<ErrorResultContentProps> = ({ content }) => (
-  <pre className="whitespace-pre-wrap break-words font-mono text-sm">{content}</pre>
+  <pre className="whitespace-pre-wrap break-words font-mono">{content}</pre>
 );
