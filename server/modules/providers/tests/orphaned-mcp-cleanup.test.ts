@@ -132,3 +132,25 @@ test('idempotent: a second call after a clean pass does no work', async () => {
   assert.equal(callCount, firstCallCount, 'no further removal calls on the second run');
   assert.equal(second.ran, false);
 });
+
+test('never throws when persisting the flag fails; reports incomplete so it retries', async () => {
+  const warnings: string[] = [];
+  const capturingLogger = { log: () => {}, warn: (msg: string) => warnings.push(msg) };
+  const config = {
+    get: () => null,
+    set: () => {
+      throw new Error('SQLITE_IOERR: disk I/O error');
+    },
+  };
+  const mcp = fakeMcpService(() => [{ provider: 'claude' as LLMProvider, removed: true }]);
+
+  // Must not reject even though configStore.set throws (never-throws contract).
+  const result = await pruneOrphanedBrowserMcp({ configStore: config, mcpService: mcp, logger: capturingLogger });
+
+  assert.equal(result.ran, true);
+  assert.equal(result.completed, false, 'flag persistence failed, so it is not complete');
+  assert.equal(result.hadErrors, true);
+  // The removal work still happened and is surfaced.
+  assert.deepEqual(result.removed, ['cloudcli-browser@claude', 'cloudcli-browser-use@claude']);
+  assert.ok(warnings.some((w) => w.includes('persist cleanup flag')), 'should warn about the failed flag write');
+});

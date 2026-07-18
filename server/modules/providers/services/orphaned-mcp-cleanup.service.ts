@@ -82,7 +82,15 @@ export async function pruneOrphanedBrowserMcp(deps: CleanupDeps = {}): Promise<B
 
   // Only record the flag on a clean pass so transient failures retry next boot.
   if (!hadErrors) {
-    configStore.set(BROWSER_MCP_CLEANUP_FLAG, 'true');
+    try {
+      configStore.set(BROWSER_MCP_CLEANUP_FLAG, 'true');
+    } catch (error) {
+      // The cleanup itself already succeeded; only persisting the flag failed.
+      // Swallow it (keeping the never-throws contract) — the next boot simply
+      // re-runs, and removing already-absent entries is a harmless no-op.
+      hadErrors = true;
+      logger.warn(`[MCP cleanup] Could not persist cleanup flag: ${(error as Error)?.message ?? String(error)}`);
+    }
   }
 
   return { ran: true, completed: !hadErrors, removed, hadErrors };
