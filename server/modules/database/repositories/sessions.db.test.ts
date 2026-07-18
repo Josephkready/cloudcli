@@ -91,3 +91,16 @@ test('archiveSessionsOlderThan returns an empty list when nothing qualifies', as
     assert.equal(sessionsDb.getSessionById('recent-1')?.isArchived, 0);
   });
 });
+
+test('archiveSessionsOlderThan excludes a session updated exactly at the cutoff', async () => {
+  await withIsolatedDatabase(async () => {
+    // The comparison is strict (`< cutoff`), so a row whose activity equals the
+    // cutoff instant is not "older than" it and must stay active.
+    seedSession('at-cutoff', { updated: CUTOFF });
+
+    const archived = sessionsDb.archiveSessionsOlderThan(CUTOFF);
+
+    assert.deepEqual(archived, []);
+    assert.equal(sessionsDb.getSessionById('at-cutoff')?.isArchived, 0);
+  });
+});

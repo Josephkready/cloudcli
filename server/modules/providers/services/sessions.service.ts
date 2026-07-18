@@ -305,9 +305,12 @@ export const sessionsService = {
    * Soft-archives every active session that has been idle for more than
    * `olderThanDays` days, in a single pass, and returns how many moved.
    *
-   * Archiving is reversible (rows keep their transcript and metadata), so this
-   * is a safe bulk declutter: the sidebar surfaces the moved sessions in its
-   * archived view where they can be restored or permanently deleted.
+   * Archiving is reversible (rows keep their transcript and metadata) and does
+   * not interrupt a live run, so this is a safe bulk declutter: the sidebar
+   * surfaces the moved sessions in its archived view where they can be restored
+   * or permanently deleted. A still-running session is only eligible if its row
+   * has genuinely gone untouched past the (>= 7 day) cutoff, so we intentionally
+   * do not special-case the in-memory run registry here.
    */
   bulkArchiveSessionsOlderThan(
     olderThanDays: number,

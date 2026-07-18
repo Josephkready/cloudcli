@@ -332,8 +332,11 @@ const parseArchiveByAgeDays = (payload: unknown): number => {
   }
 
   const body = payload as Record<string, unknown>;
-  const days = typeof body.days === 'number' ? body.days : Number(body.days);
-  if (!Number.isFinite(days) || days <= 0) {
+  // Require an actual number — no string/array coercion — so surprising inputs
+  // like `{ days: [7] }` (which `Number()` would quietly coerce to 7) are
+  // rejected rather than silently accepted.
+  const days = body.days;
+  if (typeof days !== 'number' || !Number.isFinite(days) || days <= 0) {
     throw new AppError('days must be a positive number.', {
       code: 'INVALID_ARCHIVE_AGE',
       statusCode: 400,

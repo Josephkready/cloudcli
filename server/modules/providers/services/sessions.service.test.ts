@@ -89,6 +89,15 @@ test('computeArchiveCutoff keeps the time-of-day across a month boundary', () =>
   assert.equal(computeArchiveCutoff(now, 10), '2026-02-23T08:30:00.000Z');
 });
 
+test('computeArchiveCutoff supports fractional days', () => {
+  const now = new Date('2026-07-18T12:00:00.000Z');
+
+  // Fractional ages are a legal input path (neither the route nor the service
+  // rounds `days`), so lock in sub-day arithmetic.
+  assert.equal(computeArchiveCutoff(now, 0.5), '2026-07-18T00:00:00.000Z');
+  assert.equal(computeArchiveCutoff(now, 2.5), '2026-07-16T00:00:00.000Z');
+});
+
 test('bulkArchiveSessionsOlderThan archives only the stale sessions and reports the count', async () => {
   await withIsolatedDatabase(async () => {
     // Years old: comfortably beyond any realistic cutoff.

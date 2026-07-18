@@ -82,7 +82,8 @@ export default function SidebarHeader({
     },
   }));
 
-  // Only offer the declutter action when there are active sessions to archive.
+  // Only offer the declutter action when the sidebar has projects (and thus
+  // potentially archivable sessions); it no-ops harmlessly if none qualify.
   const bulkArchiveMenu = projectsCount > 0 ? (
     <div className="flex justify-end">
       <ActionMenu
