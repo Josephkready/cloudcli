@@ -151,27 +151,57 @@ test('parseMsEnv warns and falls back on a malformed or negative value', () => {
   }
 });
 
-test('startStaleToolApprovalReaper fires the reaper on its interval; stop halts it', async () => {
+test('startStaleToolApprovalReaper fires the reaper on its interval; stop halts it', async (t) => {
+  // Drive the interval with mock timers so the tick is deterministic. The reaper's
+  // setInterval is unref'd (it must not keep the process alive in production), so
+  // under real timers the process can exit before a real tick fires — cancelling
+  // this test and the next as `cancelledByParent` (#135). A mock tick removes the
+  // wall-clock race entirely. Only setInterval is faked; Date stays real so the
+  // reap-window comparison against `_receivedAt` still holds.
+  t.mock.timers.enable({ apis: ['setInterval'] });
   const now = Date.now();
   // 90 min idle — well past the default 45 min reap window used by the timer.
   const pending = waitForToolApproval('reaper-timer-test', {
     metadata: { _receivedAt: new Date(now - 90 * MINUTE), _sessionId: 's-timer', _toolName: 'Bash' },
   });
   try {
-    startStaleToolApprovalReaper(10); // fast interval so the test doesn't wait long
+    startStaleToolApprovalReaper(10);
+    t.mock.timers.tick(10); // one interval elapses → the reaper force-denies the stale approval
     // Resolves to null once an interval tick force-denies the stale approval.
     assert.equal(await pending, null);
+
+    // ...and stop halts it: a fresh stale approval registered after stop survives
+    // further ticks, proving the interval was cleared (no reaper runs post-stop).
+    stopStaleToolApprovalReaper();
+    let survivorSettled = false;
+    const survivor = waitForToolApproval('reaper-timer-survivor', {
+      metadata: { _receivedAt: new Date(now - 90 * MINUTE), _sessionId: 's-timer-2', _toolName: 'Bash' },
+    }).then((d) => {
+      survivorSettled = true;
+      return d;
+    });
+    t.mock.timers.tick(10 * 100); // advance far past many intervals — nothing should fire
+    await Promise.resolve(); // drain microtasks so a stray resolution would be observed
+    assert.equal(survivorSettled, false, 'stop() must halt the reaper — no tick fires after stop');
+    // Clean up the still-pending survivor so it can't leak into the module-global map.
+    resolveToolApproval('reaper-timer-survivor', { approved: true });
+    assert.deepEqual(await survivor, { approved: true });
   } finally {
     stopStaleToolApprovalReaper();
   }
 });
 
-test('startStaleToolApprovalReaper is idempotent and stop is safe when not running', () => {
-  // Starting twice must not throw or spin up a second timer; stopping repeatedly
-  // (including when never started) must be a safe no-op.
-  startStaleToolApprovalReaper(60_000);
-  startStaleToolApprovalReaper(60_000);
-  stopStaleToolApprovalReaper();
-  stopStaleToolApprovalReaper();
-  assert.ok(true);
+test('startStaleToolApprovalReaper is idempotent and stop is safe when not running', (t) => {
+  // Starting twice must not spin up a second timer; stopping repeatedly (including
+  // when never started) must be a safe no-op. Spy on setInterval to assert the
+  // second start is a true no-op rather than just not throwing.
+  const setIntervalSpy = t.mock.method(global, 'setInterval');
+  try {
+    startStaleToolApprovalReaper(60_000);
+    startStaleToolApprovalReaper(60_000);
+    assert.equal(setIntervalSpy.mock.callCount(), 1, 'a second start must not create a second timer');
+  } finally {
+    stopStaleToolApprovalReaper();
+    stopStaleToolApprovalReaper();
+  }
 });
