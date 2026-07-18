@@ -208,8 +208,6 @@ function sendWebPushPayload(userId, payload) {
 const notificationChannels = [
   {
     id: 'webPush',
-    // TODO: Web push still uses push_subscriptions. Do not remove that table until
-    // browser push subscriptions are migrated into notification_channel_endpoints.
     isEnabled: (preferences) => Boolean(preferences?.channels?.webPush),
     send: ({ userId, payload }) => sendWebPushPayload(userId, payload)
   }
