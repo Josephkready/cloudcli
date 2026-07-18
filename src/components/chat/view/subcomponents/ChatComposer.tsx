@@ -76,9 +76,9 @@ interface ChatComposerProps {
   onClearInput: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement> | MouseEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>) => void;
   isDragActive: boolean;
-  queuedDraft: QueuedDraft | null;
-  onEditQueuedDraft: () => void;
-  onDeleteQueuedDraft: () => void;
+  queuedDrafts: QueuedDraft[];
+  onEditQueuedDraft: (index: number) => void;
+  onDeleteQueuedDraft: (index: number) => void;
   attachedImages: File[];
   onRemoveImage: (index: number) => void;
   uploadingImages: Map<string, number>;
@@ -134,7 +134,7 @@ export default function ChatComposer({
   onClearInput,
   onSubmit,
   isDragActive,
-  queuedDraft,
+  queuedDrafts,
   onEditQueuedDraft,
   onDeleteQueuedDraft,
   attachedImages,
@@ -275,18 +275,18 @@ export default function ChatComposer({
   const hasPendingPermissions = pendingPermissionRequests.length > 0;
   const hasActivityIndicator = Boolean(activity && !hasPendingPermissions);
 
-  const hasQueuedDraft = Boolean(queuedDraft);
+  const hasQueuedDraft = queuedDrafts.length > 0;
   const canQueueDraft = isLoading && Boolean(input.trim());
   const submitHint = canQueueDraft
     ? hasQueuedDraft
-      ? t('input.hintText.updateQueued', { defaultValue: 'Enter to update queued message' })
+      ? t('input.hintText.queueAnother', { defaultValue: 'Enter to queue another message' })
       : t('input.hintText.queue', { defaultValue: 'Enter to queue your next message' })
     : sendByCtrlEnter
       ? t('input.hintText.ctrlEnter')
       : t('input.hintText.enter');
   const submitAriaLabel = canQueueDraft
     ? hasQueuedDraft
-      ? t('input.queue.update', { defaultValue: 'Update queued message' })
+      ? t('input.queue.queueAnother', { defaultValue: 'Queue another message' })
       : t('input.queue.sendNext', { defaultValue: 'Queue next message' })
     : isLoading
       ? t('input.stop')
@@ -310,14 +310,15 @@ export default function ChatComposer({
         </div>
       )}
 
-      {queuedDraft && (
+      {queuedDrafts.map((draft, index) => (
         <QueuedMessageCard
-          content={queuedDraft.content}
-          imageCount={queuedDraft.images.length}
-          onEdit={onEditQueuedDraft}
-          onDelete={onDeleteQueuedDraft}
+          key={draft.id}
+          content={draft.content}
+          imageCount={draft.images.length}
+          onEdit={() => onEditQueuedDraft(index)}
+          onDelete={() => onDeleteQueuedDraft(index)}
         />
-      )}
+      ))}
 
       {!hasQuestionPanel && <div className="relative mx-auto max-w-[54.25rem]">
         {showFileDropdown && filteredFiles.length > 0 && (
