@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 import { CodexSessionSynchronizer } from '@/modules/providers/list/codex/codex-session-synchronizer.provider.js';
+import { CodexSessionsProvider } from '@/modules/providers/list/codex/codex-sessions.provider.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
   const original = os.homedir;
@@ -193,6 +194,106 @@ test('Codex synchronizer leaves indexed sessions untitled when no name is availa
       await synchronizer.synchronize();
 
       assert.equal(sessionsDb.getSessionById('codex-indexed-1')?.custom_name, 'Untitled Codex Session');
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Writes a rollout transcript whose single `apply_patch` custom_tool_call touches
+ * `files` and is followed by one shared `custom_tool_call_output`. Mirrors what
+ * the Codex runtime records for a multi-file patch.
+ */
+const writeCodexApplyPatchTranscript = async (
+  homeDir: string,
+  codexSessionId: string,
+  workspacePath: string,
+  files: string[],
+  output: string,
+): Promise<string> => {
+  const sessionsDir = path.join(homeDir, '.codex', 'sessions', '2026', '07', '07');
+  await mkdir(sessionsDir, { recursive: true });
+
+  const patch = [
+    '*** Begin Patch',
+    ...files.flatMap((file) => [
+      `*** Update File: ${file}`,
+      `-const x = 1 // ${file}`,
+      `+const x = 2 // ${file}`,
+    ]),
+    '*** End Patch',
+  ].join('\n');
+
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: codexSessionId, cwd: workspacePath } }),
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-07-07T00:00:01.000Z',
+      payload: { type: 'custom_tool_call', name: 'apply_patch', call_id: 'call-multi', input: patch },
+    }),
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-07-07T00:00:02.000Z',
+      payload: { type: 'custom_tool_call_output', call_id: 'call-multi', output },
+    }),
+  ];
+
+  const filePath = path.join(sessionsDir, `rollout-${codexSessionId}.jsonl`);
+  await writeFile(filePath, `${lines.join('\n')}\n`, 'utf8');
+  return filePath;
+};
+
+// End-to-end wiring for #119/#122 (integration coverage requested in #125): a real
+// multi-file apply_patch rollout must flow through getCodexSessionMessages →
+// parseApplyPatch → normalizeHistoryEntry → attachCodexToolResults and end up as N
+// Edits that share one toolId with the shared result attached to exactly one. The
+// isolated unit tests hand-build NormalizedMessage[], so a wiring break (e.g.
+// call_id failing to propagate into toolId) would slip past them.
+test('multi-file apply_patch history attaches the shared result to exactly one Edit (#125)', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codex-apply-patch-history-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    const output = 'Success. Updated the following files:\nM src/a.ts\nM src/b.ts\nM src/c.ts';
+    await writeCodexApplyPatchTranscript(
+      tempRoot,
+      'codex-apply-patch-1',
+      workspacePath,
+      ['src/a.ts', 'src/b.ts', 'src/c.ts'],
+      output,
+    );
+
+    await withIsolatedDatabase(async () => {
+      const synchronizer = new CodexSessionSynchronizer();
+      await synchronizer.synchronize();
+      // The rollout must be indexed with its jsonl_path, or fetchHistory can't read it.
+      assert.ok(sessionsDb.getSessionById('codex-apply-patch-1')?.jsonl_path, 'session should be indexed');
+
+      const history = await new CodexSessionsProvider().fetchHistory('codex-apply-patch-1');
+      const edits = history.messages.filter((m) => m.kind === 'tool_use' && m.toolName === 'Edit');
+
+      // parseApplyPatch split the one call into one Edit per file, in order.
+      assert.equal(edits.length, 3);
+      assert.deepEqual(
+        edits.map((e) => JSON.parse(String(e.toolInput)).file_path),
+        ['src/a.ts', 'src/b.ts', 'src/c.ts'],
+      );
+
+      // The call_id propagated into every Edit's toolId (the wiring the unit test can't see).
+      assert.deepEqual(new Set(edits.map((e) => e.toolId)), new Set(['call-multi']));
+
+      // The shared custom_tool_call_output attaches to exactly one Edit — the last.
+      const withResult = edits.filter((e) => e.toolResult);
+      assert.equal(withResult.length, 1);
+      assert.equal(withResult[0], edits[2]);
+      assert.equal(edits[2].toolResult?.content, output);
+      assert.equal(edits[2].toolResult?.isError, false);
+      assert.equal(edits[0].toolResult, undefined);
+      assert.equal(edits[1].toolResult, undefined);
     });
   } finally {
     restoreHomeDir();
