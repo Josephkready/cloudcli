@@ -42,7 +42,22 @@ test('a throwing resolver falls back to the app id — the #69 failure mode', ()
   const d = deps(() => {
     throw new ReferenceError('sessionsDb is not defined');
   });
-  assert.equal(resolveResumeSessionId(message(), d), APP_ID);
+  // Capture console.error so the expected caught-error line doesn't leak to the
+  // suite's stderr (where it reads like a real failure and can mask a genuine
+  // one), and assert the fallback is actually logged — not just that it falls
+  // back silently.
+  const errorCalls: unknown[][] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    errorCalls.push(args);
+  };
+  try {
+    assert.equal(resolveResumeSessionId(message(), d), APP_ID);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(errorCalls.length, 1, 'the caught resolver error must be logged once');
+  assert.match(String(errorCalls[0]?.[0]), /Failed to resolve provider session ID/);
 });
 
 test('resolveResumeSessionId returns empty when there is no session to resume', () => {
