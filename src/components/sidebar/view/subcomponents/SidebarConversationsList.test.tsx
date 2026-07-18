@@ -8,7 +8,7 @@ import type { SessionActivity, SessionActivityMap } from '../../../../hooks/useS
 import type { Project } from '../../../../types/app';
 
 // Regression coverage for the delete-gate footgun: a blocked-but-running session
-// ranks as `attention` (not `running`), so gating the archive/delete button on
+// ranks as `blocked` (not `running`), so gating the archive/delete button on
 // the ranking band would expose it for an in-flight session. The button must be
 // gated on the live-run flag instead. These render the real component and assert
 // the button's presence in the static markup.

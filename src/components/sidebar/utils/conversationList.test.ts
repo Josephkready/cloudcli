@@ -70,6 +70,15 @@ test('the currently-open session is never Done (no flash while viewing)', () => 
   assert.equal(isSessionDone(s, 'other'), true);
 });
 
+test('buildConversationList forwards the selected id (selected session ranks Recent, not Done)', () => {
+  // Exercises the integration path resolveStatus -> isSessionDone: a wiring bug
+  // that dropped selectedSessionId would let the open session show Done here.
+  const p = project('p1', [session('s-open', '2026-07-18T03:00:00Z', completed('2026-07-18T03:00:00.000Z'))]);
+
+  assert.equal(buildConversationList([p], new Map(), 's-open')[0].status, 'recent');
+  assert.equal(buildConversationList([p], new Map(), 'other')[0].status, 'done');
+});
+
 test('an active session is Running/Blocked, not Done, despite an old completion', () => {
   const p = project('p1', [session('s', 'x', completed('2026-07-18T01:00:00.000Z'))]);
 
