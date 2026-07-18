@@ -153,6 +153,12 @@ async function buildSessionUpsertedEvent(updatedProviderSessionId: string): Prom
       summary: row.custom_name || '',
       messageCount: 0,
       lastActivity: row.updated_at ?? row.created_at ?? new Date().toISOString(),
+      // Keep in sync with broadcastCanonicalSessionUpsert in
+      // chat-run-registry.service.ts — a session first appearing via this
+      // disk-watcher path must still carry the Done-state timestamps, else it
+      // renders not-Done until the next full /api/projects refresh.
+      last_completed_at: row.last_completed_at,
+      last_viewed_at: row.last_viewed_at,
     },
     project: project
       ? {
