@@ -62,6 +62,7 @@ import notificationRoutes from './modules/notifications/notifications.routes.js'
 import userRoutes from './routes/user.js';
 import pluginsRoutes from './routes/plugins.js';
 import providerRoutes from './modules/providers/provider.routes.js';
+import { pruneOrphanedBrowserMcp } from './modules/providers/services/orphaned-mcp-cleanup.service.js';
 import voiceRoutes from './voice-proxy.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
@@ -1400,6 +1401,12 @@ async function startServer() {
             // Start server-side plugin processes for enabled plugins
             startEnabledPluginServers().catch(err => {
                 console.error('[Plugins] Error during startup:', err.message);
+            });
+
+            // One-time cleanup of the orphaned 'cloudcli-browser' MCP registration
+            // left in provider configs by the removed browser-use feature (#95).
+            pruneOrphanedBrowserMcp().catch(err => {
+                console.error('[MCP cleanup] Error pruning orphaned browser MCP:', err?.message || err);
             });
         });
 
