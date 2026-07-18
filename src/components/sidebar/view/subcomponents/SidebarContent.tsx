@@ -325,6 +325,8 @@ export default function SidebarContent({
               projectListProps.onProjectSelect(project);
               projectListProps.onSessionSelect(session, project.projectId);
             }}
+            onNewConversation={projectListProps.onNewSession}
+            onCreateProject={onCreateProject}
             editingSession={projectListProps.editingSession}
             editingSessionName={projectListProps.editingSessionName}
             onEditingSessionNameChange={projectListProps.onEditingSessionNameChange}

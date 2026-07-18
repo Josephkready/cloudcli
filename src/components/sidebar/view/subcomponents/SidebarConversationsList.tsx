@@ -10,6 +10,8 @@ import { buildConversationList, formatCompactAge, STATUS_ORDER, type Conversatio
 import { getSessionName } from '../../utils/utils';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 
+import SidebarNewConversationButton from './SidebarNewConversationButton';
+
 // Rename + archive/delete handlers, shared with the Projects view's
 // SidebarSessionItem. Threaded through unchanged from useSidebarController so a
 // conversation row archives/renames exactly like a project's session row.
@@ -30,6 +32,10 @@ type SidebarConversationsListProps = SessionRowActions & {
   selectedSession: ProjectSession | null;
   currentTime: Date;
   onSelect: (session: SessionWithProvider, project: Project) => void;
+  // Launches a new conversation in the chosen project (wired to handleNewSession).
+  onNewConversation: (project: Project) => void;
+  // Opens the create-project flow, for starting a conversation in a new folder.
+  onCreateProject: () => void;
   t: TFunction;
 };
 
@@ -278,6 +284,8 @@ export default function SidebarConversationsList({
   selectedSession,
   currentTime,
   onSelect,
+  onNewConversation,
+  onCreateProject,
   editingSession,
   editingSessionName,
   onEditingSessionNameChange,
@@ -303,9 +311,17 @@ export default function SidebarConversationsList({
         <h3 className="mb-2 text-base font-medium text-foreground md:mb-1">
           {t('conversations.emptyTitle', 'No conversations yet')}
         </h3>
-        <p className="text-sm text-muted-foreground">
-          {t('conversations.emptyDescription', 'Start a session from a project and it will appear here.')}
+        <p className="mb-4 text-sm text-muted-foreground md:mb-3">
+          {t('conversations.emptyDescription', 'Start a new conversation and it will appear here.')}
         </p>
+        <div className="flex justify-center">
+          <SidebarNewConversationButton
+            projects={projects}
+            onNewConversation={onNewConversation}
+            onCreateProject={onCreateProject}
+            t={t}
+          />
+        </div>
       </div>
     );
   }
@@ -320,6 +336,14 @@ export default function SidebarConversationsList({
 
   return (
     <div className="space-y-3 px-2 pb-safe-area-inset-bottom">
+      <div className="px-1 pt-1">
+        <SidebarNewConversationButton
+          projects={projects}
+          onNewConversation={onNewConversation}
+          onCreateProject={onCreateProject}
+          t={t}
+        />
+      </div>
       {STATUS_ORDER.map((status) => {
         const sectionItems = itemsByStatus.get(status) ?? [];
         if (sectionItems.length === 0) {
