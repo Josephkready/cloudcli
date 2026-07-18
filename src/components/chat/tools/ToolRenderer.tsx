@@ -318,6 +318,9 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
         showRawParameters={mode === 'input' && showRawParameters}
         rawContent={rawToolInput}
         toolCategory={getToolCategory(toolName)}
+        // Interactive question/answer prompts (AskUserQuestion) should render
+        // in full; everything else is height-capped so it can't dominate the chat.
+        capHeight={displayConfig.contentType !== 'question-answer'}
       >
         {contentComponent}
       </CollapsibleDisplay>

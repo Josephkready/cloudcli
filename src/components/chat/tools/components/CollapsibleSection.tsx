@@ -11,6 +11,10 @@ interface CollapsibleSectionProps {
   onTitleClick?: () => void;
   children: React.ReactNode;
   className?: string;
+  /** Cap the expanded body's height and scroll past it (default true). Set
+   *  false for interactive content (e.g. question/answer prompts) the user
+   *  should see in full without an inner scrollbar. */
+  capHeight?: boolean;
 }
 
 /**
@@ -25,6 +29,7 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   onTitleClick,
   children,
   className = '',
+  capHeight = true,
 }) => {
   return (
     <Collapsible defaultOpen={open} className={cn('group/section', className)}>
@@ -83,7 +88,7 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
             (#58). Renderers with their own tighter cap (TextContent max-h-80,
             Bash max-h-80) scroll first, so this outer bound only binds for
             otherwise-uncapped children. */}
-        <div className="mt-1.5 max-h-[32rem] overflow-y-auto pl-[18px]">
+        <div className={cn('mt-1.5 pl-[18px]', capHeight && 'max-h-[32rem] overflow-y-auto')}>
           {children}
         </div>
       </CollapsibleContent>

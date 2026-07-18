@@ -340,7 +340,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     },
     result: {
       type: 'collapsible',
-      defaultOpen: true,
+      defaultOpen: false,
       title: 'Task list',
       contentType: 'task',
       getContentProps: (result) => ({
@@ -363,7 +363,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     },
     result: {
       type: 'collapsible',
-      defaultOpen: true,
+      defaultOpen: false,
       title: 'Task details',
       contentType: 'task',
       getContentProps: (result) => ({

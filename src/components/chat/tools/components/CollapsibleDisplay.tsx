@@ -15,6 +15,7 @@ interface CollapsibleDisplayProps {
   rawContent?: string;
   className?: string;
   toolCategory?: string;
+  capHeight?: boolean;
 }
 
 const borderColorMap: Record<string, string> = {
@@ -41,6 +42,7 @@ export const CollapsibleDisplay: React.FC<CollapsibleDisplayProps> = ({
   rawContent,
   className = '',
   toolCategory,
+  capHeight = true,
 }) => {
   const borderColor = borderColorMap[toolCategory || 'default'] || borderColorMap.default;
 
@@ -53,6 +55,7 @@ export const CollapsibleDisplay: React.FC<CollapsibleDisplayProps> = ({
         action={action}
         badge={badge}
         onTitleClick={onTitleClick}
+        capHeight={capHeight}
       >
         {children}
 
