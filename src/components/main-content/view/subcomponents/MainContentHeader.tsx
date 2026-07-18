@@ -9,7 +9,6 @@ export default function MainContentHeader({
   setActiveTab,
   selectedProject,
   selectedSession,
-  shouldShowTasksTab,
   isMobile,
   onMenuClick,
 }: MainContentHeaderProps) {
@@ -42,7 +41,6 @@ export default function MainContentHeader({
             activeTab={activeTab}
             selectedProject={selectedProject}
             selectedSession={selectedSession}
-            shouldShowTasksTab={shouldShowTasksTab}
           />
         </div>
 
@@ -58,7 +56,6 @@ export default function MainContentHeader({
             <MainContentTabSwitcher
               activeTab={activeTab}
               setActiveTab={setActiveTab}
-              shouldShowTasksTab={shouldShowTasksTab}
             />
           </div>
           {canScrollRight && (

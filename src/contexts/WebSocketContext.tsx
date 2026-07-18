@@ -33,7 +33,7 @@ type WebSocketContextType = {
   /**
    * Legacy state-based access to the most recent frame.
    *
-   * Kept only for low-frequency consumers (TaskMaster broadcasts). High-rate
+   * Kept only for low-frequency consumers. High-rate
    * chat streams must use `subscribe` — React may batch state updates, which
    * makes `latestMessage` lossy under load.
    */

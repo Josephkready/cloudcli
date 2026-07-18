@@ -51,8 +51,6 @@ import {
 import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
 import cursorRoutes from './routes/cursor.js';
-import taskmasterRoutes from './routes/taskmaster.js';
-import mcpUtilsRoutes from './routes/mcp-utils.js';
 import commandsRoutes from './routes/commands.js';
 import settingsRoutes from './routes/settings.js';
 import agentRoutes from './routes/agent.js';
@@ -181,12 +179,6 @@ app.use('/api/git', authenticateToken, gitRoutes);
 
 // Cursor API Routes (protected)
 app.use('/api/cursor', authenticateToken, cursorRoutes);
-
-// TaskMaster API Routes (protected)
-app.use('/api/taskmaster', authenticateToken, taskmasterRoutes);
-
-// MCP utilities
-app.use('/api/mcp-utils', authenticateToken, mcpUtilsRoutes);
 
 // Commands API Routes (protected)
 app.use('/api/commands', authenticateToken, commandsRoutes);

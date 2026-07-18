@@ -2,7 +2,6 @@ import express from 'express';
 
 import { createProject, updateProjectDisplayName } from '@/modules/projects/services/project-management.service.js';
 import { startCloneProject } from '@/modules/projects/services/project-clone.service.js';
-import { getProjectTaskMaster } from '@/modules/projects/services/projects-has-taskmaster.service.js';
 import { getSessionTokenUsage } from '@/modules/providers/index.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 import { getArchivedProjectsWithSessions, getProjectSessionsPage, getProjectsWithSessions } from '@/modules/projects/services/projects-with-sessions-fetch.service.js';
@@ -237,15 +236,6 @@ router.get('/clone-progress', async (req, res) => {
     }
   }
 });
-
-router.get(
-  '/:projectId/taskmaster',
-  asyncHandler(async (req, res) => {
-    const projectId = typeof req.params.projectId === 'string' ? req.params.projectId : '';
-    const taskMasterDetails = await getProjectTaskMaster(projectId);
-    res.json(taskMasterDetails);
-  }),
-);
 
 router.put('/:projectId/rename', (req, res) => {
   try {

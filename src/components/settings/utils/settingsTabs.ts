@@ -12,7 +12,6 @@ export const KNOWN_MAIN_TABS = [
   'git',
   'api',
   'voice',
-  'tasks',
   'notifications',
   'about',
 ] as const satisfies readonly SettingsMainTab[];

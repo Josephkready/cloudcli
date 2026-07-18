@@ -10,7 +10,6 @@ import CredentialsSettingsTab from '../view/tabs/api-settings/CredentialsSetting
 import VoiceSettingsTab from '../view/tabs/VoiceSettingsTab';
 import GitSettingsTab from '../view/tabs/git-settings/GitSettingsTab';
 import NotificationsSettingsTab from '../view/tabs/NotificationsSettingsTab';
-import TasksSettingsTab from '../view/tabs/tasks-settings/TasksSettingsTab';
 import AboutTab from '../view/tabs/AboutTab';
 import { useSettingsController } from '../hooks/useSettingsController';
 import { useWebPush } from '../../../hooks/useWebPush';
@@ -132,8 +131,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
                   projects={projects}
                 />
               )}
-
-              {activeTab === 'tasks' && <TasksSettingsTab />}
 
               {activeTab === 'notifications' && (
                 <NotificationsSettingsTab

@@ -23,9 +23,6 @@ import enAuth from './locales/en/auth.json';
 import enSidebar from './locales/en/sidebar.json';
 import enChat from './locales/en/chat.json';
 import enCodeEditor from './locales/en/codeEditor.json';
-// eslint-disable-next-line import-x/order
-import enTasks from './locales/en/tasks.json';
-
 // Import supported languages configuration
 import { languages } from './languages.js';
 
@@ -57,7 +54,6 @@ i18n
         sidebar: enSidebar,
         chat: enChat,
         codeEditor: enCodeEditor,
-        tasks: enTasks,
       },
     },
 
@@ -71,7 +67,7 @@ i18n
     debug: false,
 
     // Namespaces - load only what's needed
-    ns: ['common', 'settings', 'auth', 'sidebar', 'chat', 'codeEditor', 'tasks'],
+    ns: ['common', 'settings', 'auth', 'sidebar', 'chat', 'codeEditor'],
     defaultNS: 'common',
 
     // Key separator for nested keys (default: '.')

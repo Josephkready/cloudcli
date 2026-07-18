@@ -15,7 +15,6 @@ const ALL_MAIN_TABS: Record<SettingsMainTab, true> = {
   git: true,
   api: true,
   voice: true,
-  tasks: true,
   notifications: true,
   about: true,
 };

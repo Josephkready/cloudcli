@@ -13,7 +13,7 @@ This is a **private, single-user fork** of [siteboon/claudecodeui](https://githu
 - **Single user, LAN/tailnet-only** web app + iOS PWA — not exposed to the public internet.
 - Runs as a **host `systemd` service** (bare metal, no Docker) on the `dante` host.
 - **Login is disabled** (single-user install); the auth stack is kept buildable as a security fallback, not deleted.
-- **Claude + Codex providers only** — upstream's other providers, the desktop/Electron app, Docker sandboxing, TaskMaster, browser-use, and the marketing/community surface are being removed to lean out the fork (see the `cleanup` / `epic` issues).
+- **Claude + Codex providers only** — upstream's other providers, the desktop/Electron app, Docker sandboxing, browser-use, and the marketing/community surface are being removed to lean out the fork (see the `cleanup` / `epic` issues).
 - **Deployed by `ansible-pull`** from a git checkout: merges to `origin/main` are reconciled onto the host automatically — there is no npm publish and no release cut.
 
 Because of that shape, this fork **intentionally diverges** from upstream. Feature removals are kept as atomic, well-labeled commits so future upstream syncs resolve to a simple "re-delete."
