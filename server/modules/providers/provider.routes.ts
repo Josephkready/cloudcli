@@ -7,6 +7,7 @@ import { providerModelsService } from '@/modules/providers/services/provider-mod
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
 import { sessionConversationsSearchService } from '@/modules/providers/services/session-conversations-search.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
+import { parseArchiveByAgeDays, parseArchiveByAgeDaysQuery } from '@/modules/providers/archive-by-age.parsers.js';
 import type {
   LLMProvider,
   McpScope,
@@ -321,45 +322,6 @@ const parseSessionRenameSummary = (payload: unknown): string => {
   }
 
   return summary;
-};
-
-const parseArchiveByAgeDays = (payload: unknown): number => {
-  if (!payload || typeof payload !== 'object') {
-    throw new AppError('Request body must be an object.', {
-      code: 'INVALID_REQUEST_BODY',
-      statusCode: 400,
-    });
-  }
-
-  const body = payload as Record<string, unknown>;
-  // Require an actual number — no string/array coercion — so surprising inputs
-  // like `{ days: [7] }` (which `Number()` would quietly coerce to 7) are
-  // rejected rather than silently accepted.
-  const days = body.days;
-  if (typeof days !== 'number' || !Number.isFinite(days) || days <= 0) {
-    throw new AppError('days must be a positive number.', {
-      code: 'INVALID_ARCHIVE_AGE',
-      statusCode: 400,
-    });
-  }
-
-  return days;
-};
-
-// Query-string twin of `parseArchiveByAgeDays` for the GET preview endpoint:
-// query params always arrive as strings, so here we parse-then-validate a
-// numeric `?days=` rather than requiring a JSON number.
-const parseArchiveByAgeDaysQuery = (value: unknown): number => {
-  const raw = readOptionalQueryString(value);
-  const days = raw === undefined ? NaN : Number(raw);
-  if (!Number.isFinite(days) || days <= 0) {
-    throw new AppError('days must be a positive number.', {
-      code: 'INVALID_ARCHIVE_AGE',
-      statusCode: 400,
-    });
-  }
-
-  return days;
 };
 
 const parseSessionSearchQuery = (value: unknown): string => {
