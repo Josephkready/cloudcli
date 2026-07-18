@@ -87,15 +87,14 @@ test('formatFileSize: renders TB/PB units instead of "undefined" at large sizes'
   const PB = 1024 ** 5;
   assert.equal(formatFileSize(TB), '1 TB');
   assert.equal(formatFileSize(2 * TB), '2 TB');
+  assert.equal(formatFileSize(1.5 * TB), '1.5 TB'); // trailing-.0 trim still applies at TB scale
   assert.equal(formatFileSize(PB), '1 PB');
 });
 
 // Past the largest defined unit (>= 1 EB) the index is clamped to PB rather
 // than walking off the end of the array into `undefined`.
 test('formatFileSize: clamps sizes beyond the largest unit to PB', () => {
-  const result = formatFileSize(1024 ** 6);
-  assert.ok(result.endsWith(' PB'), `expected a PB value, got "${result}"`);
-  assert.ok(!result.includes('undefined'), `unit went out of range: "${result}"`);
+  assert.equal(formatFileSize(1024 ** 6), '1024 PB');
 });
 
 /* ── isImageFile ─────────────────────────────────────────────────────────── */
