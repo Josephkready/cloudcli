@@ -21,6 +21,7 @@ import { sessionsService } from './modules/providers/services/sessions.service.j
 import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
 import { providerModelsService } from './modules/providers/services/provider-models.service.js';
 import { createCompleteMessage, createNormalizedMessage } from './shared/utils.js';
+import { sendMessage } from './codex-send-message.js';
 
 const activeCodexSessions = new Map();
 
@@ -478,25 +479,6 @@ export function getActiveCodexSessions() {
   }
 
   return sessions;
-}
-
-/**
- * Helper to send message via WebSocket or writer
- * @param {WebSocket|object} ws - WebSocket or response writer
- * @param {object} data - Data to send
- */
-function sendMessage(ws, data) {
-  try {
-    if (ws.isSSEStreamWriter || ws.isWebSocketWriter) {
-      // Writer handles stringification (SSEStreamWriter or WebSocketWriter)
-      ws.send(data);
-    } else if (typeof ws.send === 'function') {
-      // Raw WebSocket - stringify here
-      ws.send(JSON.stringify(data));
-    }
-  } catch (error) {
-    console.error('[Codex] Error sending message:', error);
-  }
 }
 
 // Clean up old completed sessions periodically
