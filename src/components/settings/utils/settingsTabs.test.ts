@@ -17,7 +17,6 @@ const ALL_MAIN_TABS: Record<SettingsMainTab, true> = {
   voice: true,
   tasks: true,
   notifications: true,
-  plugins: true,
   about: true,
 };
 

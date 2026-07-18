@@ -14,7 +14,6 @@ export const KNOWN_MAIN_TABS = [
   'voice',
   'tasks',
   'notifications',
-  'plugins',
   'about',
 ] as const satisfies readonly SettingsMainTab[];
 
