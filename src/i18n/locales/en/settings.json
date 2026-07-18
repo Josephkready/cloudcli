@@ -110,7 +110,6 @@
     "voice": "Voice",
     "tasks": "Tasks",
     "notifications": "Notifications",
-    "plugins": "Plugins",
     "about": "About"
   },
   "notifications": {
@@ -475,95 +474,5 @@
       "title": "About Codex MCP",
       "description": "Codex supports stdio-based MCP servers. You can add servers that extend Codex's capabilities with additional tools and resources."
     }
-  },
-  "pluginSettings": {
-    "title": "Plugins",
-    "description": "Extend the interface with custom plugins. Install from git or drop a folder in ~/.claude-code-ui/plugins/",
-    "installPlaceholder": "https://github.com/user/my-plugin",
-    "installButton": "Install",
-    "installing": "Installing…",
-    "securityWarning": "Only install plugins whose source code you have reviewed or from authors you trust.",
-    "scanningPlugins": "Scanning plugins…",
-    "noPluginsInstalled": "No plugins installed",
-    "pullLatest": "Pull latest from git",
-    "noGitRemote": "No git remote — update not available",
-    "uninstallPlugin": "Uninstall plugin",
-    "confirmUninstall": "Click again to confirm",
-    "confirmUninstallMessage": "Remove {{name}}? This cannot be undone.",
-    "cancel": "Cancel",
-    "remove": "Remove",
-    "updateFailed": "Update failed",
-    "installFailed": "Installation failed",
-    "uninstallFailed": "Uninstall failed",
-    "toggleFailed": "Toggle failed",
-    "starterPluginLabel": "Starter Plugin",
-    "starter": "Starter",
-    "docs": "Docs",
-    "sections": {
-      "officialTitle": "Official Plugins",
-      "officialDescription": "Maintained by the CloudCLI team and ready for direct install.",
-      "unofficialTitle": "Other Plugins",
-      "unofficialDescription": "Unofficial plugins and integrations from other users. Review the source before installing."
-    },
-    "starterPlugin": {
-      "name": "Project Stats",
-      "badge": "starter",
-      "description": "File counts, lines of code, file-type breakdown, and recent activity for your project.",
-      "install": "Install"
-    },
-    "terminalPlugin": {
-      "name": "Terminal",
-      "badge": "official",
-      "description": "Integrated terminal with full shell access directly within the interface.",
-      "install": "Install"
-    },
-    "scheduledPromptPlugin": {
-      "name": "Scheduled Prompts",
-      "badge": "unofficial",
-      "description": "Schedule workspace prompts, review run history, and manage recurring local tasks.",
-      "install": "Install"
-    },
-    "claudeWatchPlugin": {
-      "name": "Claude Watch",
-      "badge": "unofficial",
-      "description": "Watch long-running Claude Code sessions for hangs and expose process controls.",
-      "install": "Install"
-    },
-    "prismCloudCLI": {
-      "name": "PRISM CloudCLI",
-      "badge": "unofficial",
-      "description": "Session intelligence for Claude Code, inside CloudCLI. See why your sessions are burning tokens without leaving the browser.",
-      "install": "Install"
-    },
-    "sessionManagerPlugin": {
-      "name": "Sessions",
-      "badge": "unofficial",
-      "description": "View, manage, and kill active Claude Code sessions.",
-      "install": "Install"
-    },
-    "tokenCostCalculatorPlugin": {
-      "name": "Token Cost Calculator",
-      "badge": "unofficial",
-      "description": "Calculate API costs from model prices and token usage, with preset model pricing support.",
-      "install": "Install"
-    },
-    "taskQueuePlugin": {
-      "name": "Task Queue",
-      "badge": "unofficial",
-      "description": "Task queue dashboard to view, filter, and launch agent tasks.",
-      "install": "Install"
-    },
-    "githubIssuesBoardPlugin": {
-      "name": "GitHub Issues Board",
-      "badge": "unofficial",
-      "description": "Kanban board for GitHub Issues with bidirectional TaskMaster sync and /github-task CLI skill auto-install",
-      "install": "Install"
-    },
-    "morePlugins": "More",
-    "enable": "Enable",
-    "disable": "Disable",
-    "installAriaLabel": "Plugin git repository URL",
-    "tab": "tab",
-    "runningStatus": "running"
   }
 }

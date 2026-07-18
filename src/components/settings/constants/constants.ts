@@ -7,7 +7,6 @@ import {
   KeyRound,
   ListChecks,
   Palette,
-  Plug,
 } from 'lucide-react';
 
 import type {
@@ -33,7 +32,6 @@ export const SETTINGS_MAIN_TABS: SettingsMainTabMeta[] = [
   { id: 'api', label: 'API Tokens', keywords: 'api tokens auth keys', icon: KeyRound },
   { id: 'tasks', label: 'Tasks', keywords: 'tasks taskmaster', icon: ListChecks },
   { id: 'notifications', label: 'Notifications', keywords: 'notifications alerts push', icon: Bell },
-  { id: 'plugins', label: 'Plugins', keywords: 'plugins extensions integrations', icon: Plug },
   { id: 'about', label: 'About', keywords: 'about version info', icon: Info },
 ];
 
