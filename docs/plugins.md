@@ -24,6 +24,11 @@ Restart the host (or reload) — the new tab appears. Plugins are **enabled by
 default**; to disable one without deleting it, set
 `~/.claude-code-ui/plugins.json` → `{ "<name>": { "enabled": false } }`.
 
+The graphical install/marketplace UI has been removed, but the HTTP routes it
+used still exist for agents that prefer a git-based flow over dropping files:
+`POST /api/plugins/install {url}` (git-clone install), `POST /api/plugins/:name/update`,
+`PUT /api/plugins/:name/enable {enabled}`, and `DELETE /api/plugins/:name`.
+
 ## manifest.json
 
 ```json
@@ -64,7 +69,11 @@ export function mount(container, api) {
 
   // react to theme / project / session changes
   const off = api.onContextChange((ctx) => {
-    // ctx = { isDarkMode, selectedProject, selectedSession }
+    // ctx = {
+    //   theme: 'dark' | 'light',
+    //   project: { name, path } | null,   // `name` is the opaque project id
+    //   session: { id, title } | null,
+    // }
   });
 
   // talk to your optional server subprocess (see below)
@@ -81,7 +90,9 @@ export function unmount(container) {  // optional
 
 `api` provides:
 
-- `api.context` — current `{ isDarkMode, selectedProject, selectedSession }`.
+- `api.context` — current `{ theme, project, session }`, where `theme` is
+  `'dark' | 'light'`, `project` is `{ name, path } | null` (`name` is the opaque
+  project id), and `session` is `{ id, title } | null`.
 - `api.onContextChange(cb)` — subscribe to context changes; returns an unsubscribe fn.
 - `api.rpc(method, path, body?)` — call your plugin's server subprocess, proxied
   through `/api/plugins/<name>/rpc/*`. Rejects on non-2xx, resolves the JSON body.
