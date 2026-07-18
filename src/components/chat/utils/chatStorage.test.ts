@@ -47,6 +47,7 @@ test('parse: drops empty, whitespace-only, and malformed entries from an array',
     { notContent: 'nope' },
     null,
     42,
+    ['nested'],
     { content: 'also-keep', options: { a: 1 } },
   ]);
   assert.deepEqual(parseQueuedMessages(raw), [

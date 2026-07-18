@@ -20,6 +20,7 @@ import {
   writeQueuedMessages,
   type QueuedSendOptions,
 } from '../utils/chatStorage';
+import { decideQueueFlush } from '../utils/queueFlush';
 import type {
   ChatMessage,
   PendingPermissionRequest,
@@ -241,7 +242,11 @@ export function useChatComposerState({
   const textareaLineHeightRef = useRef<number | null>(null);
   const lastAutosizedInputRef = useRef<string | null>(null);
   const handleSubmitRef = useRef<
-    ((event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>) => Promise<void>) | null
+    // Resolves to `true` when a run was actually started (a chat.send was
+    // dispatched), `false` otherwise (queued, intercepted as a command, or an
+    // early/failed exit). The queue drain uses this to know whether to wait for
+    // a completion edge or keep draining immediately.
+    ((event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>) => Promise<boolean>) | null
   >(null);
   const inputValueRef = useRef(input);
   const selectedProjectId = selectedProject?.projectId;
@@ -659,7 +664,7 @@ export function useChatComposerState({
       event.preventDefault();
       const currentInput = inputValueRef.current;
       if (!currentInput.trim() || !selectedProject) {
-        return;
+        return false;
       }
 
       // A turn is already in flight: stash this message instead of sending it.
@@ -690,7 +695,7 @@ export function useChatComposerState({
         }
         // selectedProject is guaranteed by the guard at the top of handleSubmit.
         safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
-        return;
+        return false;
       }
 
       // Intercept slash commands only when "/" is the first input character.
@@ -724,7 +729,8 @@ export function useChatComposerState({
           if (textareaRef.current) {
             textareaRef.current.style.height = 'auto';
           }
-          return;
+          // A built-in command runs inline; no chat.send / run started.
+          return false;
         }
       }
 
@@ -758,7 +764,7 @@ export function useChatComposerState({
             content: `Failed to upload images: ${message}`,
             timestamp: new Date(),
           });
-          return;
+          return false;
         }
       }
 
@@ -792,7 +798,7 @@ export function useChatComposerState({
             content: `Failed to start a new session: ${message}`,
             timestamp: new Date(),
           });
-          return;
+          return false;
         }
 
         if (!targetSessionId) {
@@ -801,7 +807,7 @@ export function useChatComposerState({
             content: 'Failed to start a new session: no session id returned.',
             timestamp: new Date(),
           });
-          return;
+          return false;
         }
 
         onSessionEstablished?.(targetSessionId, {
@@ -856,6 +862,8 @@ export function useChatComposerState({
       }
 
       safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
+      // A chat.send was dispatched: a run has started.
+      return true;
     },
     [
       selectedSession,
@@ -886,43 +894,37 @@ export function useChatComposerState({
   // normal submit path (slash commands, image upload, etc. all still apply).
   const wasLoadingRef = useRef(isLoading);
   const flushSessionKeyRef = useRef(sessionKey);
-  // The "is a run actually still live?" probe runs once per session mount; after
-  // that, draining is driven purely by run-completion edges, so we never
-  // dispatch two queued messages into overlapping runs (which the backend would
-  // reject) — one flush per completed turn.
-  const idleProbeDoneRef = useRef(false);
+  // True while a queued item's replay is in flight, so we never dispatch a
+  // second queued message into the same window — the serialization guard that
+  // also covers slow image uploads (which keep `isLoading` false for a while).
+  const flushingRef = useRef(false);
+  // Bumped to re-run the drain when a flushed item started no run (a built-in
+  // command or a failed send), which produces no completion edge of its own.
+  const [drainTick, setDrainTick] = useState(0);
   useEffect(() => {
     const wasLoading = wasLoadingRef.current;
     wasLoadingRef.current = isLoading;
 
-    // A session switch changes which session `isLoading` describes, so this
-    // transition says nothing about the queued draft's own session. Never
-    // flush across it — the swap effect below replaces `queuedDrafts` with the
-    // new session's saved queue right after this.
-    if (flushSessionKeyRef.current !== sessionKey) {
+    // A session switch changes which session `isLoading` describes; the swap
+    // effect below replaces `queuedDrafts` with the new session's saved queue
+    // right after this. Track it so we never flush across the gap.
+    const sessionChanged = flushSessionKeyRef.current !== sessionKey;
+    if (sessionChanged) {
       flushSessionKeyRef.current = sessionKey;
-      idleProbeDoneRef.current = false;
+    }
+
+    const { flush, delayMs } = decideQueueFlush({
+      sessionChanged,
+      isLoading,
+      isFlushing: flushingRef.current,
+      queueLength: queuedDrafts.length,
+      wasLoading,
+    });
+    if (!flush) {
       return;
     }
 
-    if (isLoading || queuedDrafts.length === 0) {
-      return;
-    }
-
-    // Flush at most one message — the head — per idle window. `wasLoading` marks
-    // a run that just completed in this session, so drain the next item
-    // immediately; otherwise this is a restored/idle queue, probed once with a
-    // short hold so a still-live run can flip `isLoading` first (the cleanup
-    // below cancels the send in that case). Subsequent items drain on later
-    // completion edges, keeping sends strictly serialized.
-    const isCompletionEdge = wasLoading;
-    if (!isCompletionEdge && idleProbeDoneRef.current) {
-      return;
-    }
-
-    const delay = isCompletionEdge ? 0 : 750;
     const timer = setTimeout(() => {
-      idleProbeDoneRef.current = true;
       // The persisted queue is the claim ticket shared with the app-level
       // auto-send (which handles sessions that finish while not viewed). Re-read
       // it; if it's been drained elsewhere, just resync the in-memory queue.
@@ -932,30 +934,50 @@ export function useChatComposerState({
         return;
       }
       const head = queuedDrafts[0];
-      // Claim the head by removing it from storage BEFORE sending, so a racing
-      // flusher can't also dispatch it; the tail stays queued for later turns.
+      // Claim the head by removing it from storage BEFORE replaying the send, so
+      // a racing flusher can't also dispatch it; the tail stays queued.
       if (sessionKey) {
         writeQueuedMessages(sessionKey, persisted.slice(1));
       }
+      // Latched before the state updates so any re-render this triggers sees the
+      // flush as in progress and holds the next item.
+      flushingRef.current = true;
       setQueuedDrafts((prev) => prev.slice(1));
       setInput(head.content);
       inputValueRef.current = head.content;
       setAttachedImages(head.images);
+      // Defer a macrotask so the state above commits (and handleSubmit's closure
+      // refreshes with the restored images) before we replay it.
       setTimeout(() => {
-        handleSubmitRef.current?.(createFakeSubmitEvent());
+        void (async () => {
+          let startedRun = false;
+          try {
+            startedRun = (await handleSubmitRef.current?.(createFakeSubmitEvent())) ?? false;
+          } finally {
+            flushingRef.current = false;
+          }
+          // A real send starts a run whose completion edge drains the next item.
+          // An item that starts no run (a built-in command, or a failed send)
+          // produces no such edge — nudge the drain so the tail doesn't stall.
+          if (!startedRun) {
+            setDrainTick((tick) => tick + 1);
+          }
+        })();
       }, 0);
-    }, delay);
+    }, delayMs);
     return () => clearTimeout(timer);
-  }, [isLoading, queuedDrafts, sessionKey, setInput]);
+  }, [isLoading, queuedDrafts, sessionKey, setInput, drainTick]);
 
+  // Addressed by the draft's stable id (not array index) so an edit/delete can't
+  // hit the wrong item if the queue shifts under it (e.g. the head drains).
   const editQueuedDraft = useCallback(
-    (index: number) => {
-      const target = queuedDrafts[index];
+    (id: string) => {
+      const target = queuedDrafts.find((draft) => draft.id === id);
       if (!target) {
         return;
       }
       // Pull the item out of the queue and back into the composer to edit.
-      setQueuedDrafts((prev) => prev.filter((_, i) => i !== index));
+      setQueuedDrafts((prev) => prev.filter((draft) => draft.id !== id));
       setInput(target.content);
       inputValueRef.current = target.content;
       setAttachedImages(target.images);
@@ -964,8 +986,8 @@ export function useChatComposerState({
     [queuedDrafts],
   );
 
-  const deleteQueuedDraft = useCallback((index: number) => {
-    setQueuedDrafts((prev) => prev.filter((_, i) => i !== index));
+  const deleteQueuedDraft = useCallback((id: string) => {
+    setQueuedDrafts((prev) => prev.filter((draft) => draft.id !== id));
   }, []);
 
   // A voice transcript either fills the input (to edit before sending) or, when the

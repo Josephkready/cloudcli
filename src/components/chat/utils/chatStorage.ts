@@ -132,10 +132,6 @@ export function writeQueuedMessages(sessionId: string, messages: StoredQueuedMes
   }
 }
 
-export function clearQueuedMessages(sessionId: string): void {
-  safeLocalStorage.removeItem(queuedMessageKey(sessionId));
-}
-
 export function getClaudeSettings(): ClaudeSettings {
   const raw = safeLocalStorage.getItem(CLAUDE_SETTINGS_KEY);
   if (!raw) {

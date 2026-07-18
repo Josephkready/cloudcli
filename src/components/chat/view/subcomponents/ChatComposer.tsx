@@ -77,8 +77,8 @@ interface ChatComposerProps {
   onSubmit: (event: FormEvent<HTMLFormElement> | MouseEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>) => void;
   isDragActive: boolean;
   queuedDrafts: QueuedDraft[];
-  onEditQueuedDraft: (index: number) => void;
-  onDeleteQueuedDraft: (index: number) => void;
+  onEditQueuedDraft: (id: string) => void;
+  onDeleteQueuedDraft: (id: string) => void;
   attachedImages: File[];
   onRemoveImage: (index: number) => void;
   uploadingImages: Map<string, number>;
@@ -310,13 +310,13 @@ export default function ChatComposer({
         </div>
       )}
 
-      {queuedDrafts.map((draft, index) => (
+      {queuedDrafts.map((draft) => (
         <QueuedMessageCard
           key={draft.id}
           content={draft.content}
           imageCount={draft.images.length}
-          onEdit={() => onEditQueuedDraft(index)}
-          onDelete={() => onDeleteQueuedDraft(index)}
+          onEdit={() => onEditQueuedDraft(draft.id)}
+          onDelete={() => onDeleteQueuedDraft(draft.id)}
         />
       ))}
 
