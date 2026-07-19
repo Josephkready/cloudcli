@@ -136,7 +136,10 @@
     "bulkByAgeConfirm": "Archive all conversations with no activity in the last {{days}} days? You can restore them anytime from the archived view.",
     "bulkByAgeConfirmCount_one": "Archive {{count}} conversation with no activity in the last {{days}} days? You can restore it anytime from the archived view.",
     "bulkByAgeConfirmCount_other": "Archive {{count}} conversations with no activity in the last {{days}} days? You can restore them anytime from the archived view.",
-    "bulkByAgeNoneIdle": "No conversations have been idle for more than {{days}} days."
+    "bulkByAgeNoneIdle": "No conversations have been idle for more than {{days}} days.",
+    "bulkByAgeConfirmAction": "Archive",
+    "bulkByAgeCancelAction": "Cancel",
+    "bulkByAgeDismissAction": "OK"
   },
   "conversations": {
     "blockedHeader": "Blocked",
