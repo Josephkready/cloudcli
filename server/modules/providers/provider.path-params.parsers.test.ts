@@ -84,6 +84,10 @@ test('parseSessionId: rejects reserved dot-only segments (., .., ...)', () => {
   assertRejects(() => parseSessionId('.'), 'INVALID_SESSION_ID');
   assertRejects(() => parseSessionId('..'), 'INVALID_SESSION_ID');
   assertRejects(() => parseSessionId('...'), 'INVALID_SESSION_ID');
+  // The guard is narrow: only *all-dots* ids are reserved. Ids that merely
+  // contain dots — including a leading-dot id — carry non-dot chars and pass.
+  assert.equal(parseSessionId('.hidden'), '.hidden');
+  assert.equal(parseSessionId('a.b'), 'a.b');
 });
 
 test('parseSessionId: rejects a non-string / array path param before pattern-testing', () => {
