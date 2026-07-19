@@ -97,6 +97,25 @@ test('formatFileSize: clamps sizes beyond the largest unit to PB', () => {
   assert.equal(formatFileSize(1024 ** 6), '1024 PB');
 });
 
+// Sub-1-byte fractional inputs have a negative log index; the lower-bound clamp
+// keeps them in the `B` bucket instead of indexing `sizes[-1]` -> "undefined".
+test('formatFileSize: clamps sub-1-byte fractional sizes into the B unit', () => {
+  assert.equal(formatFileSize(0.5), '0.5 B');
+  assert.ok(!formatFileSize(0.5).includes('undefined'));
+  assert.equal(formatFileSize(1), '1 B'); // boundary: rawIndex 0, no clamp needed
+  assert.equal(formatFileSize(0.99), '1 B'); // clamped B branch still trims a trailing .0
+});
+
+// Out-of-domain inputs (negative, NaN, Infinity) can't be salvaged by clamping
+// (Math.log -> NaN, which Math.min/max propagate), so they collapse to '0 B'
+// rather than rendering "NaN undefined" / "Infinity PB".
+test('formatFileSize: returns "0 B" for negative and non-finite inputs', () => {
+  assert.equal(formatFileSize(-5), '0 B');
+  assert.equal(formatFileSize(Number.NaN), '0 B');
+  assert.equal(formatFileSize(Number.POSITIVE_INFINITY), '0 B');
+  assert.equal(formatFileSize(Number.NEGATIVE_INFINITY), '0 B');
+});
+
 /* ── isImageFile ─────────────────────────────────────────────────────────── */
 
 test('isImageFile: true for known image extensions, case-insensitive', () => {
