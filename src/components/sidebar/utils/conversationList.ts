@@ -66,7 +66,7 @@ export function isSessionDone(
   return !viewed || completed > viewed;
 }
 
-function resolveStatus(
+export function resolveStatus(
   session: SessionWithProvider,
   activeSessions: SessionActivityMap,
   selectedSessionId: string | null,

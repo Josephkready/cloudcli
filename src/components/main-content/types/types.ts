@@ -28,6 +28,10 @@ export type MainContentProps = {
   onShowSettings: (tab?: SettingsMainTab) => void;
   externalMessageUpdate: number;
   newSessionTrigger: number;
+  // Switch to a session in the active space (the per-space session tab bar).
+  onSessionSelect: (session: ProjectSession) => void;
+  // Start a fresh session in the given space (the tab bar's ＋ affordance).
+  onNewSession: (project: Project) => void;
 };
 
 export type MainContentHeaderProps = {
@@ -37,6 +41,9 @@ export type MainContentHeaderProps = {
   selectedSession: ProjectSession | null;
   isMobile: boolean;
   onMenuClick: () => void;
+  processingSessions: SessionActivityMap;
+  onSessionSelect: (session: ProjectSession) => void;
+  onNewSession: (project: Project) => void;
 };
 
 export type MainContentStateViewProps = {

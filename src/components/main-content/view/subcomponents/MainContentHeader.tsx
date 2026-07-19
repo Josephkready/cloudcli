@@ -1,8 +1,11 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
+
 import type { MainContentHeaderProps } from '../../types/types';
+
 import MobileMenuButton from './MobileMenuButton';
 import MainContentTabSwitcher from './MainContentTabSwitcher';
 import MainContentTitle from './MainContentTitle';
+import MainContentSessionTabs from './MainContentSessionTabs';
 
 export default function MainContentHeader({
   activeTab,
@@ -11,6 +14,9 @@ export default function MainContentHeader({
   selectedSession,
   isMobile,
   onMenuClick,
+  processingSessions,
+  onSessionSelect,
+  onNewSession,
 }: MainContentHeaderProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -63,6 +69,16 @@ export default function MainContentHeader({
           )}
         </div>
       </div>
+
+      {/* Per-space "open sessions" tab bar (renders nothing when the space has
+          no sessions). */}
+      <MainContentSessionTabs
+        selectedProject={selectedProject}
+        selectedSession={selectedSession}
+        processingSessions={processingSessions}
+        onSessionSelect={onSessionSelect}
+        onNewSession={onNewSession}
+      />
     </div>
   );
 }

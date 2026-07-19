@@ -35,6 +35,8 @@ function MainContent({
   onShowSettings,
   externalMessageUpdate,
   newSessionTrigger,
+  onSessionSelect,
+  onNewSession,
 }: MainContentProps) {
   const { preferences } = useUiPreferences();
   const { showRawParameters, showThinking, sendByCtrlEnter } = preferences;
@@ -86,6 +88,9 @@ function MainContent({
         selectedSession={selectedSession}
         isMobile={isMobile}
         onMenuClick={onMenuClick}
+        processingSessions={processingSessions}
+        onSessionSelect={onSessionSelect}
+        onNewSession={onNewSession}
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">

@@ -12,6 +12,7 @@
     "all": "All",
     "untitledSession": "Untitled Session",
     "newSession": "New Session",
+    "newSessionInSpace": "New session in this space",
     "codexSession": "Codex Session",
     "fetchingProjects": "Fetching your Claude projects and sessions",
     "projects": "projects",
