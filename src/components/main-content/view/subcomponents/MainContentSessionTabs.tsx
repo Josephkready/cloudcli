@@ -52,8 +52,14 @@ export default function MainContentSessionTabs({
     const el = scrollRef.current;
     if (!el) return;
     updateScrollState();
+    // Observe both the scroll viewport and the inner pill row: the viewport's
+    // own box rarely changes, but the pill row's width does (pills added/removed
+    // or a title widening), which is what actually shifts the scroll fades.
     const observer = new ResizeObserver(updateScrollState);
     observer.observe(el);
+    if (el.firstElementChild) {
+      observer.observe(el.firstElementChild);
+    }
     return () => observer.disconnect();
   }, [updateScrollState, tabs.length]);
 

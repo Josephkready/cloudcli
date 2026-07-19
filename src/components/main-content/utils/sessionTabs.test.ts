@@ -57,9 +57,10 @@ test('with no selection, nothing is active', () => {
   assert.equal(tabs.every((t) => !t.isActive), true);
 });
 
-test('status-dot map: running/blocked/done get a color, recent gets none', () => {
-  assert.ok(SESSION_TAB_STATUS_DOT.running);
-  assert.ok(SESSION_TAB_STATUS_DOT.blocked);
-  assert.ok(SESSION_TAB_STATUS_DOT.done);
+test('status-dot map: each status maps to its own distinct color, recent gets none', () => {
+  // Exact values (not just truthiness) so a color swap between statuses fails.
+  assert.equal(SESSION_TAB_STATUS_DOT.blocked, 'bg-amber-500');
+  assert.equal(SESSION_TAB_STATUS_DOT.running, 'bg-emerald-500');
+  assert.equal(SESSION_TAB_STATUS_DOT.done, 'bg-sky-500');
   assert.equal(SESSION_TAB_STATUS_DOT.recent, null);
 });
