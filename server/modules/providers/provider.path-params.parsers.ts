@@ -42,19 +42,28 @@ export const normalizeProviderParam = (value: unknown): string =>
 
 /**
  * Allowed shape of a session id: 1–120 chars of `[A-Za-z0-9._-]`. Deliberately
- * excludes path separators, `..`, and whitespace so a user-supplied id can't be
- * used for path traversal downstream.
+ * excludes path separators and whitespace so a user-supplied id can't be used
+ * for path traversal downstream.
  */
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,120}$/;
 
 /**
+ * Reserved dot-only names. `.` is an allow-list character (needed for ids like
+ * `v2.0`), so bare `.` / `..` (and any all-dots id) slip past
+ * `SESSION_ID_PATTERN`. On their own they can't traverse — `/` is rejected — but
+ * a lone `..` used as a single path segment downstream (`path.join(base, id)`)
+ * would resolve to `base`'s parent, so reject them defensively here.
+ */
+const RESERVED_DOT_ONLY_ID = /^\.+$/;
+
+/**
  * Parse and validate a `:sessionId` path param against `SESSION_ID_PATTERN`.
- * Trims first, then rejects empty, over-length (>120), or
- * traversal/whitespace-bearing ids with a 400.
+ * Trims first, then rejects empty, over-length (>120), reserved dot-only names
+ * (`.`, `..`), or traversal/whitespace-bearing ids with a 400.
  */
 export const parseSessionId = (value: unknown): string => {
   const sessionId = readPathParam(value, 'sessionId').trim();
-  if (!SESSION_ID_PATTERN.test(sessionId)) {
+  if (!SESSION_ID_PATTERN.test(sessionId) || RESERVED_DOT_ONLY_ID.test(sessionId)) {
     throw new AppError('Invalid sessionId.', {
       code: 'INVALID_SESSION_ID',
       statusCode: 400,

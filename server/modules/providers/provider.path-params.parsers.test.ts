@@ -76,13 +76,18 @@ test('parseSessionId: rejects separator, whitespace, and NUL characters', () => 
   assertRejects(() => parseSessionId('a\0b'), 'INVALID_SESSION_ID'); // NUL byte
 });
 
-// Pins CURRENT behavior: `.` is an allow-list character, so a bare `.` / `..`
-// (with no separator) passes the pattern and is returned verbatim. These can't
-// traverse on their own since `/` is rejected, but a lone `..` used as a single
-// path segment downstream would resolve to the parent — see follow-up issue.
-test('parseSessionId: currently accepts bare dot segments (documents the gap)', () => {
-  assert.equal(parseSessionId('.'), '.');
-  assert.equal(parseSessionId('..'), '..');
+// `.` is an allow-list character, so bare `.` / `..` (and any all-dots id) pass
+// the pattern — but they're reserved filesystem names. A lone `..` used as a
+// single path segment downstream would resolve to the parent, so they're
+// rejected explicitly. See issue #181.
+test('parseSessionId: rejects reserved dot-only segments (., .., ...)', () => {
+  assertRejects(() => parseSessionId('.'), 'INVALID_SESSION_ID');
+  assertRejects(() => parseSessionId('..'), 'INVALID_SESSION_ID');
+  assertRejects(() => parseSessionId('...'), 'INVALID_SESSION_ID');
+  // The guard is narrow: only *all-dots* ids are reserved. Ids that merely
+  // contain dots — including a leading-dot id — carry non-dot chars and pass.
+  assert.equal(parseSessionId('.hidden'), '.hidden');
+  assert.equal(parseSessionId('a.b'), 'a.b');
 });
 
 test('parseSessionId: rejects a non-string / array path param before pattern-testing', () => {
