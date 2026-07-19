@@ -481,8 +481,8 @@ export function getActiveCodexSessions() {
   return sessions;
 }
 
-// Clean up old completed sessions periodically
-setInterval(() => {
+// Clean up old completed sessions periodically.
+const codexSessionCleanupTimer = setInterval(() => {
   const now = Date.now();
   const maxAge = 30 * 60 * 1000; // 30 minutes
 
@@ -495,3 +495,8 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000); // Every 5 minutes
+
+// This is best-effort housekeeping — never let it hold the event loop open (it
+// would otherwise keep the process, or any test run importing this module,
+// alive indefinitely). See #127.
+codexSessionCleanupTimer.unref();

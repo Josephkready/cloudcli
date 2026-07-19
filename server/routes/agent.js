@@ -15,6 +15,7 @@ import { providerModelsService } from '../modules/providers/services/provider-mo
 import { IS_PLATFORM } from '../constants/config.js';
 import { normalizeProjectPath } from '../shared/utils.js';
 import { ResponseCollector } from './response-collector.js';
+import { runMockAgentProvider } from './mock-agent-provider.js';
 
 const router = express.Router();
 
@@ -772,7 +773,15 @@ router.post('/', validateExternalApiKey, async (req, res) => {
     return res.status(400).json({ error: 'message is required' });
   }
 
-  if (!['claude', 'cursor', 'codex', 'opencode'].includes(provider)) {
+  // The env-gated in-process `mock` provider is a test-only affordance (see
+  // mock-agent-provider.js); it is only a valid provider when explicitly enabled
+  // and is otherwise rejected like any unknown provider.
+  const mockProviderEnabled = process.env.AGENT_MOCK_PROVIDER === 'true';
+  const allowedProviders = ['claude', 'cursor', 'codex', 'opencode'];
+  if (mockProviderEnabled) {
+    allowedProviders.push('mock');
+  }
+  if (!allowedProviders.includes(provider)) {
     return res.status(400).json({ error: 'provider must be "claude", "cursor", "codex", or "opencode"' });
   }
 
@@ -898,6 +907,18 @@ router.post('/', validateExternalApiKey, async (req, res) => {
         model: model || opencodeModels.DEFAULT,
         effort,
         permissionMode: 'bypassPermissions' // Agent runs are non-interactive, like the other providers above
+      }, writer);
+    } else if (provider === 'mock') {
+      // Env-gated deterministic provider for integration tests. Reachable only
+      // when AGENT_MOCK_PROVIDER=true (enforced by the validation above).
+      console.log('🧪 Starting mock provider session (AGENT_MOCK_PROVIDER)');
+
+      await runMockAgentProvider(message.trim(), {
+        projectPath: finalProjectPath,
+        cwd: finalProjectPath,
+        sessionId: sessionId || null,
+        model,
+        effort,
       }, writer);
     }
 
