@@ -146,37 +146,52 @@ async function driveSingleRun(
   message: QueuedChatMessage,
   dependencies: ChatWebSocketDependencies
 ): Promise<void> {
-  const session = sessionsDb.getSessionById(sessionId);
-  const spawnFn = dependencies.spawnFns[run.provider];
-  if (!session || !spawnFn) {
-    // Session vanished mid-queue or provider unavailable: end the run cleanly
-    // rather than spawning against a missing session.
-    chatRunRegistry.completeRunIfCurrent(run, { exitCode: 1 });
-    return;
-  }
-
-  const clientOptions = message.options;
-
-  // The provider runtimes receive the provider-native session id (that is the
-  // id their CLI/SDK understands for resume). Brand-new sessions have no
-  // provider id yet, so the runtime starts fresh and announces one, which the
-  // gateway writer captures and maps back to the app session id.
-  const runtimeOptions: AnyRecord = {
-    ...clientOptions,
-    // Image attachments are re-validated server-side: only files inside the
-    // global upload store may reach the provider runtimes' file reads.
-    images: filterImagesToUploadStore(clientOptions.images),
-    sessionId: session.provider_session_id ?? undefined,
-    resume: Boolean(session.provider_session_id),
-    cwd: clientOptions.cwd ?? session.project_path ?? undefined,
-    projectPath: session.project_path ?? clientOptions.projectPath,
-  };
-
+  // Everything is wrapped so this function NEVER throws: the `finally` always
+  // emits the run's terminal `complete`, and the outer `catch` swallows any
+  // pre-spawn failure (a DB read, image validation) so the dispatcher loop is
+  // never torn down with the session still marked as running/dispatching.
   try {
-    await spawnFn(message.content, runtimeOptions, run.writer);
+    const session = sessionsDb.getSessionById(sessionId);
+    const spawnFn = dependencies.spawnFns[run.provider];
+    if (!session || !spawnFn) {
+      // Session vanished mid-queue or provider unavailable: end the run cleanly
+      // rather than spawning against a missing session.
+      console.warn('[Chat] Skipping run: session or provider unavailable', {
+        sessionId,
+        provider: run.provider,
+        hasSession: Boolean(session),
+      });
+      return;
+    }
+
+    const clientOptions = message.options;
+
+    // The provider runtimes receive the provider-native session id (that is the
+    // id their CLI/SDK understands for resume). Brand-new sessions have no
+    // provider id yet, so the runtime starts fresh and announces one, which the
+    // gateway writer captures and maps back to the app session id.
+    const runtimeOptions: AnyRecord = {
+      ...clientOptions,
+      // Image attachments are re-validated server-side: only files inside the
+      // global upload store may reach the provider runtimes' file reads.
+      images: filterImagesToUploadStore(clientOptions.images),
+      sessionId: session.provider_session_id ?? undefined,
+      resume: Boolean(session.provider_session_id),
+      cwd: clientOptions.cwd ?? session.project_path ?? undefined,
+      projectPath: session.project_path ?? clientOptions.projectPath,
+    };
+
+    try {
+      await spawnFn(message.content, runtimeOptions, run.writer);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[Chat] Provider runtime "${run.provider}" failed`, { sessionId, error: errorMessage });
+    }
   } catch (error) {
+    // Non-spawn failure (session lookup, image validation): log and fall through
+    // to the finally, which still completes the run so no client is left stuck.
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`[Chat] Provider runtime "${run.provider}" failed`, { sessionId, error: errorMessage });
+    console.error('[Chat] Failed to dispatch run', { sessionId, provider: run.provider, error: errorMessage });
   } finally {
     // Safety net: a runtime that crashed (or resolved) without emitting its
     // terminal `complete` would otherwise leave the session stuck in
@@ -207,33 +222,52 @@ async function driveRunAndDrain(
   let run = firstRun;
   let message = firstMessage;
 
-  for (;;) {
-    await driveSingleRun(sessionId, run, message, dependencies);
+  try {
+    for (;;) {
+      await driveSingleRun(sessionId, run, message, dependencies);
 
-    const next = chatRunRegistry.takeNextQueued(sessionId);
-    if (!next) {
-      // Queue empty; the dispatcher role was released inside takeNextQueued.
-      return;
-    }
-
-    const session = sessionsDb.getSessionById(sessionId);
-    if (!session) {
-      // Session was deleted while messages were queued: there is no valid
-      // target left, so discard the remainder and release the dispatcher.
-      while (chatRunRegistry.takeNextQueued(sessionId)) {
-        // drain
+      const next = chatRunRegistry.takeNextQueued(sessionId);
+      if (!next) {
+        // Queue empty; the dispatcher role was released inside takeNextQueued.
+        return;
       }
-      return;
-    }
 
-    run = chatRunRegistry.startDispatchedRun({
-      appSessionId: sessionId,
-      provider: session.provider as LLMProvider,
-      providerSessionId: session.provider_session_id,
-      connection: next.connection,
-      userId: next.userId,
+      const session = sessionsDb.getSessionById(sessionId);
+      if (!session) {
+        // Session was deleted while messages were queued: there is no valid
+        // target left. Discard the dequeued message plus the remainder and
+        // release the dispatcher so a future send for a recreated session can
+        // start fresh instead of being absorbed into an orphaned queue.
+        const discarded = chatRunRegistry.releaseDispatcher(sessionId) + 1;
+        console.warn('[Chat] Session no longer exists; discarding queued messages', {
+          sessionId,
+          discarded,
+        });
+        return;
+      }
+
+      run = chatRunRegistry.startDispatchedRun({
+        appSessionId: sessionId,
+        provider: session.provider as LLMProvider,
+        providerSessionId: session.provider_session_id,
+        connection: next.connection,
+        userId: next.userId,
+      });
+      message = next;
+    }
+  } catch (error) {
+    // driveSingleRun never throws, so this only fires on an unexpected failure
+    // between runs (e.g. a DB error resolving the next session row). Never leave
+    // the session wedged: complete any in-flight run and force-release the
+    // dispatcher so the next send can start a clean run.
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const discarded = chatRunRegistry.releaseDispatcher(sessionId);
+    chatRunRegistry.completeRun(sessionId, { exitCode: 1 });
+    console.error('[Chat] Dispatch loop failed; released session dispatcher', {
+      sessionId,
+      discarded,
+      error: errorMessage,
     });
-    message = next;
   }
 }
 
@@ -294,8 +328,13 @@ async function handleChatSend(
   );
 
   if (result.action === 'rejected') {
-    // Only reached under a pathological backlog; surfaced visibly (never a
-    // silent drop) so the client can keep the message and retry later.
+    // Only reached under a pathological backlog (a stuck run or a flooding
+    // client). Surfaced visibly (never a silent drop) so the client can keep
+    // the message and retry, and logged for operator visibility.
+    console.warn('[Chat] Queue full; rejecting send', {
+      sessionId,
+      pending: chatRunRegistry.getPendingCount(sessionId),
+    });
     sendProtocolError(
       ws,
       'QUEUE_FULL',
@@ -451,6 +490,11 @@ function handlePermissionResponse(data: AnyRecord, dependencies: ChatWebSocketDe
  * - `chat.abort`               { sessionId }
  * - `chat.subscribe`           { sessions: [{ sessionId, lastSeq? }] }
  * - `chat.permission-response` { requestId, allow, updatedInput?, message?, rememberEntry? }
+ *
+ * A `chat.send` that arrives while the session already has a run in progress is
+ * appended to a server-side FIFO queue and dispatched in order once the current
+ * run finishes — it is NOT rejected. A `QUEUE_FULL` protocol_error is only
+ * emitted when that queue exceeds its per-session cap (pathological backlog).
  *
  * Outbound protocol (server to client): every frame is `kind`-based — either
  * a provider `NormalizedMessage` (with `seq`) or a gateway event

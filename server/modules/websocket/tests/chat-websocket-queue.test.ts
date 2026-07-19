@@ -257,3 +257,121 @@ test('a follow-up sent after the previous run fully completed starts a fresh run
     assert.equal(socket.protocolErrors().length, 0);
   });
 });
+
+test('a send in the mid-handoff window (run completed, dispatcher not yet released) queues instead of starting a second run', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('handoff-session', 'claude', '/workspace/demo');
+    const { spawn, calls } = makeControllableSpawn();
+    const dependencies = makeDependencies(spawn);
+
+    const socket = new FakeSocket();
+    connect(socket, dependencies);
+
+    sendChat(socket, 'handoff-session', 'head');
+    await settle();
+    assert.equal(calls.length, 1);
+
+    // Emit the head run's terminal `complete` WITHOUT resolving its runtime
+    // promise: run.status flips to 'completed' but the dispatcher — still
+    // awaiting spawnFn — has not yet released its role. This is the exact race
+    // window `dispatchingSessions` was added to close, reproduced through the
+    // real handler path (not the registry primitive).
+    (calls[0] as SpawnCall).writer.send({ kind: 'complete', provider: 'claude', sessionId: 'native', exitCode: 0 });
+    await settle();
+    assert.equal(chatRunRegistry.isProcessing('handoff-session'), false, 'head run is completed');
+    assert.equal(chatRunRegistry.isDispatching('handoff-session'), true, 'dispatcher still held');
+
+    // A send in this gap must QUEUE (a second dispatcher/run here would be the
+    // bug), so no new spawn happens yet.
+    sendChat(socket, 'handoff-session', 'racer');
+    await settle();
+    assert.equal(calls.length, 1, 'no second run started in the handoff gap');
+    assert.equal(chatRunRegistry.getPendingCount('handoff-session'), 1);
+
+    // Let the head run's promise resolve; the queued racer is dispatched next.
+    (calls[0] as SpawnCall).resolve();
+    await settle();
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1]?.command, 'racer');
+
+    finishRun(calls[1] as SpawnCall);
+    await settle();
+    assert.equal(chatRunRegistry.isProcessing('handoff-session'), false);
+    assert.equal(chatRunRegistry.isDispatching('handoff-session'), false);
+    assert.equal(socket.protocolErrors().length, 0);
+  });
+});
+
+test('a send past the per-session queue cap is rejected with a visible QUEUE_FULL protocol_error', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('cap-session', 'claude', '/workspace/demo');
+    const { spawn, calls } = makeControllableSpawn();
+    const dependencies = makeDependencies(spawn);
+
+    const socket = new FakeSocket();
+    connect(socket, dependencies);
+
+    const CAP = 50; // MAX_PENDING_MESSAGES_PER_SESSION in the registry.
+    // One head run plus CAP queued fills the queue exactly to capacity.
+    for (let i = 0; i < CAP + 1; i += 1) {
+      sendChat(socket, 'cap-session', `m${i}`);
+    }
+    await settle();
+
+    assert.equal(calls.length, 1, 'only the head run started');
+    assert.equal(chatRunRegistry.getPendingCount('cap-session'), CAP);
+    assert.equal(socket.protocolErrors().length, 0, 'nothing rejected while under cap');
+
+    // One more overflows the cap: surfaced VISIBLY as QUEUE_FULL, never dropped.
+    sendChat(socket, 'cap-session', 'overflow');
+    await settle();
+
+    const queueFull = socket.protocolErrors().filter((frame) => frame.code === 'QUEUE_FULL');
+    assert.equal(queueFull.length, 1);
+    assert.equal(queueFull[0]?.sessionId, 'cap-session');
+    assert.equal(chatRunRegistry.getPendingCount('cap-session'), CAP, 'cap is not exceeded');
+
+    // Drain every accepted run so nothing is left dangling.
+    let index = 0;
+    while (chatRunRegistry.isProcessing('cap-session')) {
+      finishRun(calls[index] as SpawnCall);
+      index += 1;
+      await settle(2);
+    }
+
+    // Head + CAP queued all ran; the overflow message never spawned a run.
+    assert.equal(calls.length, CAP + 1);
+    assert.equal(chatRunRegistry.isDispatching('cap-session'), false);
+  });
+});
+
+test('deleting a session mid-queue discards the remaining messages and releases the dispatcher (no throw, no phantom run)', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('gone-session', 'claude', '/workspace/demo');
+    const { spawn, calls } = makeControllableSpawn();
+    const dependencies = makeDependencies(spawn);
+
+    const socket = new FakeSocket();
+    connect(socket, dependencies);
+
+    sendChat(socket, 'gone-session', 'head');
+    sendChat(socket, 'gone-session', 'queued-1');
+    sendChat(socket, 'gone-session', 'queued-2');
+    await settle();
+    assert.equal(calls.length, 1);
+    assert.equal(chatRunRegistry.getPendingCount('gone-session'), 2);
+
+    // The session row is deleted while the head run is still in flight.
+    assert.equal(sessionsDb.deleteSessionById('gone-session'), true);
+
+    // Finishing the head run drives the dispatcher to the next message, finds no
+    // session row, and discards the remainder rather than throwing or spawning.
+    finishRun(calls[0] as SpawnCall);
+    await settle();
+
+    assert.equal(calls.length, 1, 'no run spawned against the deleted session');
+    assert.equal(chatRunRegistry.getPendingCount('gone-session'), 0);
+    assert.equal(chatRunRegistry.isProcessing('gone-session'), false);
+    assert.equal(chatRunRegistry.isDispatching('gone-session'), false);
+  });
+});

@@ -362,14 +362,17 @@ function createAndRegisterRun(input: StartRunInput): ChatRun {
  */
 export const chatRunRegistry = {
   /**
-   * Starts tracking a run and returns it, or `null` when a run is already in
-   * progress for the session. Retained for the abort/subscribe paths and tests;
-   * the chat.send path goes through `submitMessage` so concurrent sends queue
-   * (FIFO) instead of being rejected.
+   * Starts tracking a run and returns it, or `null` when the session already
+   * has a run in progress OR an active dispatcher draining its queue. The
+   * production chat.send path goes through `submitMessage` (which additionally
+   * queues rather than rejecting); `startRun` remains as a thin, dispatcher-safe
+   * primitive for tests. The dispatcher check matters so that even a direct
+   * caller cannot start a second run during the gap between one run completing
+   * and the dispatcher pulling the next queued message.
    */
   startRun(input: StartRunInput): ChatRun | null {
     const existing = runs.get(input.appSessionId);
-    if (existing && existing.status === 'running') {
+    if ((existing && existing.status === 'running') || dispatchingSessions.has(input.appSessionId)) {
       return null;
     }
 
@@ -444,6 +447,22 @@ export const chatRunRegistry = {
    */
   startDispatchedRun(input: StartRunInput): ChatRun {
     return createAndRegisterRun(input);
+  },
+
+  /**
+   * Forcibly releases the dispatcher role and drops any still-queued messages
+   * for a session. Reserved for the two abnormal exits the dispatcher loop can
+   * hit — an unexpected error mid-drain, or a session deleted out from under a
+   * queue — where leaving the session marked as dispatching would wedge it (all
+   * future sends absorbed into a queue nobody drains). Returns the number of
+   * pending messages discarded, for logging. Normal draining uses
+   * `takeNextQueued`, which releases the role on its own when the queue empties.
+   */
+  releaseDispatcher(appSessionId: string): number {
+    const discarded = pendingQueues.get(appSessionId)?.length ?? 0;
+    pendingQueues.delete(appSessionId);
+    dispatchingSessions.delete(appSessionId);
+    return discarded;
   },
 
   /** Number of messages waiting in a session's server-side FIFO queue. */
