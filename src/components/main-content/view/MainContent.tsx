@@ -19,6 +19,7 @@ import ErrorBoundary from './ErrorBoundary';
 function MainContent({
   selectedProject,
   selectedSession,
+  onRenameSession,
   activeTab,
   setActiveTab,
   ws,
@@ -91,6 +92,7 @@ function MainContent({
         processingSessions={processingSessions}
         onSessionSelect={onSessionSelect}
         onNewSession={onNewSession}
+        onRenameSession={onRenameSession}
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">

@@ -692,8 +692,13 @@ export function useProjectsState({
       if (match) {
         const normalizedSession = normalizeSessionProvider(match);
         const shouldUpdateProject = selectedProject?.projectId !== project.projectId;
+        // Also refresh when the summary changes so a rename (from the chat header,
+        // the sidebar, or an AI-authored title) reaches the selected session — the
+        // header reads `selectedSession.summary`, not the raw projects payload.
         const shouldUpdateSession =
-          selectedSession?.id !== sessionId || selectedSession.__provider !== normalizedSession.__provider;
+          selectedSession?.id !== sessionId ||
+          selectedSession.__provider !== normalizedSession.__provider ||
+          selectedSession.summary !== normalizedSession.summary;
 
         if (shouldUpdateProject) {
           setSelectedProject(project);
@@ -729,7 +734,7 @@ export function useProjectsState({
       __projectId: selectedProject.projectId,
       summary: '',
     });
-  }, [sessionId, projects, selectedProject, selectedSession?.id, selectedSession?.__provider]);
+  }, [sessionId, projects, selectedProject, selectedSession?.id, selectedSession?.__provider, selectedSession?.summary]);
 
   const handleProjectSelect = useCallback(
     (project: Project) => {

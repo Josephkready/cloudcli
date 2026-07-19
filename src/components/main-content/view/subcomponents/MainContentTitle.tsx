@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
@@ -8,6 +9,7 @@ type MainContentTitleProps = {
   activeTab: AppTab;
   selectedProject: Project;
   selectedSession: ProjectSession | null;
+  onRenameSession: (sessionId: string, summary: string) => void | Promise<void>;
 };
 
 function getTabTitle(activeTab: AppTab, t: (key: string) => string, pluginDisplayName?: string) {
@@ -34,9 +36,44 @@ export default function MainContentTitle({
   activeTab,
   selectedProject,
   selectedSession,
+  onRenameSession,
 }: MainContentTitleProps) {
   const { t } = useTranslation();
   const { plugins } = usePlugins();
+
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  const sessionTitle = selectedSession ? getSessionTitle(selectedSession) : '';
+
+  // Never keep the editor open across a session switch.
+  useEffect(() => {
+    setIsEditingTitle(false);
+  }, [selectedSession?.id]);
+
+  useEffect(() => {
+    if (isEditingTitle) {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    }
+  }, [isEditingTitle]);
+
+  const startEditingTitle = () => {
+    if (!selectedSession) {
+      return;
+    }
+    setTitleDraft(sessionTitle);
+    setIsEditingTitle(true);
+  };
+
+  const commitTitle = () => {
+    setIsEditingTitle(false);
+    const trimmed = titleDraft.trim();
+    if (selectedSession && trimmed && trimmed !== sessionTitle) {
+      void onRenameSession(selectedSession.id, trimmed);
+    }
+  };
 
   const pluginDisplayName = activeTab.startsWith('plugin:')
     ? plugins.find((p) => p.name === activeTab.replace('plugin:', ''))?.displayName
@@ -56,9 +93,34 @@ export default function MainContentTitle({
       <div className="min-w-0 flex-1">
         {activeTab === 'chat' && selectedSession ? (
           <div className="min-w-0">
-            <h2 title={getSessionTitle(selectedSession)} className="truncate text-sm font-semibold leading-tight text-foreground">
-              {getSessionTitle(selectedSession)}
-            </h2>
+            {isEditingTitle ? (
+              <input
+                ref={titleInputRef}
+                value={titleDraft}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    commitTitle();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setIsEditingTitle(false);
+                  }
+                }}
+                onBlur={commitTitle}
+                aria-label={t('mainContent.renameSession', 'Rename session')}
+                className="w-full rounded border border-primary/40 bg-background px-1 py-0.5 text-sm font-semibold leading-tight text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={startEditingTitle}
+                title={t('mainContent.renameSessionHint', 'Click to rename')}
+                className="-mx-1 block max-w-full truncate rounded px-1 text-left text-sm font-semibold leading-tight text-foreground hover:bg-accent/50"
+              >
+                {sessionTitle}
+              </button>
+            )}
             <div className="truncate text-[11px] leading-tight text-muted-foreground">{selectedProject.displayName}</div>
           </div>
         ) : showChatNewSession ? (

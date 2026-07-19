@@ -12,6 +12,7 @@ import type { SettingsMainTab } from '../../settings/types/types';
 export type MainContentProps = {
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
+  onRenameSession: (sessionId: string, summary: string) => void | Promise<void>;
   activeTab: AppTab;
   setActiveTab: Dispatch<SetStateAction<AppTab>>;
   ws: WebSocket | null;
@@ -44,6 +45,7 @@ export type MainContentHeaderProps = {
   processingSessions: SessionActivityMap;
   onSessionSelect: (session: ProjectSession) => void;
   onNewSession: (project: Project) => void;
+  onRenameSession: (sessionId: string, summary: string) => void | Promise<void>;
 };
 
 export type MainContentStateViewProps = {

@@ -142,6 +142,20 @@ function AppContentInner() {
     return () => window.clearInterval(interval);
   }, [refreshRunningSessions]);
 
+  // Rename from the chat header — persists the new summary then refreshes so the
+  // header and the sidebar rows both reflect it. Mirrors the sidebar rename path.
+  const handleRenameSession = useCallback(
+    async (targetSessionId: string, summary: string) => {
+      try {
+        await api.renameSession(targetSessionId, summary);
+        await refreshProjectsSilently();
+      } catch (error) {
+        console.error('[AppContent] Failed to rename session:', error);
+      }
+    },
+    [refreshProjectsSilently],
+  );
+
   usePaletteOpsRegister({
     openSettings,
     refreshProjects: refreshProjectsSilently,
@@ -244,6 +258,7 @@ function AppContentInner() {
         <MainContent
           selectedProject={selectedProject}
           selectedSession={selectedSession}
+          onRenameSession={handleRenameSession}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           ws={ws}

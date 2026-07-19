@@ -17,6 +17,7 @@ export default function MainContentHeader({
   processingSessions,
   onSessionSelect,
   onNewSession,
+  onRenameSession,
 }: MainContentHeaderProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -47,6 +48,7 @@ export default function MainContentHeader({
             activeTab={activeTab}
             selectedProject={selectedProject}
             selectedSession={selectedSession}
+            onRenameSession={onRenameSession}
           />
         </div>
 
