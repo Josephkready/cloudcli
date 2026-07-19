@@ -117,10 +117,19 @@
   "version": {
     "restartRequired": "Update installed — restart the server to apply"
   },
+  "sections": {
+    "spaces": "Spaces",
+    "conversations": "Conversations"
+  },
   "search": {
     "modeProjects": "Projects",
     "modeConversations": "Conversations",
     "conversationsPlaceholder": "Search in conversations...",
+    "archivedPlaceholder": "Search archived sessions...",
+    "fullTextLabel": "Search chats",
+    "archivedLabel": "Archived",
+    "fullTextTitle": "Search conversations",
+    "fullTextPrompt": "Type at least 2 characters to search message contents.",
     "searching": "Searching...",
     "noResults": "No results found",
     "tryDifferentQuery": "Try a different search query",
@@ -154,6 +163,8 @@
     "emptyDescription": "Start a new conversation and it will appear here.",
     "newConversation": "New conversation",
     "newConversationNewProject": "New project…",
+    "newConversationSearchPlaceholder": "Search folders…",
+    "newConversationNoResults": "No folders found",
     "cliOrigin": "Session not driven by cloudcli",
     "cliOriginBadge": "CLI",
     "cliOriginTooltip": "Not driven by cloudcli — started from a terminal/CLI (or created before session tracking), so its live status is unknown"

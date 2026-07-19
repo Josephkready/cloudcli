@@ -979,16 +979,6 @@ export function useSidebarController({
     conversationResults,
     isSearching,
     searchProgress,
-    clearConversationResults: useCallback(() => {
-      searchSeqRef.current += 1;
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-      setIsSearching(false);
-      setSearchProgress(null);
-      setConversationResults(null);
-    }, []),
     setSearchFilter,
     setDeleteConfirmation,
     setSessionDeleteConfirmation,

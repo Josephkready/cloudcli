@@ -109,7 +109,17 @@
     "apiTokens": "API & Tokens",
     "voice": "Voice",
     "notifications": "Notifications",
+    "data": "Data",
     "about": "About"
+  },
+  "dataSettings": {
+    "maintenance": {
+      "title": "Maintenance"
+    },
+    "bulkArchive": {
+      "label": "Archive old conversations",
+      "description": "Move conversations older than a chosen age into the archive to declutter the list. This is reversible from the sidebar’s Archived view."
+    }
   },
   "notifications": {
     "title": "Notifications",
