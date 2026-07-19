@@ -105,6 +105,7 @@ test('the Spaces section renders a collapse toggle and is collapsed by default',
   const markup = render({ sidebarOverlay: 'none', spacesExpanded: false });
 
   assert.ok(markup.includes('Toggle spaces'), 'expected the Spaces collapse toggle affordance');
+  assert.ok(markup.includes('aria-expanded="false"'), 'expected the trigger to report collapsed');
   assert.ok(markup.includes('data-state="closed"'), 'expected the Spaces region to render collapsed');
   assert.ok(!markup.includes('data-state="open"'), 'the Spaces region should not be open by default');
 });
@@ -112,6 +113,7 @@ test('the Spaces section renders a collapse toggle and is collapsed by default',
 test('the Spaces section expands when the persisted flag is set', () => {
   const markup = render({ sidebarOverlay: 'none', spacesExpanded: true });
 
+  assert.ok(markup.includes('aria-expanded="true"'), 'expected the trigger to report expanded');
   assert.ok(markup.includes('data-state="open"'), 'expected the Spaces region to render expanded');
   assert.ok(!markup.includes('data-state="closed"'), 'the Spaces region should not be collapsed when expanded');
 });

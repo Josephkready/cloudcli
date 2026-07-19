@@ -112,17 +112,14 @@ function formatCompactArchivedAge(dateString: string | null): string {
   return `${Math.floor(diffInHours / 24)}d`;
 }
 
-// Small label above each stacked section (Spaces / Conversations). Mirrors
-// herdr's two-section sidebar so both regions read as distinct at a glance.
-function SectionHeader({ label, count, badge }: { label: string; count?: number; badge?: number }) {
+// Small label above the Conversations section. The Spaces section renders its
+// own header (a collapsible trigger with a chevron) rather than using this.
+function SectionHeader({ label, badge }: { label: string; badge?: number }) {
   return (
     <div className="flex flex-shrink-0 items-center gap-2 px-3 pb-1 pt-2">
       <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
         {label}
       </span>
-      {typeof count === 'number' && count > 0 && (
-        <span className="text-[10px] font-normal text-muted-foreground/50">{count}</span>
-      )}
       {typeof badge === 'number' && badge > 0 && (
         <span
           className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500 px-1 text-[9px] font-semibold leading-none text-white"
@@ -582,9 +579,9 @@ export default function SidebarContent({
           )}
         </ScrollArea>
       ) : (
-        // Default view: Spaces (top) + Conversations (bottom), both visible at
-        // once — herdr's unified two-section sidebar. Fixed split; each region
-        // scrolls independently.
+        // Default view: Spaces (collapsible, collapsed by default) stacked above
+        // Conversations (always visible) — herdr's two-section sidebar. Spaces
+        // only claims the 40% split when expanded; each region scrolls independently.
         <div className="flex min-h-0 flex-1 flex-col">
           {/* The whole Spaces region collapses behind one chevron (not per-space).
               It's collapsed by default and its state is persisted, so when closed
