@@ -99,15 +99,16 @@ test('parseSessionId: rejects a non-string / array path param before pattern-tes
 
 /* ── parseProvider ───────────────────────────────────────────────────────── */
 
-test('parseProvider: accepts the four supported providers, case/whitespace-insensitively', () => {
+test('parseProvider: accepts the supported providers, case/whitespace-insensitively', () => {
   assert.equal(parseProvider('claude'), 'claude');
   assert.equal(parseProvider('CODEX'), 'codex');
-  assert.equal(parseProvider('  Cursor '), 'cursor');
-  assert.equal(parseProvider('opencode'), 'opencode');
+  assert.equal(parseProvider('  Codex '), 'codex');
 });
 
 test('parseProvider: rejects anything off the allow-list', () => {
   assertRejects(() => parseProvider('gpt'), 'UNSUPPORTED_PROVIDER');
+  assertRejects(() => parseProvider('cursor'), 'UNSUPPORTED_PROVIDER');
+  assertRejects(() => parseProvider('opencode'), 'UNSUPPORTED_PROVIDER');
   assertRejects(() => parseProvider(''), 'UNSUPPORTED_PROVIDER');
   // Non-string input fails at the read step first.
   assertRejects(() => parseProvider(undefined), 'INVALID_PATH_PARAMETER');

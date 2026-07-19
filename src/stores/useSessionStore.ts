@@ -81,7 +81,7 @@ export interface NormalizedMessage {
   parentToolUseId?: string;
   subagentTools?: unknown[];
   isFinal?: boolean;
-  // Cursor-specific ordering
+  // Provider-native transcript ordering hints
   sequence?: number;
   rowid?: number;
 }

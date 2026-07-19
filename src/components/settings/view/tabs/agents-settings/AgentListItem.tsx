@@ -12,7 +12,7 @@ type AgentListItemProps = {
 
 type AgentConfig = {
   name: string;
-  color: 'blue' | 'purple' | 'gray' | 'zinc';
+  color: 'blue' | 'gray';
 };
 
 const agentConfig: Record<AgentProvider, AgentConfig> = {
@@ -20,17 +20,9 @@ const agentConfig: Record<AgentProvider, AgentConfig> = {
     name: 'Claude',
     color: 'blue',
   },
-  cursor: {
-    name: 'Cursor',
-    color: 'purple',
-  },
   codex: {
     name: 'Codex',
     color: 'gray',
-  },
-  opencode: {
-    name: 'OpenCode',
-    color: 'zinc',
   },
 };
 
@@ -38,14 +30,8 @@ const colorClasses = {
   blue: {
     dot: 'bg-blue-500',
   },
-  purple: {
-    dot: 'bg-purple-500',
-  },
   gray: {
     dot: 'bg-foreground/60',
-  },
-  zinc: {
-    dot: 'bg-zinc-500',
   },
 } as const;
 

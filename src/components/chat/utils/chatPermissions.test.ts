@@ -110,7 +110,6 @@ test('formatToolInputForDisplay: an unstringifiable value falls back to String()
 test('getClaudePermissionSuggestion: non-claude providers get no suggestion', () => {
   const message = toolMessage({ toolName: 'Bash', toolInput: '{"command":"git commit"}' });
   assert.equal(getClaudePermissionSuggestion(message, 'codex'), null);
-  assert.equal(getClaudePermissionSuggestion(message, 'cursor'), null);
 });
 
 test('getClaudePermissionSuggestion: non-error results get no suggestion', () => {

@@ -6,7 +6,7 @@
  * + response-collector.js) for the REST path, and the chat `WebSocketWriter`
  * (server/modules/websocket) for the live path. All of them accept a structured
  * object and own their own encoding, exactly like the writers the other provider
- * runtimes (claude-sdk.js, cursor-cli.js, opencode-cli.js) call `ws.send(...)` on
+ * runtimes (e.g. claude-sdk.js) call `ws.send(...)` on
  * directly. A raw `ws` socket is never passed here — the chat layer wraps sockets
  * in a `WebSocketWriter` before dispatching.
  *

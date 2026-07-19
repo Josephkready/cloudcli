@@ -5,12 +5,10 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
-  appendImagesInputTag,
   buildClaudeUserContent,
   buildCodexInputItems,
   isAllowedImageSourcePath,
   normalizeImageDescriptors,
-  parseImagesInputTag,
   resolveImageMediaType,
   toImageAttachments,
 } from '@/shared/image-attachments.js';
@@ -63,85 +61,6 @@ test('normalizeImageDescriptors accepts objects and bare paths, drops junk', () 
   ]);
   assert.deepEqual(normalizeImageDescriptors(undefined), []);
   assert.deepEqual(normalizeImageDescriptors('not-an-array'), []);
-});
-
-test('appendImagesInputTag and parseImagesInputTag round-trip', () => {
-  const prompt = 'Describe these screenshots.\n\nFocus on the header.';
-  const tagged = appendImagesInputTag(prompt, [
-    { path: '.cloudcli/assets/1-a.png' },
-    { path: '.cloudcli\\assets\\2-b.jpg' },
-  ]);
-
-  assert.ok(tagged.startsWith(prompt));
-  assert.ok(tagged.includes('<images_input>'));
-  assert.ok(tagged.includes('</images_input>'));
-  assert.ok(tagged.includes('The user attached 2 image(s)'));
-
-  const parsed = parseImagesInputTag(tagged);
-  assert.equal(parsed.text, prompt);
-  // Backslashes are normalized so references stay portable.
-  assert.deepEqual(parsed.imagePaths, ['.cloudcli/assets/1-a.png', '.cloudcli/assets/2-b.jpg']);
-});
-
-test('original filenames round-trip through the tag', () => {
-  const tagged = appendImagesInputTag('compare these', [
-    { path: 'C:/Users/x/.cloudcli/assets/1-a.png', name: 'screenshot (final).png' },
-    { path: 'C:/Users/x/.cloudcli/assets/2-b.jpg' },
-  ]);
-
-  const parsed = parseImagesInputTag(tagged);
-  assert.equal(parsed.text, 'compare these');
-  // Parentheses are dropped from names so the "(original name: ...)" suffix
-  // stays parseable; the path-only entry carries no name.
-  assert.deepEqual(parsed.attachments, [
-    { path: 'C:/Users/x/.cloudcli/assets/1-a.png', name: 'screenshot final.png' },
-    { path: 'C:/Users/x/.cloudcli/assets/2-b.jpg' },
-  ]);
-});
-
-test('only the LAST images_input block is treated as the attachment carrier', () => {
-  const userTypedTag = 'What does <images_input> mean in this codebase?';
-  const tagged = appendImagesInputTag(
-    `${userTypedTag}\n\n<images_input>\nfake user block\n</images_input>\n\nAlso check this.`,
-    [{ path: 'C:/Users/x/.cloudcli/assets/real.png' }],
-  );
-
-  const parsed = parseImagesInputTag(tagged);
-  assert.ok(parsed.text.includes('fake user block'));
-  assert.ok(parsed.text.includes('Also check this.'));
-  assert.deepEqual(parsed.imagePaths, ['C:/Users/x/.cloudcli/assets/real.png']);
-});
-
-test('appendImagesInputTag without images returns the prompt untouched', () => {
-  assert.equal(appendImagesInputTag('hello', []), 'hello');
-  assert.equal(appendImagesInputTag('hello', undefined), 'hello');
-});
-
-test('parseImagesInputTag handles prompts flattened to one line for cmd.exe shims', () => {
-  // Windows spawn runtimes collapse newlines before passing the argument to
-  // .cmd-shimmed CLIs; the persisted prompt is then a single line.
-  const flattened = appendImagesInputTag('now?', [{ path: 'C:/Users/x/.cloudcli/assets/a.jpg' }])
-    .replace(/\s*\r?\n\s*/g, ' ')
-    .trim();
-
-  assert.ok(!flattened.includes('\n'));
-  const parsed = parseImagesInputTag(flattened);
-  assert.equal(parsed.text, 'now?');
-  assert.deepEqual(parsed.imagePaths, ['C:/Users/x/.cloudcli/assets/a.jpg']);
-});
-
-test('parseImagesInputTag leaves text without a tag untouched', () => {
-  const text = 'Just a normal prompt with [brackets] and JSON ["like"] content.';
-  const parsed = parseImagesInputTag(text);
-  assert.equal(parsed.text, text);
-  assert.deepEqual(parsed.imagePaths, []);
-});
-
-test('parseImagesInputTag strips a malformed tag body without attaching images', () => {
-  const text = 'prompt\n\n<images_input>\nnot json here\n</images_input>';
-  const parsed = parseImagesInputTag(text);
-  assert.equal(parsed.text, 'prompt');
-  assert.deepEqual(parsed.imagePaths, []);
 });
 
 test('toImageAttachments maps paths to posix attachment records', () => {

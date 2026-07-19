@@ -20,8 +20,6 @@ export const sessionSynchronizerService = {
     const processedByProvider: Record<LLMProvider, number> = {
       claude: 0,
       codex: 0,
-      cursor: 0,
-      opencode: 0,
     };
     const failures: string[] = [];
 
@@ -46,7 +44,7 @@ export const sessionSynchronizerService = {
       scanStateDb.updateLastScannedAt(scanBoundary);
     } else {
       console.warn(
-        `[Sessions] Skipping scan_state cursor advance because ${failures.length} provider sync(s) failed.`,
+        `[Sessions] Skipping scan_state last_scanned_at advance because ${failures.length} provider sync(s) failed.`,
       );
     }
 

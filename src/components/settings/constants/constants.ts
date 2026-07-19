@@ -13,7 +13,6 @@ import type {
   AgentCategory,
   AgentProvider,
   CodeEditorSettingsState,
-  CursorPermissionsState,
   ProjectSortOrder,
   SettingsMainTab,
 } from '../types/types';
@@ -35,7 +34,7 @@ export const SETTINGS_MAIN_TABS: SettingsMainTabMeta[] = [
   { id: 'about', label: 'About', keywords: 'about version info', icon: Info },
 ];
 
-export const AGENT_PROVIDERS: AgentProvider[] = ['claude', 'cursor', 'codex', 'opencode'];
+export const AGENT_PROVIDERS: AgentProvider[] = ['claude', 'codex'];
 export const AGENT_CATEGORIES: AgentCategory[] = ['account', 'permissions', 'mcp'];
 
 // Keep in sync with `DEFAULT_PROJECT_SORT_ORDER` in
@@ -48,10 +47,4 @@ export const DEFAULT_CODE_EDITOR_SETTINGS: CodeEditorSettingsState = {
   showMinimap: true,
   lineNumbers: true,
   fontSize: '14',
-};
-
-export const DEFAULT_CURSOR_PERMISSIONS: CursorPermissionsState = {
-  allowedCommands: [],
-  disallowedCommands: [],
-  skipPermissions: false,
 };

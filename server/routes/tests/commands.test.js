@@ -41,7 +41,6 @@ test('models command returns available models only for the active provider', asy
     assert.deepEqual(result.data.available.codex, result.data.availableModels);
     assert.ok(result.data.availableModels.includes('gpt-5.4'));
     assert.equal(result.data.available.claude, undefined);
-    assert.equal(result.data.available.cursor, undefined);
     assert.equal(getCurrentActiveModelCalls, 0);
   } finally {
     providerModelsService.getProviderModels = originalGetProviderModels;

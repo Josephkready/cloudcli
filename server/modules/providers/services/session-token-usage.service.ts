@@ -152,18 +152,6 @@ export async function getSessionTokenUsage(
   const sessionRow = dependencies.getSessionById(sessionId);
   const provider = (sessionRow?.provider ?? 'claude') as LLMProvider;
 
-  if (provider === 'cursor') {
-    return buildUnsupportedResponse('Token usage tracking not available for Cursor sessions');
-  }
-  if (provider === 'opencode') {
-    // OpenCode is a provider that landed upstream after this service was
-    // extracted from index.js. Its usage lives in OpenCode's SQLite store;
-    // until that reader is ported here we report it as unsupported rather
-    // than silently falling through to the Claude JSONL path (which would
-    // look for a Claude session file that doesn't exist).
-    return buildUnsupportedResponse('Token usage tracking not available for OpenCode sessions');
-  }
-
   if (provider === 'codex') {
     const codexDir = dependencies.resolveCodexSessionsDir();
     const sessionFilePath = await findCodexSessionFile(codexDir, sessionId);

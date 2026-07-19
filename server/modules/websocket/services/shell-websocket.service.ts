@@ -129,13 +129,6 @@ export function buildShellCommand(
     return initialCommand;
   }
 
-  if (provider === 'cursor') {
-    if (resumeSessionId) {
-      return `cursor-agent --resume="${resumeSessionId}"`;
-    }
-    return 'cursor-agent';
-  }
-
   if (provider === 'codex') {
     if (resumeSessionId) {
       if (os.platform() === 'win32') {
@@ -144,13 +137,6 @@ export function buildShellCommand(
       return `codex resume "${resumeSessionId}" || codex`;
     }
     return 'codex';
-  }
-
-  if (provider === 'opencode') {
-    if (resumeSessionId) {
-      return `opencode --session "${resumeSessionId}"`;
-    }
-    return initialCommand || 'opencode';
   }
 
   const command = initialCommand || 'claude';
@@ -258,7 +244,6 @@ export function handleShellConnection(
         const isLoginCommand =
           !!initialCommand &&
           (initialCommand.includes('setup-token') ||
-            initialCommand.includes('cursor-agent login') ||
             initialCommand.includes('auth login'));
 
         const commandSuffix =
@@ -464,14 +449,7 @@ export function handleShellConnection(
 
         let welcomeMsg = `\x1b[36mStarting terminal in: ${projectPath}\x1b[0m\r\n`;
         if (!isPlainShell) {
-          const providerName =
-            provider === 'cursor'
-              ? 'Cursor'
-              : provider === 'codex'
-                ? 'Codex'
-                : provider === 'opencode'
-                    ? 'OpenCode'
-                  : 'Claude';
+          const providerName = provider === 'codex' ? 'Codex' : 'Claude';
           welcomeMsg = hasSession && resumeSessionId
             ? `\x1b[36mResuming ${providerName} session ${resumeSessionId} in: ${projectPath}\x1b[0m\r\n`
             : `\x1b[36mStarting new ${providerName} session in: ${projectPath}\x1b[0m\r\n`;

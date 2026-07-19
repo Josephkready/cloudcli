@@ -18,12 +18,10 @@ import {
 
 const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
   claude: 'default',
-  cursor: 'gpt-5.3-codex',
   codex: 'gpt-5.4',
-  opencode: 'anthropic/claude-sonnet-4-5',
 };
 
-const PROVIDERS: LLMProvider[] = ['claude', 'cursor', 'codex', 'opencode'];
+const PROVIDERS: LLMProvider[] = ['claude', 'codex'];
 
 const readStoredProvider = (): LLMProvider => {
   const storedProvider = localStorage.getItem('selected-provider');
@@ -40,9 +38,7 @@ const readStoredProvider = (): LLMProvider => {
  */
 const FALLBACK_PERMISSION_MODES: Record<LLMProvider, PermissionMode[]> = {
   claude: ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'],
-  cursor: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
   codex: ['default', 'acceptEdits', 'bypassPermissions'],
-  opencode: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
 };
 
 type ProviderCapabilities = {
@@ -91,9 +87,6 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
   const [provider, setProvider] = useState<LLMProvider>(readStoredProvider);
-  const [cursorModel, setCursorModel] = useState<string>(() => {
-    return localStorage.getItem('cursor-model') || FALLBACK_DEFAULT_MODEL.cursor;
-  });
   const [claudeModel, setClaudeModel] = useState<string>(() => {
     return localStorage.getItem('claude-model') || FALLBACK_DEFAULT_MODEL.claude;
   });
@@ -105,9 +98,6 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
       acc[targetProvider] = localStorage.getItem(`${targetProvider}-effort`) || DEFAULT_EFFORT_VALUE;
       return acc;
     }, {});
-  });
-  const [opencodeModel, setOpenCodeModel] = useState<string>(() => {
-    return localStorage.getItem('opencode-model') || FALLBACK_DEFAULT_MODEL.opencode;
   });
 
   /**
@@ -133,26 +123,14 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   const providerModelsRequestIdRef = useRef(0);
 
   const setStoredProviderModel = useCallback((targetProvider: LLMProvider, model: string) => {
-    if (targetProvider === 'claude') {
-      setClaudeModel(model);
-      localStorage.setItem('claude-model', model);
-      return;
-    }
-
-    if (targetProvider === 'cursor') {
-      setCursorModel(model);
-      localStorage.setItem('cursor-model', model);
-      return;
-    }
-
     if (targetProvider === 'codex') {
       setCodexModel(model);
       localStorage.setItem('codex-model', model);
       return;
     }
 
-    setOpenCodeModel(model);
-    localStorage.setItem('opencode-model', model);
+    setClaudeModel(model);
+    localStorage.setItem('claude-model', model);
   }, []);
 
   const setStoredProviderEffort = useCallback((targetProvider: LLMProvider, effort: string) => {
@@ -352,10 +330,8 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
 
   const providerModels = useMemo<Record<LLMProvider, string>>(() => ({
     claude: claudeModel,
-    cursor: cursorModel,
     codex: codexModel,
-    opencode: opencodeModel,
-  }), [claudeModel, cursorModel, codexModel, opencodeModel]);
+  }), [claudeModel, codexModel]);
 
   useEffect(() => {
     const claude = providerModelCatalog.claude;
@@ -371,19 +347,6 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   }, [providerModelCatalog.claude, claudeModel]);
 
   useEffect(() => {
-    const cursor = providerModelCatalog.cursor;
-    if (cursor) {
-      const next = pickStoredOrCurrent('cursor-model', cursorModel, cursor);
-      if (next !== cursorModel) {
-        setCursorModel(next);
-      }
-      if (localStorage.getItem('cursor-model') !== next) {
-        localStorage.setItem('cursor-model', next);
-      }
-    }
-  }, [providerModelCatalog.cursor, cursorModel]);
-
-  useEffect(() => {
     const codex = providerModelCatalog.codex;
     if (codex) {
       const next = pickStoredOrCurrent('codex-model', codexModel, codex);
@@ -395,19 +358,6 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
       }
     }
   }, [providerModelCatalog.codex, codexModel]);
-
-  useEffect(() => {
-    const opencode = providerModelCatalog.opencode;
-    if (opencode) {
-      const next = pickStoredOrCurrent('opencode-model', opencodeModel, opencode);
-      if (next !== opencodeModel) {
-        setOpenCodeModel(next);
-      }
-      if (localStorage.getItem('opencode-model') !== next) {
-        localStorage.setItem('opencode-model', next);
-      }
-    }
-  }, [providerModelCatalog.opencode, opencodeModel]);
 
   useEffect(() => {
     const nextEfforts: Partial<Record<LLMProvider, string>> = {};
@@ -462,28 +412,6 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
       previous.filter((request) => !request.sessionId || request.sessionId === selectedSession?.id),
     );
   }, [selectedSession?.id]);
-
-  useEffect(() => {
-    if (provider !== 'cursor') {
-      return;
-    }
-
-    authenticatedFetch('/api/cursor/config')
-      .then((response) => response.json())
-      .then((data) => {
-        if (!data.success || !data.config?.model?.modelId) {
-          return;
-        }
-
-        const modelId = data.config.model.modelId as string;
-        if (!localStorage.getItem('cursor-model')) {
-          setCursorModel(modelId);
-        }
-      })
-      .catch((error) => {
-        console.error('Error loading Cursor config:', error);
-      });
-  }, [provider]);
 
   const cyclePermissionMode = useCallback(() => {
     const modes = getPermissionModesForProvider(provider);
@@ -561,16 +489,12 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   return {
     provider,
     setProvider,
-    cursorModel,
-    setCursorModel,
     claudeModel,
     setClaudeModel,
     codexModel,
     setCodexModel,
     currentProviderEffort,
     currentProviderEffortOptions,
-    opencodeModel,
-    setOpenCodeModel,
     permissionMode,
     setPermissionMode,
     pendingPermissionRequests,

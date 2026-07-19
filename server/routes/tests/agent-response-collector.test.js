@@ -53,13 +53,13 @@ test('getAssistantText concatenates assistant frames and ignores the rest', () =
   assert.equal(c.getAssistantText(), 'fix(git): do the thing');
 });
 
-test('getAssistantText falls back to stream_delta chunks (Cursor live path)', () => {
-  // Cursor's live normalizeMessage emits only kind:'stream_delta' (no terminal
-  // role:'assistant' text frame), so getAssistantText must recover the reply
-  // from the deltas.
+test('getAssistantText falls back to stream_delta chunks (delta-only live path)', () => {
+  // A provider whose live normalizeMessage emits only kind:'stream_delta' (no
+  // terminal role:'assistant' text frame) forces getAssistantText to recover
+  // the reply from the deltas.
   const c = new ResponseCollector();
-  c.send({ kind: 'stream_delta', content: 'fix(git): ', provider: 'cursor' });
-  c.send({ kind: 'stream_delta', content: 'collect deltas', provider: 'cursor' });
+  c.send({ kind: 'stream_delta', content: 'fix(git): ', provider: 'codex' });
+  c.send({ kind: 'stream_delta', content: 'collect deltas', provider: 'codex' });
   assert.equal(c.getAssistantText(), 'fix(git): collect deltas');
 });
 

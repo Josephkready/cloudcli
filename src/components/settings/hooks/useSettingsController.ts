@@ -7,7 +7,6 @@ import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuth
 import { normalizeMainTab } from '../utils/settingsTabs';
 import {
   DEFAULT_CODE_EDITOR_SETTINGS,
-  DEFAULT_CURSOR_PERMISSIONS,
   DEFAULT_PROJECT_SORT_ORDER,
 } from '../constants/constants';
 import type {
@@ -15,7 +14,6 @@ import type {
   ClaudePermissionsState,
   CodeEditorSettingsState,
   CodexPermissionMode,
-  CursorPermissionsState,
   NotificationPreferencesState,
   ProjectSortOrder,
   SettingsMainTab,
@@ -36,12 +34,6 @@ type ClaudeSettingsStorage = {
   disallowedTools?: string[];
   skipPermissions?: boolean;
   projectSortOrder?: ProjectSortOrder;
-};
-
-type CursorSettingsStorage = {
-  allowedCommands?: string[];
-  disallowedCommands?: string[];
-  skipPermissions?: boolean;
 };
 
 type CodexSettingsStorage = {
@@ -90,10 +82,6 @@ const createEmptyClaudePermissions = (): ClaudePermissionsState => ({
   skipPermissions: false,
 });
 
-const createEmptyCursorPermissions = (): CursorPermissionsState => ({
-  ...DEFAULT_CURSOR_PERMISSIONS,
-});
-
 const createDefaultNotificationPreferences = (): NotificationPreferencesState => ({
   channels: {
     inApp: true,
@@ -140,9 +128,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
   const [claudePermissions, setClaudePermissions] = useState<ClaudePermissionsState>(() => (
     createEmptyClaudePermissions()
   ));
-  const [cursorPermissions, setCursorPermissions] = useState<CursorPermissionsState>(() => (
-    createEmptyCursorPermissions()
-  ));
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferencesState>(() => (
     createDefaultNotificationPreferences()
   ));
@@ -175,16 +160,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
           : DEFAULT_PROJECT_SORT_ORDER,
       );
 
-      const savedCursorSettings = parseJson<CursorSettingsStorage>(
-        localStorage.getItem('cursor-tools-settings'),
-        {},
-      );
-      setCursorPermissions({
-        allowedCommands: savedCursorSettings.allowedCommands || [],
-        disallowedCommands: savedCursorSettings.disallowedCommands || [],
-        skipPermissions: Boolean(savedCursorSettings.skipPermissions),
-      });
-
       const savedCodexSettings = parseJson<CodexSettingsStorage>(
         localStorage.getItem('codex-settings'),
         {},
@@ -210,7 +185,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     } catch (error) {
       console.error('Error loading settings:', error);
       setClaudePermissions(createEmptyClaudePermissions());
-      setCursorPermissions(createEmptyCursorPermissions());
       setNotificationPreferences(createDefaultNotificationPreferences());
       setCodexPermissionMode('default');
       setProjectSortOrder(DEFAULT_PROJECT_SORT_ORDER);
@@ -251,13 +225,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
         lastUpdated: now,
       }));
 
-      localStorage.setItem('cursor-tools-settings', JSON.stringify({
-        allowedCommands: cursorPermissions.allowedCommands,
-        disallowedCommands: cursorPermissions.disallowedCommands,
-        skipPermissions: cursorPermissions.skipPermissions,
-        lastUpdated: now,
-      }));
-
       localStorage.setItem('codex-settings', JSON.stringify({
         permissionMode: codexPermissionMode,
         lastUpdated: now,
@@ -281,9 +248,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     claudePermissions.disallowedTools,
     claudePermissions.skipPermissions,
     codexPermissionMode,
-    cursorPermissions.allowedCommands,
-    cursorPermissions.disallowedCommands,
-    cursorPermissions.skipPermissions,
     notificationPreferences,
     projectSortOrder,
   ]);
@@ -383,8 +347,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     updateCodeEditorSetting,
     claudePermissions,
     setClaudePermissions,
-    cursorPermissions,
-    setCursorPermissions,
     notificationPreferences,
     setNotificationPreferences,
     codexPermissionMode,

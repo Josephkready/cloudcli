@@ -5,7 +5,6 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { projectsDb } from '../modules/database/index.js';
 import { queryClaudeSDK } from '../claude-sdk.js';
-import { spawnCursor } from '../cursor-cli.js';
 import { ResponseCollector } from './response-collector.js';
 
 const router = express.Router();
@@ -994,8 +993,8 @@ router.post('/generate-commit-message', async (req, res) => {
   }
 
   // Validate provider
-  if (!['claude', 'cursor'].includes(provider)) {
-    return res.status(400).json({ error: 'provider must be "claude" or "cursor"' });
+  if (provider !== 'claude') {
+    return res.status(400).json({ error: 'provider must be "claude"' });
   }
 
   try {
@@ -1052,10 +1051,10 @@ router.post('/generate-commit-message', async (req, res) => {
 });
 
 /**
- * Generates a commit message using AI (Claude SDK or Cursor CLI)
+ * Generates a commit message using AI (Claude SDK)
  * @param {Array<string>} files - List of changed files
  * @param {string} diffContext - Git diff content
- * @param {string} provider - 'claude' or 'cursor'
+ * @param {string} provider - 'claude'
  * @param {string} projectPath - Project directory path
  * @returns {Promise<string>} Generated commit message
  */
@@ -1084,9 +1083,9 @@ Generate the commit message:`;
     // Buffer the run's normalized frames and pull the assistant prose back out.
     // Providers stream `createNormalizedMessage()` envelopes keyed by `kind`;
     // assistant text arrives as `kind:'text'` with `role:'assistant'`. The old
-    // inline writer matched the legacy `claude-response`/`cursor-output`/`text`
-    // shapes, which no provider emits anymore — so it collected nothing and this
-    // always returned the fallback. See #96 (same root cause) / #129.
+    // inline writer matched the legacy `claude-response`/`text` shapes, which no
+    // provider emits anymore — so it collected nothing and this always returned
+    // the fallback. See #96 (same root cause) / #129.
     const collector = new ResponseCollector();
 
     // Call the appropriate agent
@@ -1095,11 +1094,6 @@ Generate the commit message:`;
         cwd: projectPath,
         permissionMode: 'bypassPermissions',
         model: 'sonnet'
-      }, collector);
-    } else if (provider === 'cursor') {
-      await spawnCursor(prompt, {
-        cwd: projectPath,
-        skipPermissions: true
       }, collector);
     }
 

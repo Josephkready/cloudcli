@@ -31,17 +31,9 @@ import {
     stopStaleToolApprovalReaper,
 } from './claude-sdk.js';
 import {
-    spawnCursor,
-    abortCursorSession,
-} from './cursor-cli.js';
-import {
     queryCodex,
     abortCodexSession,
 } from './openai-codex.js';
-import {
-    spawnOpenCode,
-    abortOpenCodeSession,
-} from './opencode-cli.js';
 import {
     stripAnsiSequences,
     normalizeDetectedUrl,
@@ -50,7 +42,6 @@ import {
 } from './utils/url-detection.js';
 import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
-import cursorRoutes from './routes/cursor.js';
 import commandsRoutes from './routes/commands.js';
 import settingsRoutes from './routes/settings.js';
 import agentRoutes from './routes/agent.js';
@@ -105,15 +96,11 @@ const wss = createWebSocketServer(server, {
     chat: {
         spawnFns: {
             claude: queryClaudeSDK,
-            cursor: spawnCursor,
             codex: queryCodex,
-            opencode: spawnOpenCode,
         },
         abortFns: {
             claude: abortClaudeSDKSession,
-            cursor: abortCursorSession,
             codex: abortCodexSession,
-            opencode: abortOpenCodeSession,
         },
         resolveToolApproval,
         getPendingApprovalsForSession,
@@ -176,9 +163,6 @@ app.use('/api/assets', authenticateToken, assetsRoutes);
 
 // Git API Routes (protected)
 app.use('/api/git', authenticateToken, gitRoutes);
-
-// Cursor API Routes (protected)
-app.use('/api/cursor', authenticateToken, cursorRoutes);
 
 // Commands API Routes (protected)
 app.use('/api/commands', authenticateToken, commandsRoutes);

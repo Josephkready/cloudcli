@@ -41,7 +41,7 @@ async function withAgentServer(fn) {
   process.env.DATABASE_PATH = dbPath;
   await initializeDatabase();
 
-  // Keep the run hermetic: agent.js fetches codex/opencode models unconditionally
+  // Keep the run hermetic: agent.js fetches codex models unconditionally
   // before dispatch. Stub it so the test never touches a models cache or CLI.
   const originalGetProviderModels = providerModelsService.getProviderModels;
   providerModelsService.getProviderModels = async () => ({

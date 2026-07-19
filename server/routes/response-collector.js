@@ -116,8 +116,8 @@ export class ResponseCollector {
 
     // Some providers stream their reply only as incremental `stream_delta`
     // chunks and never emit a terminal `{ kind:'text', role:'assistant' }` frame
-    // during a live run (e.g. Cursor's live path). When no assistant text frame
-    // was seen, fall back to concatenating those deltas so the reply isn't lost.
+    // during a live run. When no assistant text frame was seen, fall back to
+    // concatenating those deltas so the reply isn't lost.
     return this.messages
       .map(toMessageObject)
       .filter((msg) => msg && msg.kind === 'stream_delta' && typeof msg.content === 'string')
@@ -130,9 +130,9 @@ export class ResponseCollector {
    *
    * Usage is reported via `kind:'status'` frames tagged `token_budget`, each
    * carrying a `tokenBudget` snapshot (see `extractTokenBudget` in claude-sdk.js
-   * and the Codex/OpenCode equivalents). Every provider's snapshot is
-   * **cumulative** — Claude reports the growing per-turn context, Codex/OpenCode
-   * report a running session total — so the last frame is the authoritative
+   * and the Codex equivalent). Every provider's snapshot is
+   * **cumulative** — Claude reports the growing per-turn context, Codex
+   * reports a running session total — so the last frame is the authoritative
    * total. Summing across frames would multiply-count. `tokenBudget.inputTokens`
    * already includes cache tokens, matching the previous output shape. See #96.
    */

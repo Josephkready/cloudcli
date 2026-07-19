@@ -110,8 +110,8 @@ export const sessionsDb = {
         // custom_name is only refreshed from disk while name_source IS NULL
         // (a raw, synchronizer-derived title). Once the AI-title worker ('ai')
         // or a manual UI rename ('user') owns the name, re-sync must leave it
-        // alone — otherwise providers whose synchronizer recomputes the name on
-        // every scan (e.g. Cursor) would silently revert it on the next restart.
+        // alone — otherwise a provider whose synchronizer recomputes the name on
+        // every scan would silently revert it on the next restart.
         `UPDATE sessions SET
            provider = ?,
            updated_at = COALESCE(?, CURRENT_TIMESTAMP),
@@ -327,8 +327,8 @@ export const sessionsDb = {
    * Finds the newest app-created session for a project that is still waiting
    * for its provider-native id to be recorded.
    *
-   * Primary intention: OpenCode can expose a new session in its shared
-   * `opencode.db` before the websocket runtime reports that same provider id
+   * Primary intention: a provider can expose a new session in its own store
+   * before the websocket runtime reports that same provider id
    * back to our app. At that moment the sidebar already has an optimistic
    * app-owned session row, but the watcher only knows the provider-native id.
    *

@@ -38,12 +38,6 @@ export type NotificationPreferencesState = {
   };
 };
 
-export type CursorPermissionsState = {
-  allowedCommands: string[];
-  disallowedCommands: string[];
-  skipPermissions: boolean;
-};
-
 export type CodeEditorSettingsState = {
   wordWrap: boolean;
   showMinimap: boolean;
@@ -53,7 +47,6 @@ export type CodeEditorSettingsState = {
 
 export type SettingsStoragePayload = {
   claude: ClaudePermissionsState & { projectSortOrder: ProjectSortOrder; lastUpdated: string };
-  cursor: CursorPermissionsState & { lastUpdated: string };
   codex: { permissionMode: CodexPermissionMode; lastUpdated: string };
 };
 

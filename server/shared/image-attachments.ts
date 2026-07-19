@@ -9,8 +9,6 @@ import path from 'node:path';
  * folder and referenced by absolute path everywhere else:
  * - Claude: paths are read back into base64 `image` content blocks.
  * - Codex: paths become `local_image` input items.
- * - Cursor/OpenCode: paths are appended to the prompt inside an
- *   `<images_input>` tag, which is stripped again when history is read.
  *
  * The chat UI loads them through the dedicated `/api/assets/images/:filename`
  * route, which serves only from this folder.
@@ -136,121 +134,6 @@ export function resolveImageMediaType(descriptor: ImageAttachmentDescriptor): st
   }
   const extension = path.extname(descriptor.path).toLowerCase();
   return EXTENSION_TO_MEDIA_TYPE[extension] || null;
-}
-
-const IMAGES_INPUT_TAG_PATTERN = /\s*<images_input>([\s\S]*?)<\/images_input>\s*/g;
-
-// One image reference recovered from an <images_input> block: the stored
-// asset path plus the user's original filename when it was recorded.
-export type ParsedImageAttachment = {
-  path: string;
-  name?: string;
-};
-
-// Result of stripping an <images_input> block out of persisted prompt text.
-// `imagePaths` mirrors `attachments` for callers that only need paths.
-export type ParsedImagesInput = {
-  text: string;
-  imagePaths: string[];
-  attachments: ParsedImageAttachment[];
-};
-
-/**
- * Appends the `<images_input>` reference block used by the Cursor and
- * OpenCode CLIs. The block carries one numbered line per attachment with
- * the stored file path (quote-free on purpose — Windows .cmd shims mangle
- * quoted text) and the user's original filename, plus an explicit instruction
- * to read the files and keep the block out of the reply. The same block is
- * stripped back out of persisted history by {@link parseImagesInputTag}.
- */
-export function appendImagesInputTag(prompt: string, images: unknown): string {
-  const descriptors = normalizeImageDescriptors(images);
-  if (descriptors.length === 0) {
-    return prompt;
-  }
-
-  const entryLines = descriptors.map((descriptor, index) => {
-    const entryPath = toPosixPath(descriptor.path);
-    // Parentheses and newlines would break the "(original name: ...)" suffix
-    // the parser looks for, so drop them from the display name.
-    const cleanName = descriptor.name?.replace(/[()\r\n]/g, '').trim();
-    return cleanName
-      ? `${index + 1}. ${entryPath} (original name: ${cleanName})`
-      : `${index + 1}. ${entryPath}`;
-  });
-
-  return [
-    prompt,
-    '',
-    '<images_input>',
-    `The user attached ${descriptors.length} image(s) to this message. Read each file listed below with your file/image reading tool and use what you see to answer the prompt above. Respond as if the images were attached directly. Do not mention this block or the file paths unless the user asks about them.`,
-    ...entryLines,
-    '</images_input>',
-  ].join('\n');
-}
-
-// Matches one numbered attachment entry inside the tag body. Works for both
-// the multi-line block and the Windows-flattened single-line form, where the
-// next ` N. ` marker (or the end of the body) delimits each entry.
-const IMAGES_INPUT_ENTRY_PATTERN = /\d+\.\s+(.+?)(?=\s+\d+\.\s+|\s*$)/g;
-
-const ORIGINAL_NAME_SUFFIX_PATTERN = /\(original name: ([^)]*)\)\s*$/;
-
-function parseNumberedImageEntries(inner: string): ParsedImageAttachment[] {
-  const attachments: ParsedImageAttachment[] = [];
-  for (const entryMatch of inner.matchAll(IMAGES_INPUT_ENTRY_PATTERN)) {
-    let entryText = entryMatch[1].trim();
-    let name: string | undefined;
-
-    const nameMatch = ORIGINAL_NAME_SUFFIX_PATTERN.exec(entryText);
-    if (nameMatch) {
-      name = nameMatch[1].trim() || undefined;
-      entryText = entryText.slice(0, nameMatch.index).trim();
-    }
-
-    if (entryText) {
-      attachments.push(name ? { path: toPosixPath(entryText), name } : { path: toPosixPath(entryText) });
-    }
-  }
-  return attachments;
-}
-
-/**
- * Strips one `<images_input>` block from persisted prompt text and returns
- * the clean text plus the referenced attachments (path and original name).
- *
- * Only the LAST block in the text is treated as the attachment carrier — the
- * composer always appends it at the end, so a user who literally typed
- * `<images_input>` earlier in their prompt keeps that text intact.
- *
- * Understands the numbered-line body in both its multi-line and
- * Windows-flattened single-line forms.
- */
-export function parseImagesInputTag(text: string): ParsedImagesInput {
-  if (typeof text !== 'string' || !text.includes('<images_input>')) {
-    return { text, imagePaths: [], attachments: [] };
-  }
-
-  let lastMatch: RegExpExecArray | null = null;
-  IMAGES_INPUT_TAG_PATTERN.lastIndex = 0;
-  for (let match = IMAGES_INPUT_TAG_PATTERN.exec(text); match; match = IMAGES_INPUT_TAG_PATTERN.exec(text)) {
-    lastMatch = match;
-  }
-  if (!lastMatch) {
-    return { text, imagePaths: [], attachments: [] };
-  }
-
-  const attachments = parseNumberedImageEntries(lastMatch[1]);
-
-  const stripped = (
-    text.slice(0, lastMatch.index) + '\n' + text.slice(lastMatch.index + lastMatch[0].length)
-  ).trim();
-
-  return {
-    text: stripped,
-    imagePaths: attachments.map((attachment) => attachment.path),
-    attachments,
-  };
 }
 
 /** Maps raw image paths to the attachment shape carried by NormalizedMessage.images. */

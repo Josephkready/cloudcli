@@ -1,7 +1,7 @@
 /**
  * Path-based exclusion filter for auto-discovered project paths.
  *
- * The provider session synchronizers (Claude / Codex / Cursor / Gemini) walk each
+ * The provider session synchronizers (Claude / Codex) walk each
  * provider's transcript directory and upsert a `projects` row for every distinct
  * `cwd` they see. Without a filter that picks up *every* ephemeral worktree the
  * user ever ran the CLI from — `/tmp/myrepo-feature-abc/`, multica workspace

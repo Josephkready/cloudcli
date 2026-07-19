@@ -303,7 +303,7 @@
     "apiDocsLink": "API Documentation",
     "documentation": {
       "title": "External API Documentation",
-      "description": "Learn how to use the external API to trigger Claude/Cursor sessions from your applications.",
+      "description": "Learn how to use the external API to trigger Claude and Codex sessions from your applications.",
       "viewLink": "View API Documentation →"
     },
     "loading": "Loading..."
@@ -322,14 +322,8 @@
       "claude": {
         "description": "Anthropic Claude AI assistant"
       },
-      "cursor": {
-        "description": "Cursor AI-powered code editor"
-      },
       "codex": {
         "description": "OpenAI Codex AI assistant"
-      },
-      "opencode": {
-        "description": "OpenCode CLI assistant"
       }
     },
     "connectionStatus": "Connection Status",
@@ -347,8 +341,7 @@
     "title": "Permission Settings",
     "skipPermissions": {
       "label": "Skip permission prompts (use with caution)",
-      "claudeDescription": "Equivalent to --dangerously-skip-permissions flag",
-      "cursorDescription": "Equivalent to -f flag in Cursor CLI"
+      "claudeDescription": "Equivalent to --dangerously-skip-permissions flag"
     },
     "allowedTools": {
       "title": "Allowed Tools",
@@ -423,9 +416,7 @@
     "title": "MCP Servers",
     "description": {
       "claude": "Model Context Protocol servers provide additional tools and data sources to Claude",
-      "cursor": "Model Context Protocol servers provide additional tools and data sources to Cursor",
-      "codex": "Model Context Protocol servers provide additional tools and data sources to Codex",
-      "opencode": "Model Context Protocol servers provide additional tools and data sources to OpenCode"
+      "codex": "Model Context Protocol servers provide additional tools and data sources to Codex"
     },
     "addButton": "Add MCP Server",
     "empty": "No MCP servers configured",
