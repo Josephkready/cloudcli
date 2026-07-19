@@ -364,3 +364,127 @@ test('startRun rejects a second concurrent run for the same session', async () =
     assert.ok(third);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  Server-side per-session FIFO queue (issue #64)                     */
+/* ------------------------------------------------------------------ */
+
+function makeQueuedMessage(connection: FakeConnection, content: string) {
+  return {
+    content,
+    options: {} as Record<string, unknown>,
+    connection: connection as never,
+    userId: null,
+    enqueuedAt: Date.now(),
+  };
+}
+
+test('submitMessage starts the first send and queues concurrent sends in FIFO order', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('q-1', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const input = {
+      appSessionId: 'q-1',
+      provider: 'claude' as const,
+      providerSessionId: null,
+      connection: connection as never,
+      userId: null,
+    };
+
+    const first = chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'A'));
+    assert.equal(first.action, 'start');
+    assert.equal(chatRunRegistry.isProcessing('q-1'), true);
+    assert.equal(chatRunRegistry.isDispatching('q-1'), true);
+
+    // A run is already in progress: further sends join the queue instead of
+    // being rejected (the old behaviour that silently dropped the loser).
+    const second = chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'B'));
+    const third = chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'C'));
+    assert.equal(second.action, 'queued');
+    assert.equal(third.action, 'queued');
+
+    assert.equal(chatRunRegistry.getPendingCount('q-1'), 2);
+    assert.deepEqual(chatRunRegistry.listPending('q-1').map((m) => m.content), ['B', 'C']);
+  });
+});
+
+test('takeNextQueued drains the queue in FIFO order and releases the dispatcher when empty', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('q-2', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const input = {
+      appSessionId: 'q-2',
+      provider: 'claude' as const,
+      providerSessionId: null,
+      connection: connection as never,
+      userId: null,
+    };
+
+    chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'A')); // start
+    chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'B')); // queued
+    chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'C')); // queued
+
+    // The head run finishes; the dispatcher pulls the next queued message.
+    chatRunRegistry.completeRun('q-2', { exitCode: 0 });
+
+    assert.equal(chatRunRegistry.takeNextQueued('q-2')?.content, 'B');
+    assert.equal(chatRunRegistry.isDispatching('q-2'), true); // still draining
+    assert.equal(chatRunRegistry.takeNextQueued('q-2')?.content, 'C');
+    assert.equal(chatRunRegistry.takeNextQueued('q-2'), null); // empty
+    assert.equal(chatRunRegistry.isDispatching('q-2'), false); // released
+    assert.equal(chatRunRegistry.getPendingCount('q-2'), 0);
+  });
+});
+
+test('submitMessage queues (not starts) in the gap after a run completes while a dispatcher is active', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('q-3', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const input = {
+      appSessionId: 'q-3',
+      provider: 'claude' as const,
+      providerSessionId: null,
+      connection: connection as never,
+      userId: null,
+    };
+
+    chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'A')); // start + dispatching
+    chatRunRegistry.completeRun('q-3', { exitCode: 0 }); // run done, dispatcher still held
+
+    // This is the exact race window: the run has completed but the dispatcher
+    // has not yet pulled the next message. A send here must queue, or a second
+    // dispatcher would start and one message could be lost.
+    assert.equal(chatRunRegistry.isProcessing('q-3'), false);
+    assert.equal(chatRunRegistry.isDispatching('q-3'), true);
+
+    const res = chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'B'));
+    assert.equal(res.action, 'queued');
+    assert.equal(chatRunRegistry.getPendingCount('q-3'), 1);
+  });
+});
+
+test('submitMessage rejects past the pending-queue cap instead of dropping silently', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('q-4', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const input = {
+      appSessionId: 'q-4',
+      provider: 'claude' as const,
+      providerSessionId: null,
+      connection: connection as never,
+      userId: null,
+    };
+
+    chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'head')); // start
+    for (let i = 0; i < 50; i += 1) {
+      const queued = chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, `m${i}`));
+      assert.equal(queued.action, 'queued');
+    }
+
+    // The 51st queued message overflows the cap: rejected VISIBLY (the caller
+    // surfaces a protocol error), never silently discarded.
+    const overflow = chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'overflow'));
+    assert.equal(overflow.action, 'rejected');
+    assert.equal(chatRunRegistry.getPendingCount('q-4'), 50);
+  });
+});
