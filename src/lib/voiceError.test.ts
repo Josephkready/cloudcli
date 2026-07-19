@@ -33,6 +33,11 @@ test('falls back to HTTP <status> when JSON has no error string', async () => {
   assert.equal(await readVoiceError(res), 'HTTP 500');
 });
 
+test('falls back to HTTP <status> for a non-object JSON body (array)', async () => {
+  const res = new Response(JSON.stringify([1, 2, 3]), { status: 500 });
+  assert.equal(await readVoiceError(res), 'HTTP 500');
+});
+
 test('does not consume the body (clone leaves it readable)', async () => {
   const res = new Response(JSON.stringify({ error: 'boom' }), { status: 502 });
   await readVoiceError(res);
