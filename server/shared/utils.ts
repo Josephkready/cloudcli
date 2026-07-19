@@ -4,6 +4,7 @@ import {
   access,
   lstat,
   mkdir,
+  open,
   readFile,
   readdir,
   readlink,
@@ -1155,6 +1156,73 @@ export async function readFileTimestamps(
   } catch {
     return {};
   }
+}
+
+/**
+ * Reads only the last `maxBytes` bytes of a file as UTF-8 text.
+ *
+ * Session synchronizers only need a transcript's tail to find the most-recent
+ * title-bearing events, so loading a multi-MB `.jsonl` fully into memory just to
+ * scan its end is wasteful — it was the dominant cost of a cold `/api/projects`
+ * scan on a large project library. Reading a bounded window keeps that scan
+ * fast. When the file is larger than `maxBytes` the first returned line may be a
+ * truncated fragment; JSONL callers simply skip lines that don't parse.
+ */
+export async function readFileTail(filePath: string, maxBytes: number): Promise<string> {
+  const handle = await open(filePath, 'r');
+  try {
+    const { size } = await handle.stat();
+    const readBytes = Math.min(size, Math.max(0, Math.floor(maxBytes)));
+    if (readBytes === 0) {
+      return '';
+    }
+
+    const start = size - readBytes;
+    const buffer = Buffer.alloc(readBytes);
+    await handle.read(buffer, 0, readBytes, start);
+    return buffer.toString('utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Maps over `items` running at most `concurrency` workers at a time, preserving
+ * input order in the returned results.
+ *
+ * Session synchronization fans out one filesystem read per transcript; doing
+ * that for thousands of files strictly one-at-a-time is needlessly slow, but an
+ * unbounded `Promise.all` can exhaust file descriptors and thrash the disk. A
+ * fixed worker pool overlaps the I/O without either failure mode.
+ */
+export async function mapWithConcurrency<TInput, TOutput>(
+  items: readonly TInput[],
+  concurrency: number,
+  worker: (item: TInput, index: number) => Promise<TOutput>,
+): Promise<TOutput[]> {
+  const results = new Array<TOutput>(items.length);
+  const limit = Math.max(1, Math.floor(concurrency));
+  let nextIndex = 0;
+
+  async function runWorker(): Promise<void> {
+    for (;;) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) {
+        return;
+      }
+      results[currentIndex] = await worker(items[currentIndex] as TInput, currentIndex);
+    }
+  }
+
+  const workerCount = Math.min(limit, items.length);
+  const workers: Promise<void>[] = [];
+  for (let workerIndex = 0; workerIndex < workerCount; workerIndex += 1) {
+    workers.push(runWorker());
+  }
+
+  await Promise.all(workers);
+  return results;
 }
 
 // ---------------------------

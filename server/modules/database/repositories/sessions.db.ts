@@ -20,6 +20,20 @@ type SessionRow = {
 const SESSION_ROW_COLUMNS =
   'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, name_source, isArchived, created_at, updated_at, last_completed_at, last_viewed_at';
 
+/**
+ * One discovered-session upsert, as passed to `createSessions` for batch
+ * indexing. Mirrors the positional arguments of `createSession`.
+ */
+export type DiscoveredSessionInput = {
+  providerSessionId: string;
+  provider: string;
+  projectPath: string;
+  customName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  jsonlPath?: string | null;
+};
+
 const SQLITE_UTC_TIMESTAMP_REGEX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 function normalizeTimestamp(value?: string): string | null {
@@ -160,6 +174,39 @@ export const sessionsDb = {
     );
 
     return providerSessionId;
+  },
+
+  /**
+   * Upserts many discovered sessions inside a single transaction.
+   *
+   * Each row goes through the same logic as `createSession`, but wrapping the
+   * whole batch in one transaction collapses what would otherwise be an implicit
+   * commit (and a disk fsync) per row into one commit. A cold scan of a large
+   * project library upserts thousands of sessions, and those per-row fsyncs were
+   * the dominant cost of the slow `/api/projects` first paint (#188) — batching
+   * them cuts that phase by ~70x. Returns the resolved session ids in input order.
+   */
+  createSessions(records: ReadonlyArray<DiscoveredSessionInput>): string[] {
+    if (records.length === 0) {
+      return [];
+    }
+
+    const db = getConnection();
+    const runBatch = db.transaction((rows: ReadonlyArray<DiscoveredSessionInput>): string[] =>
+      rows.map((row) =>
+        this.createSession(
+          row.providerSessionId,
+          row.provider,
+          row.projectPath,
+          row.customName,
+          row.createdAt,
+          row.updatedAt,
+          row.jsonlPath,
+        ),
+      ),
+    );
+
+    return runBatch(records);
   },
 
   /**
