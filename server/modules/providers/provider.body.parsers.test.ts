@@ -88,12 +88,31 @@ test('parseMcpUpsertPayload: filters non-string members out of arrays and maps',
     env: { KEEP: 'yes', DROP: 3 },
     envVars: ['A', 7],
     headers: { 'X-Ok': 'v', 'X-Bad': {} },
+    envHttpHeaders: { 'X-Env': 'e', 'X-Drop': 5 },
   });
   assert.equal(result.scope, 'project');
   assert.deepEqual(result.args, ['--a', '--b']);
   assert.deepEqual(result.env, { KEEP: 'yes' });
   assert.deepEqual(result.envVars, ['A']);
   assert.deepEqual(result.headers, { 'X-Ok': 'v' });
+  assert.deepEqual(result.envHttpHeaders, { 'X-Env': 'e' });
+});
+
+test('parseMcpUpsertPayload: passes through and trims the optional string fields', () => {
+  const result = parseMcpUpsertPayload({
+    name: 'srv',
+    transport: 'stdio',
+    command: '  run-me  ',
+    cwd: '/work',
+    url: 'https://example.test',
+    workspacePath: '  /ws  ',
+    bearerTokenEnvVar: 'TOKEN_ENV',
+  });
+  assert.equal(result.command, 'run-me');
+  assert.equal(result.cwd, '/work');
+  assert.equal(result.url, 'https://example.test');
+  assert.equal(result.workspacePath, '/ws');
+  assert.equal(result.bearerTokenEnvVar, 'TOKEN_ENV');
 });
 
 /* ── parseProviderSkillCreatePayload ─────────────────────────────────────── */
@@ -139,6 +158,13 @@ test('parseProviderSkillCreatePayload: validates the shape of any files array', 
   assertRejects(
     () => parseProviderSkillCreatePayload({
       entries: [{ content: 'a', files: [{ relativePath: 'f.txt', content: 'x' }] }],
+    }),
+    'INVALID_REQUEST_BODY',
+  );
+  // An unsupported encoding (not utf8/base64) is rejected the same way.
+  assertRejects(
+    () => parseProviderSkillCreatePayload({
+      entries: [{ content: 'a', files: [{ relativePath: 'f.txt', content: 'x', encoding: 'ascii' }] }],
     }),
     'INVALID_REQUEST_BODY',
   );
