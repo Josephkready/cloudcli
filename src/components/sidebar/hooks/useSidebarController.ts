@@ -22,7 +22,7 @@ import {
   readProjectSortOrder,
   sortProjects,
 } from '../utils/utils';
-import { buildBulkArchivePrompt } from '../utils/bulkArchivePrompt';
+import { buildBulkArchivePrompt, type BulkArchivePrompt } from '../utils/bulkArchivePrompt';
 
 type SnippetHighlight = {
   start: number;
@@ -130,6 +130,10 @@ export function useSidebarController({
   const [deletingProjects, setDeletingProjects] = useState<Set<string>>(new Set());
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteProjectConfirmation | null>(null);
   const [sessionDeleteConfirmation, setSessionDeleteConfirmation] = useState<SessionDeleteConfirmation | null>(null);
+  // The active bulk archive-by-age dialog (the previewed prompt + the age it
+  // applies to), or null when closed. Replaces the blocking window.confirm.
+  const [bulkArchiveByAgePrompt, setBulkArchiveByAgePrompt] =
+    useState<{ prompt: BulkArchivePrompt; olderThanDays: number } | null>(null);
   const [searchMode, setSearchMode] = useState<SidebarSearchMode>('conversations');
   const [conversationResults, setConversationResults] = useState<ConversationSearchResults | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -886,14 +890,15 @@ export function useSidebarController({
     }
   }, [fetchArchivedSessions, onRefresh]);
 
-  // Bulk declutter: soft-archive every active conversation idle for more than
-  // `olderThanDays` days in one call, then refresh both the active lists and the
-  // archived view so the moved rows land in their new home. Archiving is
-  // reversible from the archived view, so we confirm once before it runs — first
-  // previewing how many conversations qualify so the confirmation names the count.
+  // Bulk declutter, step 1 (request): preview how many conversations qualify,
+  // then open the in-app confirmation dialog. Archiving is reversible from the
+  // archived view, so we confirm once before it runs — and name the count so the
+  // user knows whether they're about to archive 2 or 200. The blocking
+  // window.confirm/alert this used to call are replaced by `bulkArchiveByAgePrompt`
+  // state rendered as an inline Confirmation banner; the actual archive runs in
+  // `confirmBulkArchiveByAge`.
   const bulkArchiveSessionsByAge = useCallback(async (olderThanDays: number) => {
-    // Preview the affected count so the user knows whether they're about to
-    // archive 2 or 200 sessions. Best-effort: on failure `archivableCount` stays
+    // Preview the affected count. Best-effort: on failure `archivableCount` stays
     // null and the prompt falls back to the generic (count-less) confirmation
     // rather than blocking the action.
     let archivableCount: number | null = null;
@@ -912,18 +917,30 @@ export function useSidebarController({
       console.error('[Sidebar] Failed to preview archivable session count:', error);
     }
 
+    // Both kinds open the dialog: `confirm` asks before archiving, `inform`
+    // (nothing qualifies) shows an OK-only notice instead of running a no-op.
     const prompt = buildBulkArchivePrompt(archivableCount, olderThanDays, t);
-    // Nothing qualifies — say so instead of confirming (and then running) a no-op.
-    if (prompt.kind === 'inform') {
-      alert(prompt.message);
-      return;
-    }
-    if (!confirm(prompt.message)) {
+    setBulkArchiveByAgePrompt({ prompt, olderThanDays });
+  }, [t]);
+
+  // Dismiss the dialog without archiving (Cancel, or the OK on an `inform`).
+  const cancelBulkArchiveByAge = useCallback(() => {
+    setBulkArchiveByAgePrompt(null);
+  }, []);
+
+  // Bulk declutter, step 2 (confirm): run the archive for the age captured when
+  // the dialog opened, then refresh both the active lists and the archived view
+  // so the moved rows land in their new home. Only a `confirm` prompt archives;
+  // an `inform` dialog has nothing to run.
+  const confirmBulkArchiveByAge = useCallback(async () => {
+    const active = bulkArchiveByAgePrompt;
+    setBulkArchiveByAgePrompt(null);
+    if (!active || active.prompt.kind !== 'confirm') {
       return;
     }
 
     try {
-      const response = await api.bulkArchiveSessionsByAge(olderThanDays);
+      const response = await api.bulkArchiveSessionsByAge(active.olderThanDays);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -940,7 +957,7 @@ export function useSidebarController({
       console.error('[Sidebar] Error bulk-archiving sessions by age:', error);
       alert(t('messages.archiveSessionError', 'Error archiving session. Please try again.'));
     }
-  }, [refreshProjects, t]);
+  }, [bulkArchiveByAgePrompt, refreshProjects, t]);
 
   const updateSessionSummary = useCallback(
     // `_projectId` and `_provider` are preserved for compatibility with
@@ -1022,6 +1039,9 @@ export function useSidebarController({
     restoreArchivedSession,
     refreshProjects,
     bulkArchiveSessionsByAge,
+    bulkArchiveByAgePrompt,
+    confirmBulkArchiveByAge,
+    cancelBulkArchiveByAge,
     updateSessionSummary,
     collapseSidebar,
     expandSidebar,

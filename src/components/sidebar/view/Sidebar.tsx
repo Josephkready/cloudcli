@@ -10,6 +10,7 @@ import type { LLMProvider } from '../../../types/app';
 import type { SidebarProps } from '../types/types';
 
 import SidebarCollapsed from './subcomponents/SidebarCollapsed';
+import BulkArchiveConfirmation from './subcomponents/BulkArchiveConfirmation';
 import SidebarContent from './subcomponents/SidebarContent';
 import SidebarModals from './subcomponents/SidebarModals';
 import type { SidebarProjectListProps } from './subcomponents/SidebarProjectList';
@@ -89,6 +90,9 @@ function Sidebar({
     restoreArchivedSession,
     refreshProjects,
     bulkArchiveSessionsByAge,
+    bulkArchiveByAgePrompt,
+    confirmBulkArchiveByAge,
+    cancelBulkArchiveByAge,
     updateSessionSummary,
     collapseSidebar: handleCollapseSidebar,
     expandSidebar: handleExpandSidebar,
@@ -207,6 +211,14 @@ function Sidebar({
         />
       ) : (
         <>
+        <BulkArchiveConfirmation
+          prompt={bulkArchiveByAgePrompt?.prompt ?? null}
+          onConfirm={() => {
+            void confirmBulkArchiveByAge();
+          }}
+          onCancel={cancelBulkArchiveByAge}
+          t={t}
+        />
         <SidebarContent
             isPWA={isPWA}
             isMobile={isMobile}
