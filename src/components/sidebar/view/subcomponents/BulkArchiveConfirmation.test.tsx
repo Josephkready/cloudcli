@@ -31,8 +31,11 @@ test('a confirm prompt shows the message plus Cancel and Archive actions', () =>
     message: 'Archive 5 conversations idle for 30 days?',
   });
   assert.ok(markup.includes('Archive 5 conversations idle for 30 days?'), 'renders the prompt message');
-  assert.ok(markup.includes('>Archive<'), 'renders the Archive confirm button');
-  assert.ok(markup.includes('>Cancel<'), 'renders the Cancel button');
+  // Exactly one Archive and one Cancel button (no accidental duplication).
+  assert.equal(markup.split('>Archive<').length - 1, 1, 'exactly one Archive button');
+  assert.equal(markup.split('>Cancel<').length - 1, 1, 'exactly one Cancel button');
+  // The Archive action must carry the destructive variant.
+  assert.ok(markup.includes('bg-destructive'), 'Archive action uses the destructive variant');
   // The dismiss-only affordance must not appear on a confirm prompt.
   assert.ok(!markup.includes('>OK<'), 'no OK button on a confirm prompt');
 });
@@ -43,8 +46,9 @@ test('an inform prompt shows the message and only an OK dismiss action', () => {
     message: 'No conversations have been idle for more than 30 days.',
   });
   assert.ok(markup.includes('No conversations have been idle for more than 30 days.'));
-  assert.ok(markup.includes('>OK<'), 'renders the OK dismiss button');
+  assert.equal(markup.split('>OK<').length - 1, 1, 'exactly one OK dismiss button');
   // Destructive/confirm affordances must not appear when nothing qualifies.
   assert.ok(!markup.includes('>Archive<'), 'no Archive button on an inform prompt');
   assert.ok(!markup.includes('>Cancel<'), 'no Cancel button on an inform prompt');
+  assert.ok(!markup.includes('bg-destructive'), 'OK dismiss is not destructive-styled');
 });

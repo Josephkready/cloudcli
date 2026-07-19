@@ -211,15 +211,15 @@ function Sidebar({
         />
       ) : (
         <>
-        <BulkArchiveConfirmation
-          prompt={bulkArchiveByAgePrompt?.prompt ?? null}
-          onConfirm={() => {
-            void confirmBulkArchiveByAge();
-          }}
-          onCancel={cancelBulkArchiveByAge}
-          t={t}
-        />
-        <SidebarContent
+          <BulkArchiveConfirmation
+            prompt={bulkArchiveByAgePrompt?.prompt ?? null}
+            onConfirm={() => {
+              void confirmBulkArchiveByAge();
+            }}
+            onCancel={cancelBulkArchiveByAge}
+            t={t}
+          />
+          <SidebarContent
             isPWA={isPWA}
             isMobile={isMobile}
             isLoading={isLoading}

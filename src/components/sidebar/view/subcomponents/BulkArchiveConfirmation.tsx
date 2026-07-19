@@ -40,7 +40,7 @@ export function BulkArchiveConfirmation({
   }
 
   return (
-    <Confirmation approval="pending" role="alertdialog" aria-label={prompt.message} className="m-2">
+    <Confirmation approval="pending" role="alert" aria-label={prompt.message} className="m-2">
       <ConfirmationTitle>{prompt.message}</ConfirmationTitle>
       <ConfirmationActions>
         {prompt.kind === 'confirm' ? (

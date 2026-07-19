@@ -134,6 +134,10 @@ export function useSidebarController({
   // applies to), or null when closed. Replaces the blocking window.confirm.
   const [bulkArchiveByAgePrompt, setBulkArchiveByAgePrompt] =
     useState<{ prompt: BulkArchivePrompt; olderThanDays: number } | null>(null);
+  // Monotonic id for the async archivable-count preview. Bumped on every new
+  // request and on dismissal, so a slow/superseded preview can't resurrect a
+  // stale dialog after the user moved on (the old blocking confirm couldn't race).
+  const bulkArchivePreviewIdRef = useRef(0);
   const [searchMode, setSearchMode] = useState<SidebarSearchMode>('conversations');
   const [conversationResults, setConversationResults] = useState<ConversationSearchResults | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -898,6 +902,8 @@ export function useSidebarController({
   // state rendered as an inline Confirmation banner; the actual archive runs in
   // `confirmBulkArchiveByAge`.
   const bulkArchiveSessionsByAge = useCallback(async (olderThanDays: number) => {
+    const requestId = bulkArchivePreviewIdRef.current + 1;
+    bulkArchivePreviewIdRef.current = requestId;
     // Preview the affected count. Best-effort: on failure `archivableCount` stays
     // null and the prompt falls back to the generic (count-less) confirmation
     // rather than blocking the action.
@@ -917,6 +923,12 @@ export function useSidebarController({
       console.error('[Sidebar] Failed to preview archivable session count:', error);
     }
 
+    // A newer request started (or the dialog was dismissed) while this preview
+    // was in flight — drop this now-stale result instead of reopening the dialog.
+    if (requestId !== bulkArchivePreviewIdRef.current) {
+      return;
+    }
+
     // Both kinds open the dialog: `confirm` asks before archiving, `inform`
     // (nothing qualifies) shows an OK-only notice instead of running a no-op.
     const prompt = buildBulkArchivePrompt(archivableCount, olderThanDays, t);
@@ -924,7 +936,10 @@ export function useSidebarController({
   }, [t]);
 
   // Dismiss the dialog without archiving (Cancel, or the OK on an `inform`).
+  // Bumping the preview id discards any still-in-flight preview so it can't pop
+  // the dialog back open after the user dismissed it.
   const cancelBulkArchiveByAge = useCallback(() => {
+    bulkArchivePreviewIdRef.current += 1;
     setBulkArchiveByAgePrompt(null);
   }, []);
 
@@ -933,6 +948,7 @@ export function useSidebarController({
   // so the moved rows land in their new home. Only a `confirm` prompt archives;
   // an `inform` dialog has nothing to run.
   const confirmBulkArchiveByAge = useCallback(async () => {
+    bulkArchivePreviewIdRef.current += 1;
     const active = bulkArchiveByAgePrompt;
     setBulkArchiveByAgePrompt(null);
     if (!active || active.prompt.kind !== 'confirm') {
@@ -989,6 +1005,10 @@ export function useSidebarController({
   );
 
   const collapseSidebar = useCallback(() => {
+    // Collapsing hides the sidebar (and the inline dialog); dismiss any open
+    // bulk-archive prompt so it doesn't silently reappear on re-expand.
+    bulkArchivePreviewIdRef.current += 1;
+    setBulkArchiveByAgePrompt(null);
     setSidebarVisible(false);
   }, [setSidebarVisible]);
 
