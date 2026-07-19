@@ -1,0 +1,45 @@
+name: CI
+
+# Quality gate for every pull request and every push to main. Until this
+# landed, nothing in CI ran the tests or lint, so a regression could merge
+# freely (#101). There is no coverage floor yet: the suites gate on test / lint
+# / type failures and emit a coverage summary to ratchet against over time.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel an in-progress run when the same ref is pushed again (e.g. a new commit
+# on a PR branch) so CI always reflects the latest commit.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, typecheck & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Server tests (with coverage)
+        run: npm run test:server:coverage
+
+      - name: Frontend unit tests (with coverage)
+        run: npm run test:unit:coverage
