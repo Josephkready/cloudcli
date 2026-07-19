@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { transcribeVoice } from '../../../lib/voiceApi';
+import { readVoiceError } from '../../../lib/voiceError';
 
 // Mobile-safe recording: iOS Safari 18.4+ supports webm/opus; older iOS needs mp4.
 const MIME_CANDIDATES = [
@@ -97,7 +98,7 @@ export function useVoiceInput(
         try {
           const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
           const res = await transcribeVoice(blob, `recording.${ext}`);
-          if (!res.ok) throw new Error(`transcribe ${res.status}`);
+          if (!res.ok) throw new Error(await readVoiceError(res));
           const data = await res.json();
           if (cancelledRef.current) return;
           const text = String(data?.text || '').trim();
