@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
@@ -486,5 +486,84 @@ test('submitMessage rejects past the pending-queue cap instead of dropping silen
     const overflow = chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'overflow'));
     assert.equal(overflow.action, 'rejected');
     assert.equal(chatRunRegistry.getPendingCount('q-4'), 50);
+  });
+});
+
+/** How long a completed run stays replayable (COMPLETED_RUN_RETENTION_MS). */
+const RETENTION_MS = 5 * 60 * 1000;
+
+test('a completed run stays replayable for the retention window, then is evicted', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('retained', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+
+    // Timers are faked only around the eviction itself — the database is already
+    // initialized, and they are reset before teardown.
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      const run = chatRunRegistry.startRun({
+        appSessionId: 'retained',
+        provider: 'claude',
+        providerSessionId: null,
+        connection,
+        userId: null,
+      });
+      assert.ok(run);
+
+      run.writer.send({ kind: 'assistant', provider: 'claude', content: 'answer' });
+      chatRunRegistry.completeRun('retained', { exitCode: 0 });
+      assert.equal(chatRunRegistry.isProcessing('retained'), false);
+
+      // A client that was asleep while the run finished can still replay it right
+      // up to the end of the retention window.
+      mock.timers.tick(RETENTION_MS - 1);
+      assert.equal(chatRunRegistry.getRun('retained')?.status, 'completed');
+      assert.equal(chatRunRegistry.replayEvents('retained', 0).length, 2, 'event + terminal complete');
+
+      // Past the window the buffer is released; replay falls back to REST history.
+      mock.timers.tick(2);
+      assert.equal(chatRunRegistry.getRun('retained'), undefined);
+      assert.deepEqual(chatRunRegistry.replayEvents('retained', 0), []);
+      assert.equal(chatRunRegistry.isProcessing('retained'), false, 'an evicted run reads as idle, not running');
+    } finally {
+      mock.timers.reset();
+    }
+  });
+});
+
+test('the eviction timer never removes the session\'s newer, still-running run', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('reused', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const input = {
+      appSessionId: 'reused',
+      provider: 'claude' as const,
+      providerSessionId: null,
+      connection: connection as never,
+      userId: null,
+    };
+
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      assert.ok(chatRunRegistry.startRun(input));
+      chatRunRegistry.completeRun('reused', { exitCode: 0 });
+
+      // A follow-up turn replaces the map entry well before the first run's
+      // eviction timer fires. That timer must not delete the live run.
+      mock.timers.tick(RETENTION_MS / 2);
+      const second = chatRunRegistry.startRun(input);
+      assert.ok(second);
+
+      mock.timers.tick(RETENTION_MS);
+      assert.equal(chatRunRegistry.getRun('reused'), second, 'the running run survives the stale timer');
+      assert.equal(chatRunRegistry.isProcessing('reused'), true);
+
+      // Once it completes it gets its own timer and is evicted on its own clock.
+      chatRunRegistry.completeRun('reused', { exitCode: 0 });
+      mock.timers.tick(RETENTION_MS + 1);
+      assert.equal(chatRunRegistry.getRun('reused'), undefined);
+    } finally {
+      mock.timers.reset();
+    }
   });
 });
