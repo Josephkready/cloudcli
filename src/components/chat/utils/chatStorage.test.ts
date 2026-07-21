@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseQueuedMessages, serializeQueuedMessages, type StoredQueuedMessage } from './chatStorage';
+import { withGlobals, withLocalStorage } from '../../../test/nodeStubs';
+
+import {
+  parseQueuedMessages,
+  serializeQueuedMessages,
+  safeLocalStorage,
+  readQueuedMessages,
+  writeQueuedMessages,
+  getClaudeSettings,
+  queuedMessageKey,
+  CLAUDE_SETTINGS_KEY,
+  type StoredQueuedMessage,
+} from './chatStorage';
 
 /* ── parseQueuedMessages: reading + migrating the persisted queue ────────── */
 
@@ -95,4 +107,150 @@ test('round-trip: parse(serialize(list)) preserves FIFO order and cleans empties
     { content: 'two' },
     { content: 'three', options: { effort: 'high' } },
   ]);
+});
+
+/* ── safeLocalStorage: the storage wrapper that never throws ─────────────── */
+
+test('safeLocalStorage get/set/remove round-trip through the backing store', () => {
+  withLocalStorage({}, (store) => {
+    safeLocalStorage.setItem('k', 'v');
+    assert.equal(store.getItem('k'), 'v');
+    assert.equal(safeLocalStorage.getItem('k'), 'v');
+    assert.equal(safeLocalStorage.getItem('missing'), null);
+    safeLocalStorage.removeItem('k');
+    assert.equal(safeLocalStorage.getItem('k'), null);
+  });
+});
+
+test('safeLocalStorage.setItem evicts draft/queued keys and retries on QuotaExceededError', () => {
+  const kept = new Map<string, string>([
+    ['draft_input_s1', 'old draft'],
+    ['queued_message_s2', 'old queue'],
+    ['keepme', 'important'],
+  ]);
+  let failNextSet = true;
+  const quotaStore = {
+    getItem: (k: string) => (kept.has(k) ? (kept.get(k) as string) : null),
+    removeItem: (k: string) => { kept.delete(k); },
+    setItem: (k: string, v: string) => {
+      if (failNextSet) {
+        failNextSet = false;
+        const err = new Error('quota');
+        err.name = 'QuotaExceededError';
+        throw err;
+      }
+      kept.set(k, v);
+    },
+  };
+  // `safeLocalStorage` reads `Object.keys(localStorage)` during cleanup, so the
+  // stub must expose its entries as own enumerable properties too.
+  for (const [k, v] of kept) {
+    Object.defineProperty(quotaStore, k, { value: v, enumerable: true, configurable: true });
+  }
+
+  withGlobals({ localStorage: quotaStore }, () => {
+    safeLocalStorage.setItem('claude-settings', '{"x":1}');
+  });
+
+  // The retry succeeded, the disposable draft/queue keys were purged, and the
+  // unrelated key survived.
+  assert.equal(kept.get('claude-settings'), '{"x":1}');
+  assert.equal(kept.has('draft_input_s1'), false);
+  assert.equal(kept.has('queued_message_s2'), false);
+  assert.equal(kept.get('keepme'), 'important');
+});
+
+// The defensive wrapper logs caught errors via console.error; silence it here
+// (the assertion is the swallowed throw + return value, not the log).
+const silentConsole = { ...console, error: () => {}, warn: () => {} };
+
+test('safeLocalStorage.getItem swallows a throwing store and returns null', () => {
+  const throwingStore = {
+    getItem: () => {
+      throw new Error('SecurityError');
+    },
+  };
+  withGlobals({ localStorage: throwingStore, console: silentConsole }, () => {
+    assert.equal(safeLocalStorage.getItem('anything'), null);
+  });
+});
+
+test('safeLocalStorage.setItem swallows a non-quota error without throwing', () => {
+  const throwingStore = {
+    setItem: () => {
+      throw new Error('generic failure');
+    },
+  };
+  withGlobals({ localStorage: throwingStore, console: silentConsole }, () => {
+    assert.doesNotThrow(() => safeLocalStorage.setItem('k', 'v'));
+  });
+});
+
+/* ── readQueuedMessages / writeQueuedMessages: storage-backed queue I/O ───── */
+
+test('write then read a queue round-trips through the session-scoped key', () => {
+  withLocalStorage({}, (store) => {
+    writeQueuedMessages('sess-9', [{ content: 'hello', options: { model: 'm' } }, { content: 'world' }]);
+    assert.equal(typeof store.getItem(queuedMessageKey('sess-9')), 'string');
+    assert.deepEqual(readQueuedMessages('sess-9'), [
+      { content: 'hello', options: { model: 'm' } },
+      { content: 'world' },
+    ]);
+  });
+});
+
+test('writeQueuedMessages removes the key when the queue serializes to nothing', () => {
+  withLocalStorage({ [queuedMessageKey('sess-9')]: 'stale' }, (store) => {
+    writeQueuedMessages('sess-9', [{ content: '   ' }]);
+    assert.equal(store.getItem(queuedMessageKey('sess-9')), null);
+  });
+});
+
+test('readQueuedMessages migrates a legacy raw-text draft on read', () => {
+  withLocalStorage({ [queuedMessageKey('sess-legacy')]: 'unsent draft text' }, () => {
+    assert.deepEqual(readQueuedMessages('sess-legacy'), [{ content: 'unsent draft text' }]);
+  });
+});
+
+/* ── getClaudeSettings: defensive settings read ──────────────────────────── */
+
+test('getClaudeSettings returns hardened defaults when nothing is stored', () => {
+  withLocalStorage({}, () => {
+    assert.deepEqual(getClaudeSettings(), {
+      allowedTools: [],
+      disallowedTools: [],
+      skipPermissions: false,
+      projectSortOrder: 'count',
+    });
+  });
+});
+
+test('getClaudeSettings coerces malformed field types while preserving extras', () => {
+  const raw = JSON.stringify({
+    allowedTools: 'not-an-array',
+    disallowedTools: ['Bash'],
+    skipPermissions: 'yes',
+    theme: 'dark',
+  });
+  withLocalStorage({ [CLAUDE_SETTINGS_KEY]: raw }, () => {
+    const settings = getClaudeSettings();
+    assert.deepEqual(settings.allowedTools, []); // non-array coerced to []
+    assert.deepEqual(settings.disallowedTools, ['Bash']);
+    assert.equal(settings.skipPermissions, true); // Boolean('yes')
+    assert.equal(settings.projectSortOrder, 'count'); // absent -> default
+    assert.equal(settings.theme, 'dark'); // unknown keys passed through
+  });
+});
+
+test('getClaudeSettings falls back to count-order defaults on corrupt JSON', () => {
+  // Regression: this branch used to default projectSortOrder to 'name',
+  // disagreeing with the empty-store and valid-store defaults ('count').
+  withLocalStorage({ [CLAUDE_SETTINGS_KEY]: '{ corrupt json' }, () => {
+    assert.deepEqual(getClaudeSettings(), {
+      allowedTools: [],
+      disallowedTools: [],
+      skipPermissions: false,
+      projectSortOrder: 'count',
+    });
+  });
 });
