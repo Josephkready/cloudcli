@@ -7,7 +7,12 @@ import type {
 import { createCompleteMessage, readObjectRecord } from '@/shared/utils.js';
 
 type ChatSessionWriterOptions = {
-  connection: RealtimeClientConnection;
+  /**
+   * The connection that started the run, seeded as the first subscriber. Optional
+   * because the writer's subscriber set can legitimately be empty (every viewer
+   * left mid-run); further subscribers arrive via `addConnection`.
+   */
+  connection?: RealtimeClientConnection;
   userId: string | number | null;
   provider: LLMProvider;
   /** Provider-native id when resuming an existing session, otherwise null. */
@@ -44,11 +49,13 @@ type ChatSessionWriterOptions = {
 /**
  * Gateway writer handed to provider runtimes instead of a raw websocket writer.
  *
- * It exposes the exact same surface as `WebSocketWriter` (`send`,
- * `setSessionId`, `getSessionId`, `updateWebSocket`, `userId`,
- * `isWebSocketWriter`) so the provider runtimes (`claude-sdk.js`,
- * ...) need zero changes — but everything that flows through
- * it is translated from the provider's world into the app's protocol:
+ * It exposes the runtime-facing surface `WebSocketWriter` provides (`send`,
+ * `setSessionId`, `getSessionId`, `userId`, `isWebSocketWriter`) so the provider
+ * runtimes (`claude-sdk.js`, ...) need zero changes — but everything that flows
+ * through it is translated from the provider's world into the app's protocol.
+ * Connection management differs: instead of a single replaceable `ws`, it holds
+ * a fan-out set managed via `addConnection`/`removeConnection` (issue #204), so
+ * one run can stream to several devices at once:
  *
  * - `session_created` events are swallowed and turned into a provider-id
  *   mapping; the frontend never learns provider-native ids.
@@ -203,13 +210,22 @@ export class ChatSessionWriter {
   private forward(message: NormalizedMessage): void {
     // Fan out to every subscribed socket. Serialize once and gate each socket on
     // its own readyState so one dead connection never blocks the others, and
-    // prune closed sockets so the set cannot leak references to gone tabs.
+    // prune closed sockets so the set cannot leak references to gone tabs. Each
+    // send is isolated in its own try/catch: `ws.send` can still throw (a socket
+    // that raced from OPEN to closing, an internal buffer error), and one such
+    // throw must not skip delivery to — or pruning of — the remaining sockets.
     const serialized = JSON.stringify(message);
     for (const connection of this.connections) {
-      if (connection.readyState === WS_OPEN_STATE) {
-        connection.send(serialized);
-      } else {
+      if (connection.readyState !== WS_OPEN_STATE) {
         this.connections.delete(connection);
+        continue;
+      }
+      try {
+        connection.send(serialized);
+      } catch (error) {
+        this.connections.delete(connection);
+        const messageText = error instanceof Error ? error.message : String(error);
+        console.error('[ChatSessionWriter] Failed to send to a subscriber; pruning it', messageText);
       }
     }
   }

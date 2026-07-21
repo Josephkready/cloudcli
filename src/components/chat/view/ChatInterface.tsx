@@ -13,7 +13,7 @@ import { useChatComposerState } from '../hooks/useChatComposerState';
 import { useInterruptedResume } from '../hooks/useInterruptedResume';
 import { useSessionStore } from '../../../stores/useSessionStore';
 import { shouldOfferResume } from '../utils/interruptedResume';
-import { buildSubscribeTargets } from '../utils/subscribeTargets';
+import { sendSubscribeBatch } from '../utils/subscribeTargets';
 
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
@@ -224,21 +224,22 @@ function ChatInterface({
   // `complete` until the user next switches to it (issue #204). The running set
   // comes from the shared `/api/providers/sessions/running` poll.
   const handleWebSocketReconnect = useCallback(async () => {
-    if (!selectedProject || !selectedSession) return;
-    await sessionStore.refreshFromServer(selectedSession.id);
+    // Refresh the viewed session's transcript (if one is open) so missed
+    // streaming events are shown. A reconnect with no session in view still
+    // re-subscribes background runs below — otherwise a run with no open viewer
+    // at reconnect time would never re-attach (the second half of issue #204).
+    if (selectedProject && selectedSession) {
+      await sessionStore.refreshFromServer(selectedSession.id);
+    }
 
-    const targets = buildSubscribeTargets({
-      selectedSessionId: selectedSession.id,
+    sendSubscribeBatch({
+      selectedSessionId: selectedSession?.id ?? null,
       runningSessionIds: processingSessions ? processingSessions.keys() : [],
       lastSeqFor: (id) => lastSeqRef.current.get(id) ?? 0,
+      now: Date.now(),
+      markSubscribeSent: (id, at) => statusCheckSentAtRef.current.set(id, at),
+      send: sendMessage,
     });
-    if (targets.length === 0) return;
-
-    const now = Date.now();
-    for (const target of targets) {
-      statusCheckSentAtRef.current.set(target.sessionId, now);
-    }
-    sendMessage({ type: 'chat.subscribe', sessions: targets });
   }, [selectedProject, selectedSession, sendMessage, sessionStore, processingSessions]);
 
   useChatRealtimeHandlers({

@@ -50,3 +50,35 @@ export function buildSubscribeTargets(params: {
 
   return targets;
 }
+
+/**
+ * Builds the subscribe batch and, if non-empty, dispatches it: stamps each
+ * target's send time (for the stale-idle-ack guard) and sends one
+ * `chat.subscribe` frame. Extracted from the two React call sites
+ * (`ChatInterface.handleWebSocketReconnect`, `useChatSessionState`) so the
+ * wiring — sourcing the running set, batching, and sending — is unit-testable
+ * without a DOM. Returns the targets it sent (empty array = nothing sent).
+ */
+export function sendSubscribeBatch(params: {
+  selectedSessionId: string | null | undefined;
+  runningSessionIds: Iterable<string>;
+  lastSeqFor: (sessionId: string) => number;
+  /** Clock stamp recorded for every target's send time. */
+  now: number;
+  /** Records when a session's subscribe was sent (guards stale idle acks). */
+  markSubscribeSent: (sessionId: string, at: number) => void;
+  /** The websocket send function. */
+  send: (message: { type: 'chat.subscribe'; sessions: SubscribeTarget[] }) => void;
+}): SubscribeTarget[] {
+  const { now, markSubscribeSent, send, ...targetParams } = params;
+  const targets = buildSubscribeTargets(targetParams);
+  if (targets.length === 0) {
+    return targets;
+  }
+
+  for (const target of targets) {
+    markSubscribeSent(target.sessionId, now);
+  }
+  send({ type: 'chat.subscribe', sessions: targets });
+  return targets;
+}

@@ -110,7 +110,10 @@ When a chat socket connects:
 1. Add socket to `connectedClients`.
 2. Parse each incoming message with `parseIncomingJsonObject`.
 3. Dispatch by `data.type` (four message types, none provider-specific).
-4. On close, remove socket from `connectedClients`.
+4. On close, remove socket from `connectedClients` **and** prune it from every
+   run's subscriber set via `chatRunRegistry.detachConnectionFromAllRuns(ws)` —
+   the runs keep going (buffered events + journal stay intact for the remaining
+   and any future subscribers); closing one viewer never cancels a run.
 
 ### Session identity model
 
@@ -142,7 +145,7 @@ flowchart TD
 
 1. **Unified envelope**: every server-to-client frame carries a `kind` — either a provider `NormalizedMessage` kind or a gateway kind (`chat_subscribed`, `chat_resumed`, `session_upserted`, `loading_progress`, `protocol_error`). There is no second `type`-based protocol.
 2. **Unified terminal lifecycle**: every provider run ends with exactly one `complete` message built by `createCompleteMessage()` (`server/shared/utils.ts`): `{ kind: "complete", sessionId, actualSessionId, exitCode, success, aborted }`. The chat handler emits a synthetic `complete` for runs that crash or get aborted, and the run registry drops duplicate completes.
-3. **Per-run event log**: every live event gets a monotonically increasing `seq`. `chat.subscribe { sessions: [{ sessionId, lastSeq }] }` re-attaches the live stream to the requesting socket (any provider, not just Claude) and replays events with `seq > lastSeq`. If the buffer no longer covers `lastSeq`, the client refreshes over REST.
+3. **Per-run event log + multi-subscriber fan-out**: every live event gets a monotonically increasing `seq`. A run holds a **set** of subscriber sockets, not a single one, so `chat.subscribe { sessions: [{ sessionId, lastSeq }] }` **joins** the requesting socket to the live stream (any provider, not just Claude) rather than displacing whoever was already watching — a second device or a reconnecting tab both stream concurrently, and each still gets the terminal `complete` (issue #204). On subscribe, events with `seq > lastSeq` are replayed to the joining socket; if the buffer no longer covers `lastSeq`, the client refreshes over REST. Closed sockets are pruned from the set on the next send and on disconnect. Clients re-subscribe **every** running session (not just the viewed one) on reconnect, so background runs re-attach to the new socket.
 4. `chat_subscribed` includes `isProcessing` (replaces `check-session-status`), `pendingPermissions` (replaces `get-pending-permissions`), and `interrupted` (true when a previous process left in-flight/queued work for this session that a `chat.resume` can re-dispatch).
 5. **Restart persistence + resume** (`active_runs` table, issue #70): the in-memory run registry is mirrored to a durable SQLite journal — one row per accepted `chat.send` (`running`/`queued`), deleted at the single completion choke point so a clean run leaves no trace. On SIGTERM/SIGINT the server enters a bounded graceful drain (`CHAT_DRAIN_TIMEOUT_MS`, default 10s): new sends are refused with a `SERVER_DRAINING` `protocol_error` while in-flight runs finish. Anything still journaled after a restart is flagged `interrupted` by the startup reconcile and surfaced via `chat_subscribed.interrupted`; `chat.resume { sessionId }` re-dispatches those messages, in arrival order (the head resuming the provider transcript by provider-native id, the rest queueing behind it), and acks with `chat_resumed { sessionId, resumed }`. Net: no in-flight or queued message is silently lost across a restart.
 

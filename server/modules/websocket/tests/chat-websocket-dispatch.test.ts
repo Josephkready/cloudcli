@@ -1232,6 +1232,34 @@ test('a second device subscribing joins the live stream without stealing it from
   });
 });
 
+test('two subscribers open at once each receive exactly one terminal complete', async () => {
+  await withIsolatedDatabase(async () => {
+    const { spawn, calls } = makeControllableSpawn();
+    const { dependencies } = makeDependencies(spawn);
+    sessionsDb.createAppSession('dual-complete', 'claude', '/workspace/demo');
+
+    const first = new FakeSocket();
+    const second = new FakeSocket();
+    connect(first, dependencies);
+    connect(second, dependencies);
+
+    sendChat(first, 'dual-complete', 'hello');
+    await settle();
+    // The second device joins and stays open through completion.
+    emit(second, { type: 'chat.subscribe', sessions: [{ sessionId: 'dual-complete', lastSeq: 0 }] });
+    await settle();
+    assert.equal(chatRunRegistry.getRun('dual-complete')?.writer.connectionCount, 2, 'both sockets subscribed');
+
+    finishRun(calls[0] as SpawnCall);
+    await settle();
+
+    // The terminal `complete` fans out to BOTH still-open subscribers, exactly
+    // once each — neither device is left stuck "processing" (issue #204).
+    assert.equal(first.framesOfKind('complete').length, 1, 'first subscriber completes');
+    assert.equal(second.framesOfKind('complete').length, 1, 'second subscriber completes');
+  });
+});
+
 test('a background run keeps running when its viewer drops and re-attaches on reconnect', async () => {
   await withIsolatedDatabase(async () => {
     const { spawn, calls } = makeControllableSpawn();

@@ -598,8 +598,11 @@ function handleChatSubscribe(
     const run = chatRunRegistry.getRun(sessionId);
     const isProcessing = chatRunRegistry.isProcessing(sessionId);
 
-    // Future live events for this run should land on the socket that asked —
-    // this is what makes mid-stream page refreshes work for all providers.
+    // Future live events for this run should ALSO land on this socket, in
+    // addition to any other devices already watching it — subscribing JOINS the
+    // run's fan-out set rather than displacing the current subscriber (issue
+    // #204). This is what makes mid-stream page refreshes and multi-device
+    // viewing work for all providers.
     if (isProcessing) {
       chatRunRegistry.attachConnection(sessionId, ws);
     }
@@ -726,13 +729,14 @@ export function handleChatConnection(
   });
 
   ws.on('close', () => {
-    console.log('[INFO] Chat client disconnected');
     connectedClients.delete(ws);
     // Remove this socket from every run it was subscribed to so no fan-out set
     // keeps writing to a dead connection. The runs themselves keep going —
     // their buffered events and journal stay intact for the remaining and any
     // future subscribers — so closing one viewer never cancels a run or starves
-    // another device watching it (issue #204).
-    chatRunRegistry.detachConnectionFromAllRuns(ws);
+    // another device watching it (issue #204). The detach count is logged as a
+    // cheap signal for spotting fan-out-set leaks on disconnect.
+    const detachedFrom = chatRunRegistry.detachConnectionFromAllRuns(ws);
+    console.log(`[INFO] Chat client disconnected (detached from ${detachedFrom} run(s))`);
   });
 }
