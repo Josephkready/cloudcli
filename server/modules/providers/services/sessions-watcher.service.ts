@@ -132,30 +132,52 @@ export async function broadcastSessionUpserted(sessionId: string): Promise<void>
   });
 }
 
-async function broadcastWatcherBatch(batch: SessionUpsertBatch): Promise<void> {
-  // Per-session deltas instead of full project snapshots: an upsert of one
-  // session can never clobber unrelated client state, so the frontend needs
-  // no "suppress updates while a run is active" protection logic.
+/**
+ * Builds the `session_upserted` payloads for a batch of session ids, isolating
+ * failures per session.
+ *
+ * Building one event touches the DB and the filesystem (live-status probing),
+ * and the batch has already been detached from the debouncer's queue by the time
+ * this runs — so a single session throwing must not abort the loop. Doing so used
+ * to silently and permanently drop every other session's delta in the same
+ * batch. Each id is therefore built in its own try/catch, and only failing ids
+ * are dropped (and logged). Exported for its own regression test.
+ */
+export async function buildResilientSessionEvents(
+  sessionIds: Iterable<string>,
+  buildEvent: (sessionId: string) => Promise<string | null>,
+  onError: (sessionId: string, error: unknown) => void = defaultSessionEventBuildErrorLogger
+): Promise<string[]> {
   const events: string[] = [];
-  for (const updatedSessionId of batch.updatedSessionIds) {
-    // Per-session isolation: building an event touches the DB and the
-    // filesystem (live-status probing), and one unlucky session throwing used
-    // to abort the whole loop — silently dropping the deltas of every other
-    // session in the same batch, permanently, since the batch has already been
-    // detached from the queue.
+  for (const sessionId of sessionIds) {
     try {
-      const event = await buildSessionUpsertedEvent(updatedSessionId);
+      const event = await buildEvent(sessionId);
       if (event) {
         events.push(event);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error('Session watcher failed to build a session_upserted event', {
-        sessionId: updatedSessionId,
-        error: message,
-      });
+      onError(sessionId, error);
     }
   }
+  return events;
+}
+
+function defaultSessionEventBuildErrorLogger(sessionId: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error('Session watcher failed to build a session_upserted event', {
+    sessionId,
+    error: message,
+  });
+}
+
+async function broadcastWatcherBatch(batch: SessionUpsertBatch): Promise<void> {
+  // Per-session deltas instead of full project snapshots: an upsert of one
+  // session can never clobber unrelated client state, so the frontend needs
+  // no "suppress updates while a run is active" protection logic.
+  const events = await buildResilientSessionEvents(
+    batch.updatedSessionIds,
+    buildSessionUpsertedEvent
+  );
 
   if (events.length === 0) {
     return;
