@@ -546,7 +546,12 @@ async function handleChatAbort(
     success = Boolean(await abortFn(run.providerSessionId));
   }
 
-  chatRunRegistry.completeRun(sessionId, {
+  // Scoped to THIS run, not the session: the Claude abort is async, and while it
+  // is awaited the aborted run can finish and the dispatcher can start the
+  // session's next queued message. A session-keyed complete would then terminate
+  // that newer run — a message the user never aborted — leaving the client with
+  // a terminal `complete` for a turn that is still streaming.
+  chatRunRegistry.completeRunIfCurrent(run, {
     exitCode: success ? 0 : 1,
     aborted: true,
   });
