@@ -5,17 +5,17 @@ import { authenticatedFetch } from '../../../utils/api';
 import { safeLocalStorage } from '../utils/chatStorage';
 import type { LLMProvider, Project } from '../../../types/app';
 
-const COMMAND_QUERY_DEBOUNCE_MS = 150;
+import {
+  dedupeProviderSkills,
+  filterSlashCommands,
+  isSkillCommand,
+  mapSkillToSlashCommand,
+} from './useSlashCommands.pure';
+import type { ProviderSkill, SlashCommand } from './useSlashCommands.pure';
 
-export interface SlashCommand {
-  name: string;
-  description?: string;
-  namespace?: string;
-  path?: string;
-  type?: 'built-in' | 'custom' | 'skill' | string;
-  metadata?: Record<string, unknown>;
-  [key: string]: unknown;
-}
+export type { SlashCommand } from './useSlashCommands.pure';
+
+const COMMAND_QUERY_DEBOUNCE_MS = 150;
 
 interface UseSlashCommandsOptions {
   selectedProject: Project | null;
@@ -25,16 +25,6 @@ interface UseSlashCommandsOptions {
   textareaRef: RefObject<HTMLTextAreaElement>;
   onExecuteCommand: (command: SlashCommand, rawInput?: string) => void | Promise<void>;
 }
-
-type ProviderSkill = {
-  name: string;
-  description?: string;
-  command: string;
-  scope: string;
-  sourcePath?: string;
-  pluginName?: string;
-  pluginId?: string;
-};
 
 type ProviderSkillsResponse = {
   success?: boolean;
@@ -65,75 +55,6 @@ const saveCommandHistory = (projectName: string, history: Record<string, number>
 
 const isPromiseLike = (value: unknown): value is Promise<unknown> =>
   Boolean(value) && typeof (value as Promise<unknown>).then === 'function';
-
-const isSkillCommand = (command: SlashCommand) =>
-  command.type === 'skill' || command.metadata?.type === 'skill';
-
-const dedupeProviderSkills = (skills: ProviderSkill[]): ProviderSkill[] => {
-  const seenCommands = new Set<string>();
-
-  return skills.filter((skill) => {
-    // Multiple physical Claude plugin folders can expose the same invocation.
-    // The slash menu should show each executable command only once.
-    const key = skill.command;
-    if (seenCommands.has(key)) {
-      return false;
-    }
-
-    seenCommands.add(key);
-    return true;
-  });
-};
-
-const mapSkillToSlashCommand = (skill: ProviderSkill): SlashCommand => ({
-  name: skill.command,
-  description: skill.description,
-  namespace: 'skill',
-  path: skill.sourcePath,
-  type: 'skill',
-  metadata: {
-    type: skill.scope,
-    scope: skill.scope,
-    sourcePath: skill.sourcePath,
-    pluginName: skill.pluginName,
-    pluginId: skill.pluginId,
-    skillName: skill.name,
-  },
-});
-
-const filterSlashCommands = (
-  commands: SlashCommand[],
-  query: string,
-): SlashCommand[] => {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) {
-    return commands;
-  }
-
-  const commandPrefix = normalizedQuery.startsWith('/')
-    ? normalizedQuery
-    : `/${normalizedQuery}`;
-  const namePrefixMatches = commands.filter((command) =>
-    command.name.toLowerCase().startsWith(commandPrefix),
-  );
-
-  // Namespaced commands should behave like path completion. Once a provider
-  // namespace is typed, only exact command-prefix matches should stay visible.
-  if (normalizedQuery.includes(':') || namePrefixMatches.length > 0) {
-    return namePrefixMatches;
-  }
-
-  const nameSubstringMatches = commands.filter((command) =>
-    command.name.toLowerCase().includes(normalizedQuery),
-  );
-  if (nameSubstringMatches.length > 0) {
-    return nameSubstringMatches;
-  }
-
-  return commands.filter((command) =>
-    command.description?.toLowerCase().includes(normalizedQuery),
-  );
-};
 
 export function useSlashCommands({
   selectedProject,
