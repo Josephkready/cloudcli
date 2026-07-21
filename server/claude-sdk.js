@@ -180,6 +180,8 @@ function approvalTimeoutForTool(toolName) {
  *   - `null` (finite-timeout auto-deny) → "Permission request timed out"
  *   - `{ cancelled: true }` (abort / interrupt) → "Permission request cancelled"
  *   - `{ allow: false, message? }` (user denial) → the user's message (or default)
+ * Precondition: the caller resolves the allow case first — an `{ allow: true }`
+ * decision passed here would be mis-mapped to a user denial.
  * Split out so this mapping is unit-testable without driving a full SDK run.
  */
 function denyResultForDecision(decision) {
