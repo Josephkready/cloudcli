@@ -306,7 +306,7 @@ test('replayEvents returns only events after the requested seq', async () => {
   });
 });
 
-test('attachConnection reroutes the live stream to a new socket', async () => {
+test('attachConnection fans the live stream out to a second socket without stealing it', async () => {
   await withIsolatedDatabase(() => {
     sessionsDb.createAppSession('app-run-5', 'codex', '/workspace/demo');
     const firstConnection = new FakeConnection();
@@ -325,8 +325,64 @@ test('attachConnection reroutes the live stream to a new socket', async () => {
     assert.equal(chatRunRegistry.attachConnection('app-run-5', secondConnection), true);
     run.writer.send({ kind: 'stream_delta', provider: 'codex', sessionId: 'o', content: 'after' });
 
-    assert.deepEqual(firstConnection.frames.map((frame) => frame.content), ['before']);
+    // The second socket JOINS the stream (issue #204): the first keeps every
+    // frame it was already receiving, and both get everything after the join.
+    assert.deepEqual(firstConnection.frames.map((frame) => frame.content), ['before', 'after']);
     assert.deepEqual(secondConnection.frames.map((frame) => frame.content), ['after']);
+    assert.equal(run.writer.connectionCount, 2, 'both sockets are subscribed');
+
+    // attachConnection on an unknown session is a no-op that reports false.
+    assert.equal(chatRunRegistry.attachConnection('missing-session', new FakeConnection()), false);
+  });
+});
+
+test('detachConnectionFromAllRuns removes one socket from every run without cancelling any', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('detach-a', 'codex', '/workspace/demo');
+    sessionsDb.createAppSession('detach-b', 'codex', '/workspace/demo');
+
+    // Socket X starts run A and also subscribes to run B; socket Y watches only A.
+    const socketX = new FakeConnection();
+    const socketY = new FakeConnection();
+
+    const runA = chatRunRegistry.startRun({
+      appSessionId: 'detach-a',
+      provider: 'codex',
+      providerSessionId: null,
+      connection: socketX,
+      userId: null,
+    });
+    const runB = chatRunRegistry.startRun({
+      appSessionId: 'detach-b',
+      provider: 'codex',
+      providerSessionId: null,
+      connection: socketX,
+      userId: null,
+    });
+    assert.ok(runA && runB);
+    chatRunRegistry.attachConnection('detach-a', socketY);
+    assert.equal(runA.writer.connectionCount, 2);
+    assert.equal(runB.writer.connectionCount, 1);
+
+    // X closes: it is detached from BOTH runs it was subscribed to, but Y keeps
+    // its subscription to A and neither run is cancelled.
+    const detachedFrom = chatRunRegistry.detachConnectionFromAllRuns(socketX);
+    assert.equal(detachedFrom, 2, 'X was subscribed to two runs');
+    assert.equal(runA.writer.connectionCount, 1, 'Y is untouched by X leaving');
+    assert.equal(runB.writer.connectionCount, 0, 'B now has no live subscriber');
+    assert.equal(chatRunRegistry.isProcessing('detach-a'), true, 'run A keeps running');
+    assert.equal(chatRunRegistry.isProcessing('detach-b'), true, 'run B keeps running');
+
+    // Run A still delivers to Y; run B buffers for a future subscriber.
+    runA.writer.send({ kind: 'stream_delta', provider: 'codex', sessionId: 'o', content: 'to-Y' });
+    runB.writer.send({ kind: 'stream_delta', provider: 'codex', sessionId: 'o', content: 'buffered' });
+    assert.deepEqual(socketY.frames.map((frame) => frame.content), ['to-Y']);
+    assert.equal(socketX.frames.length, 0, 'nothing is written to the closed socket');
+    assert.equal(
+      chatRunRegistry.replayEvents('detach-b', 0).some((event) => event.content === 'buffered'),
+      true,
+      'run B still buffers events for whoever subscribes next',
+    );
   });
 });
 

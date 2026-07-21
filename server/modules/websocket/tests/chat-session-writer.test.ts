@@ -168,37 +168,88 @@ test('an event the registry drops is never forwarded', () => {
   assert.equal(connection.frames.length, 0, 'but the client did not');
 });
 
-test('forward is gated on readyState: a closed socket drops frames without throwing', () => {
+test('forward gates on readyState and prunes a non-open socket without throwing', () => {
   const { writer, connection, decorated } = makeWriter();
 
   writer.send({ kind: 'assistant', provider: 'claude', content: 'delivered' });
   assert.equal(connection.frames.length, 1);
 
-  // CLOSING / CLOSED / CONNECTING are all "not open".
-  for (const readyState of [0, 2, 3]) {
-    connection.readyState = readyState;
-    writer.send({ kind: 'assistant', provider: 'claude', content: 'dropped' });
-  }
+  // A socket that is no longer open is skipped AND pruned from the fan-out set,
+  // so the writer never keeps writing to — or holding a reference to — a dead
+  // connection (CLOSING / CLOSED / CONNECTING are all "not open").
+  connection.readyState = 3; // CLOSED
+  writer.send({ kind: 'assistant', provider: 'claude', content: 'dropped' });
   assert.equal(connection.frames.length, 1, 'nothing is written to a non-open socket');
-  assert.equal(decorated.length, 4, 'events are still sequenced/buffered for later replay');
+  assert.equal(writer.connectionCount, 0, 'the non-open socket is pruned from the set');
+  assert.equal(decorated.length, 2, 'events are still sequenced/buffered for later replay');
 
-  // Re-opening (or re-attaching a new socket) resumes delivery.
-  connection.readyState = 1;
+  // Recovery is a fresh subscribe: re-attaching a new open socket resumes
+  // delivery, and the per-run sequencing continues uninterrupted.
+  const reattached = new FakeConnection();
+  writer.addConnection(reattached as unknown as RealtimeClientConnection);
   writer.send({ kind: 'assistant', provider: 'claude', content: 'delivered again' });
-  assert.equal(connection.frames.length, 2);
+  assert.equal(reattached.frames.length, 1);
+  assert.equal(reattached.frames[0]?.seq, 3, 'sequencing continues across the reattach');
 });
 
-test('updateWebSocket redirects subsequent frames to the new connection', () => {
+test('addConnection fans out subsequent frames to every subscribed socket', () => {
   const { writer, connection } = makeWriter();
-  const replacement = new FakeConnection();
+  const second = new FakeConnection();
 
   writer.send({ kind: 'assistant', provider: 'claude', content: 'first' });
-  writer.updateWebSocket(replacement as unknown as RealtimeClientConnection);
+  writer.addConnection(second as unknown as RealtimeClientConnection);
   writer.send({ kind: 'assistant', provider: 'claude', content: 'second' });
 
-  assert.equal(connection.frames.length, 1, 'the original socket keeps only its earlier frame');
-  assert.equal(replacement.frames.length, 1);
-  assert.equal(replacement.frames[0]?.seq, 2, 'sequencing continues across the reattach');
+  // A second subscriber JOINS the live stream instead of stealing it: the
+  // original socket keeps receiving every frame (issue #204).
+  assert.equal(connection.frames.length, 2, 'the original socket keeps streaming after a join');
+  assert.equal(second.frames.length, 1, 'the new socket receives frames from when it joined');
+  assert.equal(second.frames[0]?.seq, 2, 'sequencing continues across the join');
+  assert.equal(writer.connectionCount, 2, 'both sockets are subscribed');
+});
+
+test('addConnection is de-duplicated so a re-subscribing socket is not double-counted', () => {
+  const { writer, connection } = makeWriter();
+
+  writer.addConnection(connection as unknown as RealtimeClientConnection);
+  writer.addConnection(connection as unknown as RealtimeClientConnection);
+
+  writer.send({ kind: 'assistant', provider: 'claude', content: 'once' });
+  assert.equal(writer.connectionCount, 1, 'the same socket is only held once');
+  assert.equal(connection.frames.length, 1, 'and receives each frame exactly once');
+});
+
+test('forward prunes a closed socket from the fan-out set', () => {
+  const { writer, connection } = makeWriter();
+  const second = new FakeConnection();
+  writer.addConnection(second as unknown as RealtimeClientConnection);
+  assert.equal(writer.connectionCount, 2);
+
+  // The second socket closes without a clean detach; the next forward gates it
+  // out AND prunes it so the set never leaks a reference to a dead connection.
+  second.readyState = 3;
+  writer.send({ kind: 'assistant', provider: 'claude', content: 'only-open' });
+
+  assert.equal(connection.frames.length, 1, 'the open socket still receives');
+  assert.equal(second.frames.length, 0, 'nothing is written to the closed socket');
+  assert.equal(writer.connectionCount, 1, 'the closed socket is pruned from the set');
+});
+
+test('removeConnection reports whether the socket was subscribed and stops its delivery', () => {
+  const { writer, connection } = makeWriter();
+  const second = new FakeConnection();
+  writer.addConnection(second as unknown as RealtimeClientConnection);
+
+  assert.equal(writer.removeConnection(second as unknown as RealtimeClientConnection), true);
+  assert.equal(
+    writer.removeConnection(second as unknown as RealtimeClientConnection),
+    false,
+    'removing a socket that is not subscribed is a no-op',
+  );
+
+  writer.send({ kind: 'assistant', provider: 'claude', content: 'after-removal' });
+  assert.equal(connection.frames.length, 1, 'the remaining socket still receives');
+  assert.equal(second.frames.length, 0, 'the removed socket receives nothing');
 });
 
 test('sendComplete synthesizes a terminal complete carrying the provider-native id', () => {
@@ -250,9 +301,9 @@ test('isRunActive defaults to true and otherwise mirrors the host status source'
 });
 
 test('the writer stays a drop-in replacement for WebSocketWriter', () => {
-  const { writer, connection } = makeWriter();
+  const { writer } = makeWriter();
 
   assert.equal(writer.isWebSocketWriter, true, 'runtimes feature-detect on this flag');
   assert.equal(writer.userId, 'user-1');
-  assert.equal(writer.ws, connection as unknown as RealtimeClientConnection);
+  assert.equal(writer.connectionCount, 1, 'the constructing connection is subscribed from the start');
 });

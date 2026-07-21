@@ -7,6 +7,7 @@ import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 import type { SessionStore, NormalizedMessage } from '../../../stores/useSessionStore';
 import type { ChatMessage } from '../types/types';
 import { createCachedDiffCalculator, type DiffCalculator } from '../utils/messageTransforms';
+import { buildSubscribeTargets } from '../utils/subscribeTargets';
 
 import { normalizedToChatMessages } from './useChatMessages';
 
@@ -503,14 +504,29 @@ export function useChatSessionState({
         return;
       }
 
-      statusCheckSentAtRef.current.set(selectedSessionId, Date.now());
-      sendMessage({
-        type: 'chat.subscribe',
-        sessions: [{
-          sessionId: selectedSessionId,
-          lastSeq: lastSeqRef.current.get(selectedSessionId) ?? 0,
-        }],
+      // Subscribe the viewed session AND every other session the client believes
+      // is running, batched into one frame. Re-attaching all running sessions
+      // (not just the viewed one) keeps a background run's stream and terminal
+      // `complete` flowing to this socket after a fresh connect/reconnect,
+      // instead of stranding its writer on a stale socket (issue #204). The
+      // running set is the shared processing map fed by the running-sessions
+      // poll; per-session `lastSeq` bounds replay to what this client missed.
+      const targets = buildSubscribeTargets({
+        selectedSessionId,
+        runningSessionIds: processingSessionsRef.current
+          ? processingSessionsRef.current.keys()
+          : [],
+        lastSeqFor: (id) => lastSeqRef.current.get(id) ?? 0,
       });
+      if (targets.length === 0) {
+        return;
+      }
+
+      const now = Date.now();
+      for (const target of targets) {
+        statusCheckSentAtRef.current.set(target.sessionId, now);
+      }
+      sendMessage({ type: 'chat.subscribe', sessions: targets });
     };
 
     // Skip if already loaded and fresh

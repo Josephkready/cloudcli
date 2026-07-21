@@ -1161,10 +1161,10 @@ test('frames for a socket that closed mid-run are dropped, not thrown, and the r
 });
 
 // ---------------------------------------------------------------------------
-// Characterization: multi-device behaviour (issue #105 "Related")
+// Multi-device fan-out (issue #204)
 // ---------------------------------------------------------------------------
 
-test('CHARACTERIZATION: a second device subscribing takes over the live stream from the first', async () => {
+test('a second device subscribing joins the live stream without stealing it from the first', async () => {
   await withIsolatedDatabase(async () => {
     const { spawn, calls } = makeControllableSpawn();
     const { dependencies } = makeDependencies(spawn);
@@ -1180,44 +1180,59 @@ test('CHARACTERIZATION: a second device subscribing takes over the live stream f
     (calls[0] as SpawnCall).writer.send({ kind: 'assistant', provider: 'claude', content: 'chunk-1' });
     assert.equal(phone.framesOfKind('assistant').length, 1, 'the sending device streams normally');
 
-    // The laptop opens the same session while the run is live. The registry
-    // holds ONE connection per run, so attaching the laptop redirects the
-    // stream: from here on the phone receives nothing live.
+    // The laptop opens the same session while the run is live. The run now holds
+    // a SET of subscribers, so the laptop JOINS the fan-out (replaying what it
+    // missed) instead of stealing the stream from the phone.
     emit(laptop, { type: 'chat.subscribe', sessions: [{ sessionId: 'two-device', lastSeq: 0 }] });
     await settle();
+    assert.deepEqual(
+      laptop.frames.filter((frame) => frame.kind === 'assistant').map((frame) => frame.content),
+      ['chunk-1'],
+      'the late subscriber replays the event it missed',
+    );
+
     (calls[0] as SpawnCall).writer.send({ kind: 'assistant', provider: 'claude', content: 'chunk-2' });
 
-    assert.equal(phone.framesOfKind('assistant').length, 1, 'the phone stops receiving live events');
+    // BOTH devices receive the live event — the phone was not cut off.
+    assert.deepEqual(
+      phone.frames.filter((frame) => frame.kind === 'assistant').map((frame) => frame.content),
+      ['chunk-1', 'chunk-2'],
+      'the original device keeps streaming after a second device joins',
+    );
     assert.equal(
       laptop.frames.filter((frame) => frame.content === 'chunk-2').length,
       1,
-      'the laptop now owns the stream',
+      'the second device also receives the live event',
     );
 
-    // If the laptop then goes away, the run is NOT cancelled and its events stay
-    // buffered — but nothing is delivered live until some client re-subscribes.
+    // If the laptop then goes away, it is pruned from the fan-out set, the run is
+    // NOT cancelled, and the phone keeps receiving live events.
     laptop.readyState = 3;
     laptop.emit('close');
-    (calls[0] as SpawnCall).writer.send({ kind: 'assistant', provider: 'claude', content: 'chunk-3' });
-    assert.equal(phone.framesOfKind('assistant').length, 1, 'the phone is still dark');
-    assert.equal(chatRunRegistry.isProcessing('two-device'), true, 'the run itself is untouched');
+    assert.equal(
+      chatRunRegistry.getRun('two-device')?.writer.connectionCount,
+      1,
+      'the closed subscriber is pruned, leaving just the phone',
+    );
 
-    // Recovery path: the phone re-subscribes and replays everything it missed.
-    emit(phone, { type: 'chat.subscribe', sessions: [{ sessionId: 'two-device', lastSeq: 1 }] });
-    await settle();
+    (calls[0] as SpawnCall).writer.send({ kind: 'assistant', provider: 'claude', content: 'chunk-3' });
     assert.deepEqual(
       phone.frames.filter((frame) => frame.kind === 'assistant').map((frame) => frame.content),
       ['chunk-1', 'chunk-2', 'chunk-3'],
-      'no events are lost — but only a re-subscribe recovers them',
+      'the surviving device keeps receiving after the other closes',
     );
+    assert.equal(laptop.framesOfKind('assistant').length, 2, 'nothing is written to the closed socket');
+    assert.equal(chatRunRegistry.isProcessing('two-device'), true, 'the run itself is untouched');
 
+    // Both live subscribers get the terminal complete without needing to
+    // re-subscribe — the phone's panel leaves "processing" on its own.
     finishRun(calls[0] as SpawnCall);
     await settle();
-    assert.equal(phone.framesOfKind('complete').length, 1, 'the re-subscribed device gets the terminal complete');
+    assert.equal(phone.framesOfKind('complete').length, 1, 'the original device gets the terminal complete');
   });
 });
 
-test('CHARACTERIZATION: a run whose viewer never re-subscribes still completes and persists', async () => {
+test('a background run keeps running when its viewer drops and re-attaches on reconnect', async () => {
   await withIsolatedDatabase(async () => {
     const { spawn, calls } = makeControllableSpawn();
     const { dependencies } = makeDependencies(spawn);
@@ -1228,17 +1243,42 @@ test('CHARACTERIZATION: a run whose viewer never re-subscribes still completes a
     sendChat(socket, 'background-run', 'hello');
     await settle();
 
-    // The only viewer disconnects (tab closed / network drop). A reconnecting
-    // client re-subscribes the session it is *viewing*; a background session
-    // like this one is not re-attached, so its completion reaches the UI through
-    // the periodic running-sessions refresh rather than this socket.
+    // The only viewer disconnects (tab closed / network drop). The run is not
+    // cancelled and keeps producing events, which buffer for a later subscriber.
     socket.readyState = 3;
     socket.emit('close');
+    (calls[0] as SpawnCall).writer.send({ kind: 'assistant', provider: 'claude', content: 'while away' });
+    assert.equal(chatRunRegistry.isProcessing('background-run'), true, 'the run keeps going with no live subscriber');
+    assert.equal(socket.frames.length, 0, 'the dead socket received nothing while disconnected');
+
+    // A reconnecting client re-subscribes the session (the frontend now
+    // re-subscribes every running session, not just the viewed one). It
+    // RE-ATTACHES: replays what it missed and receives subsequent live events.
+    const reconnected = new FakeSocket();
+    connect(reconnected, dependencies);
+    emit(reconnected, { type: 'chat.subscribe', sessions: [{ sessionId: 'background-run', lastSeq: 0 }] });
+    await settle();
+    assert.deepEqual(
+      reconnected.frames.filter((frame) => frame.kind === 'assistant').map((frame) => frame.content),
+      ['while away'],
+      'the reconnecting client replays the events buffered while it was gone',
+    );
+
+    (calls[0] as SpawnCall).writer.send({ kind: 'assistant', provider: 'claude', content: 'after reconnect' });
+    assert.equal(
+      reconnected.frames.some((frame) => frame.content === 'after reconnect'),
+      true,
+      'and receives new live events on the reconnected socket',
+    );
+
     finishRun(calls[0] as SpawnCall);
     await settle();
 
+    // The run still completes and persists its durable Done state, AND the
+    // reconnected client gets the terminal complete live.
     assert.equal(chatRunRegistry.isProcessing('background-run'), false);
-    assert.equal(socket.frames.length, 0, 'the dead socket received nothing');
+    assert.equal(reconnected.framesOfKind('complete').length, 1, 'the reconnected client gets the terminal complete');
+    assert.equal(socket.frames.length, 0, 'the dead socket still received nothing');
     assert.ok(
       sessionsDb.getSessionById('background-run')?.last_completed_at,
       'completion is still persisted as the durable Done state',

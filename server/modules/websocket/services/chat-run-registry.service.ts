@@ -642,11 +642,13 @@ export const chatRunRegistry = {
   },
 
   /**
-   * Re-attaches a run's outbound stream to a (new) websocket connection.
+   * Subscribes a websocket connection to a run's outbound stream.
    *
-   * This is the generic replacement for the Claude-only writer reconnect:
-   * after a page refresh the new socket subscribes and immediately starts
-   * receiving the still-running stream, for every provider.
+   * The connection is ADDED to the run's fan-out set rather than replacing the
+   * one already there, so a second device (or a reconnecting one) joins the live
+   * stream instead of stealing it from the device that started the run
+   * (issue #204). After a page refresh the new socket subscribes and immediately
+   * starts receiving the still-running stream, for every provider.
    */
   attachConnection(appSessionId: string, connection: RealtimeClientConnection): boolean {
     const run = runs.get(appSessionId);
@@ -654,8 +656,27 @@ export const chatRunRegistry = {
       return false;
     }
 
-    run.writer.updateWebSocket(connection);
+    run.writer.addConnection(connection);
     return true;
+  },
+
+  /**
+   * Removes a closing socket from EVERY run it was subscribed to. A single
+   * socket can watch several sessions at once, and a run can have several
+   * subscribers, so this prunes just this one connection everywhere — leaving
+   * the other subscribers of each run, and the runs themselves, untouched. The
+   * buffered events and durable journal stay intact for remaining/future
+   * subscribers; a run is never cancelled just because one viewer left
+   * (issue #204). Returns the number of runs the socket was detached from.
+   */
+  detachConnectionFromAllRuns(connection: RealtimeClientConnection): number {
+    let detached = 0;
+    for (const run of runs.values()) {
+      if (run.writer.removeConnection(connection)) {
+        detached += 1;
+      }
+    }
+    return detached;
   },
 
   /**

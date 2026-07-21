@@ -728,5 +728,11 @@ export function handleChatConnection(
   ws.on('close', () => {
     console.log('[INFO] Chat client disconnected');
     connectedClients.delete(ws);
+    // Remove this socket from every run it was subscribed to so no fan-out set
+    // keeps writing to a dead connection. The runs themselves keep going —
+    // their buffered events and journal stay intact for the remaining and any
+    // future subscribers — so closing one viewer never cancels a run or starves
+    // another device watching it (issue #204).
+    chatRunRegistry.detachConnectionFromAllRuns(ws);
   });
 }
