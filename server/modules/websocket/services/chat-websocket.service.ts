@@ -551,6 +551,12 @@ async function handleChatAbort(
   // session's next queued message. A session-keyed complete would then terminate
   // that newer run — a message the user never aborted — leaving the client with
   // a terminal `complete` for a turn that is still streaming.
+  if (chatRunRegistry.getRun(sessionId) !== run) {
+    // Dropping the completion here is the point, but the race is worth
+    // surfacing: it means the provider abort outlived the run it targeted.
+    console.warn('[Chat] Dropping stale abort completion: the aborted run is no longer current', { sessionId });
+  }
+
   chatRunRegistry.completeRunIfCurrent(run, {
     exitCode: success ? 0 : 1,
     aborted: true,

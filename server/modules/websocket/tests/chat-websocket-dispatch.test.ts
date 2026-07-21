@@ -128,6 +128,25 @@ function finishRun(call: SpawnCall): void {
   call.resolve();
 }
 
+/**
+ * Captures `console.warn`/`console.error` for the duration of an expected-error
+ * assertion, so the log line does not leak to the suite's stderr (where it reads
+ * like a real failure) and so the test can assert it was actually emitted.
+ */
+function captureConsole(level: 'warn' | 'error'): { calls: unknown[][]; restore: () => void } {
+  const calls: unknown[][] = [];
+  const original = console[level];
+  console[level] = (...args: unknown[]) => {
+    calls.push(args);
+  };
+  return {
+    calls,
+    restore: () => {
+      console[level] = original;
+    },
+  };
+}
+
 /** Flush pending microtasks so the async dispatch loop can advance. */
 async function settle(times = 4): Promise<void> {
   for (let i = 0; i < times; i += 1) {
@@ -395,8 +414,16 @@ test('a runtime that throws is contained: the client gets a complete and the ses
     sendChat(socket, 'boom-session', 'hello');
     await settle();
 
-    (calls[0] as SpawnCall).reject(new Error('runtime exploded'));
-    await settle();
+    const errors = captureConsole('error');
+    try {
+      (calls[0] as SpawnCall).reject(new Error('runtime exploded'));
+      await settle();
+    } finally {
+      errors.restore();
+    }
+
+    assert.equal(errors.calls.length, 1, 'the runtime failure is logged once for operators');
+    assert.match(String(errors.calls[0]?.[0]), /Provider runtime "claude" failed/);
 
     const completes = socket.framesOfKind('complete');
     assert.equal(completes.length, 1);
@@ -453,6 +480,96 @@ test('a session deleted mid-run ends the run cleanly instead of spawning against
     assert.equal(calls.length, 1, 'the queued message is discarded, not spawned');
     assert.equal(chatRunRegistry.isDispatching('vanish-session'), false);
     assert.equal(chatRunRegistry.getPendingCount('vanish-session'), 0);
+  });
+});
+
+test('a database failure while resolving the run still completes it and releases the dispatcher', async () => {
+  await withIsolatedDatabase(async () => {
+    const { spawn, calls } = makeControllableSpawn();
+    const { dependencies } = makeDependencies(spawn);
+    sessionsDb.createAppSession('db-fail', 'claude', '/workspace/demo');
+
+    const socket = new FakeSocket();
+    connect(socket, dependencies);
+
+    // The handler's own pre-flight lookup succeeds; the one inside the dispatch
+    // path (which re-reads the row to resolve the provider id) blows up.
+    const originalGet = sessionsDb.getSessionById;
+    let lookups = 0;
+    sessionsDb.getSessionById = ((sessionId: string) => {
+      lookups += 1;
+      if (lookups === 2) {
+        throw new Error('database is gone');
+      }
+      return originalGet.call(sessionsDb, sessionId);
+    }) as typeof sessionsDb.getSessionById;
+
+    const errors = captureConsole('error');
+    try {
+      sendChat(socket, 'db-fail', 'hello');
+      await settle();
+    } finally {
+      errors.restore();
+      sessionsDb.getSessionById = originalGet;
+    }
+
+    assert.equal(calls.length, 0, 'nothing is spawned when the row cannot be resolved');
+    assert.equal(errors.calls.length, 1);
+    assert.match(String(errors.calls[0]?.[0]), /Failed to dispatch run/);
+
+    // The client is never left stuck "processing": the finally still completes.
+    const completes = socket.framesOfKind('complete');
+    assert.equal(completes.length, 1);
+    assert.equal(completes[0]?.exitCode, 1);
+    assert.equal(chatRunRegistry.isProcessing('db-fail'), false);
+    assert.equal(chatRunRegistry.isDispatching('db-fail'), false);
+  });
+});
+
+test('an unexpected failure mid-drain releases the dispatcher instead of wedging the session', async () => {
+  await withIsolatedDatabase(async () => {
+    const { spawn, calls } = makeControllableSpawn();
+    const { dependencies } = makeDependencies(spawn);
+    sessionsDb.createAppSession('drain-fail', 'claude', '/workspace/demo');
+
+    const socket = new FakeSocket();
+    connect(socket, dependencies);
+
+    sendChat(socket, 'drain-fail', 'head');
+    sendChat(socket, 'drain-fail', 'queued');
+    await settle();
+    assert.equal(chatRunRegistry.getPendingCount('drain-fail'), 1);
+
+    // Simulate a failure in the handoff between two runs (the only place the
+    // dispatch loop's outer catch can fire, since driveSingleRun never throws).
+    const originalTake = chatRunRegistry.takeNextQueued;
+    chatRunRegistry.takeNextQueued = () => {
+      throw new Error('registry blew up');
+    };
+
+    const errors = captureConsole('error');
+    try {
+      finishRun(calls[0] as SpawnCall);
+      await settle();
+    } finally {
+      errors.restore();
+      chatRunRegistry.takeNextQueued = originalTake;
+    }
+
+    assert.equal(errors.calls.length, 1);
+    assert.match(String(errors.calls[0]?.[0]), /Dispatch loop failed/);
+
+    // Wedged would mean: dispatcher held forever, every future send absorbed
+    // into a queue nobody drains. Instead the session is clean and usable.
+    assert.equal(chatRunRegistry.isDispatching('drain-fail'), false);
+    assert.equal(chatRunRegistry.getPendingCount('drain-fail'), 0);
+    assert.equal(chatRunRegistry.isProcessing('drain-fail'), false);
+
+    sendChat(socket, 'drain-fail', 'after recovery');
+    await settle();
+    assert.equal(calls.length, 2, 'a later send starts a fresh run');
+    finishRun(calls[1] as SpawnCall);
+    await settle();
   });
 });
 
@@ -537,6 +654,7 @@ test('chat.abort cancels the live run via the provider-native id and emits the t
     assert.equal(completes.length, 1);
     assert.equal(completes[0]?.aborted, true);
     assert.equal(completes[0]?.exitCode, 0, 'a successful abort exits 0');
+    assert.equal(completes[0]?.success, false, 'an abort is never a success, even at exitCode 0');
     assert.equal(completes[0]?.sessionId, 'abort-session');
     assert.equal(chatRunRegistry.isProcessing('abort-session'), false);
 
@@ -630,17 +748,35 @@ test('a slow abort that resolves after the next queued run started does not kill
     assert.equal(calls.length, 2, 'the queued follow-up is now running');
     assert.equal(chatRunRegistry.isProcessing('abort-race'), true);
 
+    // Only the first run's own terminal complete reached the client — the abort
+    // resolved too late to contribute one.
+    const beforeRelease = socket.framesOfKind('complete');
+    assert.equal(beforeRelease.length, 1);
+    assert.equal(beforeRelease[0]?.exitCode, 0, 'the runtime\'s own complete won, not the abort\'s');
+    assert.equal(beforeRelease[0]?.aborted, undefined);
+
     // Now the stale abort resolves. It must not guillotine the newer run — that
-    // run belongs to a different user message which was never aborted.
-    releaseAbort(true);
-    await settle();
+    // run belongs to a different user message which was never aborted — and the
+    // dropped completion is logged rather than silently swallowed.
+    const warnings = captureConsole('warn');
+    try {
+      releaseAbort(true);
+      await settle();
+    } finally {
+      warnings.restore();
+    }
 
     assert.equal(chatRunRegistry.isProcessing('abort-race'), true, 'the newer run survives the stale abort');
-    assert.equal(socket.framesOfKind('complete').length, 1, 'only the aborted run completed');
+    assert.equal(socket.framesOfKind('complete').length, 1, 'no second complete is emitted for the newer run');
+    assert.equal(warnings.calls.length, 1, 'the dropped stale completion is surfaced to operators');
+    assert.match(String(warnings.calls[0]?.[0]), /stale abort completion/);
 
     finishRun(calls[1] as SpawnCall);
     await settle();
-    assert.equal(socket.framesOfKind('complete').length, 2);
+    const completes = socket.framesOfKind('complete');
+    assert.equal(completes.length, 2);
+    assert.equal(completes[1]?.exitCode, 0, 'the newer run completes normally, not as an abort');
+    assert.equal(completes[1]?.aborted, undefined);
   });
 });
 

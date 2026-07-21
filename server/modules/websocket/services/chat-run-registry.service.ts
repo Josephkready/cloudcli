@@ -675,8 +675,10 @@ export const chatRunRegistry = {
 
   /**
    * Emits a synthetic terminal `complete` if (and only if) the run is still
-   * marked running. Used when a provider runtime throws or resolves without
-   * having produced its own terminal event, and by the abort path.
+   * marked running. Used by the dispatch loop's error handler to unwedge a
+   * session after an unexpected failure between runs. Paths that hold a
+   * reference to a specific run (the runtime safety net, `chat.abort`) use
+   * `completeRunIfCurrent` instead so they cannot terminate a newer run.
    */
   completeRun(appSessionId: string, opts: { exitCode: number; aborted?: boolean }): void {
     const run = runs.get(appSessionId);
