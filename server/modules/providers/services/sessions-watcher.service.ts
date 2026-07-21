@@ -6,12 +6,15 @@ import chokidar, { type FSWatcher } from 'chokidar';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { resolveSessionLiveStatus } from '@/modules/providers/services/session-live-status.service.js';
+import {
+  createSessionUpsertDebouncer,
+  type SessionUpsertBatch,
+  type WatcherEventType,
+} from '@/modules/providers/services/session-upsert-debouncer.js';
 import { sessionSynchronizerService } from '@/modules/providers/services/session-synchronizer.service.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { LLMProvider } from '@/shared/types.js';
 import { generateDisplayName } from '@/modules/projects/index.js';
-
-type WatcherEventType = 'add' | 'change';
 
 const PROVIDER_WATCH_PATHS: Array<{ provider: LLMProvider; rootPath: string }> = [
   {
@@ -39,77 +42,11 @@ const PROJECTS_UPDATE_MAX_WAIT_MS = 2_000;
 
 const watchers: FSWatcher[] = [];
 
-type PendingWatcherUpdate = {
-  providers: Set<LLMProvider>;
-  changeTypes: Set<WatcherEventType>;
-  /**
-   * Provider-native session ids reported by the synchronizers. They are
-   * translated back to app-facing session rows at flush time, because the
-   * transcript file names on disk only ever contain provider ids.
-   */
-  updatedSessionIds: Set<string>;
-};
-
-let pendingWatcherUpdate: PendingWatcherUpdate | null = null;
-let pendingWatcherUpdateStartedAt: number | null = null;
-let pendingWatcherFlushTimer: ReturnType<typeof setTimeout> | null = null;
-let watcherRefreshInFlight = false;
-let watcherRescheduleAfterRefresh = false;
-
 /**
  * Filters watcher events to provider-specific session artifact file types.
  */
 function isWatcherTargetFile(_provider: LLMProvider, filePath: string): boolean {
   return filePath.endsWith('.jsonl');
-}
-
-function clearPendingWatcherFlushTimer(): void {
-  if (pendingWatcherFlushTimer) {
-    clearTimeout(pendingWatcherFlushTimer);
-    pendingWatcherFlushTimer = null;
-  }
-}
-
-function schedulePendingWatcherFlush(): void {
-  if (!pendingWatcherUpdate) {
-    return;
-  }
-
-  const now = Date.now();
-  if (pendingWatcherUpdateStartedAt === null) {
-    pendingWatcherUpdateStartedAt = now;
-  }
-
-  const elapsed = now - pendingWatcherUpdateStartedAt;
-  const remainingMaxWait = Math.max(0, PROJECTS_UPDATE_MAX_WAIT_MS - elapsed);
-  const delay = Math.min(PROJECTS_UPDATE_DEBOUNCE_MS, remainingMaxWait);
-
-  clearPendingWatcherFlushTimer();
-  pendingWatcherFlushTimer = setTimeout(() => {
-    void flushPendingWatcherUpdate();
-  }, delay);
-}
-
-function queuePendingWatcherUpdate(
-  eventType: WatcherEventType,
-  provider: LLMProvider,
-  updatedSessionId: string | null
-): void {
-  if (!pendingWatcherUpdate) {
-    pendingWatcherUpdate = {
-      providers: new Set<LLMProvider>(),
-      changeTypes: new Set<WatcherEventType>(),
-      updatedSessionIds: new Set<string>(),
-    };
-  }
-
-  pendingWatcherUpdate.providers.add(provider);
-  pendingWatcherUpdate.changeTypes.add(eventType);
-  if (updatedSessionId) {
-    pendingWatcherUpdate.updatedSessionIds.add(updatedSessionId);
-  }
-
-  schedulePendingWatcherFlush();
 }
 
 /**
@@ -195,56 +132,71 @@ export async function broadcastSessionUpserted(sessionId: string): Promise<void>
   });
 }
 
-async function flushPendingWatcherUpdate(): Promise<void> {
-  clearPendingWatcherFlushTimer();
-
-  if (!pendingWatcherUpdate) {
-    return;
-  }
-
-  if (watcherRefreshInFlight) {
-    watcherRescheduleAfterRefresh = true;
-    return;
-  }
-
-  const queuedUpdate = pendingWatcherUpdate;
-  pendingWatcherUpdate = null;
-  pendingWatcherUpdateStartedAt = null;
-  watcherRefreshInFlight = true;
-
-  try {
-    // Per-session deltas instead of full project snapshots: an upsert of one
-    // session can never clobber unrelated client state, so the frontend needs
-    // no "suppress updates while a run is active" protection logic.
-    const events: string[] = [];
-    for (const updatedSessionId of queuedUpdate.updatedSessionIds) {
-      const event = await buildSessionUpsertedEvent(updatedSessionId);
+/**
+ * Builds the `session_upserted` payloads for a batch of session ids, isolating
+ * failures per session.
+ *
+ * Building one event touches the DB and the filesystem (live-status probing),
+ * and the batch has already been detached from the debouncer's queue by the time
+ * this runs — so a single session throwing must not abort the loop. Doing so used
+ * to silently and permanently drop every other session's delta in the same
+ * batch. Each id is therefore built in its own try/catch, and only failing ids
+ * are dropped (and logged). Exported for its own regression test.
+ */
+export async function buildResilientSessionEvents(
+  sessionIds: Iterable<string>,
+  buildEvent: (sessionId: string) => Promise<string | null>,
+  onError: (sessionId: string, error: unknown) => void = defaultSessionEventBuildErrorLogger
+): Promise<string[]> {
+  const events: string[] = [];
+  for (const sessionId of sessionIds) {
+    try {
+      const event = await buildEvent(sessionId);
       if (event) {
         events.push(event);
       }
-    }
-
-    if (events.length > 0) {
-      connectedClients.forEach(client => {
-        if (client.readyState === WS_OPEN_STATE) {
-          for (const event of events) {
-            client.send(event);
-          }
-        }
-      });
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error('Session watcher refresh failed while broadcasting session_upserted', { error: message });
-  } finally {
-    watcherRefreshInFlight = false;
-
-    if (pendingWatcherUpdate || watcherRescheduleAfterRefresh) {
-      watcherRescheduleAfterRefresh = false;
-      schedulePendingWatcherFlush();
+    } catch (error) {
+      onError(sessionId, error);
     }
   }
+  return events;
 }
+
+function defaultSessionEventBuildErrorLogger(sessionId: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error('Session watcher failed to build a session_upserted event', {
+    sessionId,
+    error: message,
+  });
+}
+
+async function broadcastWatcherBatch(batch: SessionUpsertBatch): Promise<void> {
+  // Per-session deltas instead of full project snapshots: an upsert of one
+  // session can never clobber unrelated client state, so the frontend needs
+  // no "suppress updates while a run is active" protection logic.
+  const events = await buildResilientSessionEvents(
+    batch.updatedSessionIds,
+    buildSessionUpsertedEvent
+  );
+
+  if (events.length === 0) {
+    return;
+  }
+
+  connectedClients.forEach(client => {
+    if (client.readyState === WS_OPEN_STATE) {
+      for (const event of events) {
+        client.send(event);
+      }
+    }
+  });
+}
+
+const watcherUpdateDebouncer = createSessionUpsertDebouncer({
+  debounceMs: PROJECTS_UPDATE_DEBOUNCE_MS,
+  maxWaitMs: PROJECTS_UPDATE_MAX_WAIT_MS,
+  onFlush: broadcastWatcherBatch,
+});
 
 /**
  * Handles file watcher updates and triggers provider file-level synchronization.
@@ -268,7 +220,7 @@ async function onUpdate(
       filePath,
       sessionId: result.sessionId,
     });
-    queuePendingWatcherUpdate(eventType, provider, result.sessionId);
+    watcherUpdateDebouncer.queue(eventType, provider, result.sessionId);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Session watcher sync failed for provider "${provider}"`, {
@@ -333,7 +285,7 @@ export async function initializeSessionsWatcher(): Promise<void> {
  * Stops all active provider session watchers.
  */
 export async function closeSessionsWatcher(): Promise<void> {
-  clearPendingWatcherFlushTimer();
+  watcherUpdateDebouncer.reset();
 
   await Promise.all(
     watchers.map(async (watcher) => {
@@ -346,8 +298,4 @@ export async function closeSessionsWatcher(): Promise<void> {
     })
   );
   watchers.length = 0;
-  pendingWatcherUpdate = null;
-  pendingWatcherUpdateStartedAt = null;
-  watcherRefreshInFlight = false;
-  watcherRescheduleAfterRefresh = false;
 }

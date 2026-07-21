@@ -49,7 +49,7 @@ export const CODEX_FALLBACK_MODELS: ProviderModelsDefinition = {
   DEFAULT: 'gpt-5.4',
 };
 
-type CodexCachedModel = {
+export type CodexCachedModel = {
   slug?: string;
   display_name?: string;
   description?: string;
@@ -105,7 +105,16 @@ const mapCodexModel = (model: CodexCachedModel): ProviderModelOption => {
   };
 };
 
-const buildCodexModelsDefinition = (models: CodexCachedModel[]): ProviderModelsDefinition => {
+/**
+ * Turns the raw `~/.codex/models_cache.json` entries into the picker catalogue.
+ *
+ * Exported for its own tests (#104): this is the whole parsing surface of the
+ * Codex model catalogue, and it silently degrades to `CODEX_FALLBACK_MODELS`
+ * whenever it ends up with nothing to show — so a filtering or ordering
+ * regression here looks like "the picker just lists the hardcoded models" rather
+ * than like an error.
+ */
+export const buildCodexModelsDefinition = (models: CodexCachedModel[]): ProviderModelsDefinition => {
   const sortedModels = [...models]
     .filter((model) => model.visibility === 'list' && model.supported_in_api !== false)
     .sort((left, right) => readCodexPriority(left.priority) - readCodexPriority(right.priority));

@@ -412,6 +412,37 @@ function readNumber(value) {
 }
 
 /**
+ * Assembles the token-budget payload sent to the client.
+ *
+ * `inputTokens` is expected to already include the cache creation/read tokens:
+ * the Anthropic usage payload reports `input_tokens` as the tokens that were
+ * *neither* read from nor written to the prompt cache, so the three counters are
+ * disjoint and summing them is the context-window occupancy (not a double
+ * count). Both extraction branches funnel through here so they can never drift
+ * into reporting different shapes or different totals for the same run.
+ *
+ * @param {{inputTokens: number, outputTokens: number, cacheReadTokens: number, cacheCreationTokens: number}} counts
+ * @returns {Object} Token budget object
+ */
+function buildTokenBudget({ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens }) {
+  const contextWindow = parseInt(process.env.CONTEXT_WINDOW, 10) || 160000;
+
+  return {
+    used: inputTokens + outputTokens,
+    total: contextWindow,
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheCreationTokens,
+    cacheTokens: cacheReadTokens + cacheCreationTokens,
+    breakdown: {
+      input: inputTokens,
+      output: outputTokens,
+    },
+  };
+}
+
+/**
  * Extracts token usage from SDK messages.
  * Prefers per-step `message.usage` (Claude message payload), then falls back
  * to result-level usage/modelUsage for compatibility across SDK versions.
@@ -425,57 +456,58 @@ function extractTokenBudget(sdkMessage) {
 
   const messageUsage = sdkMessage.message?.usage || sdkMessage.usage;
   if (messageUsage && typeof messageUsage === 'object') {
-    const directInputTokens = readNumber(messageUsage.input_tokens ?? messageUsage.inputTokens);
     const cacheCreationTokens = readNumber(messageUsage.cache_creation_input_tokens ?? messageUsage.cacheCreationInputTokens ?? messageUsage.cacheCreationTokens);
     const cacheReadTokens = readNumber(messageUsage.cache_read_input_tokens ?? messageUsage.cacheReadInputTokens ?? messageUsage.cacheReadTokens);
-    const cacheTokens = cacheCreationTokens + cacheReadTokens;
-    const inputTokens = directInputTokens + cacheTokens;
-    const outputTokens = readNumber(messageUsage.output_tokens ?? messageUsage.outputTokens);
-    const totalUsed = inputTokens + outputTokens;
-    const contextWindow = parseInt(process.env.CONTEXT_WINDOW, 10) || 160000;
+    const directInputTokens = readNumber(messageUsage.input_tokens ?? messageUsage.inputTokens);
 
-    return {
-      used: totalUsed,
-      total: contextWindow,
-      inputTokens,
-      outputTokens,
+    return buildTokenBudget({
+      inputTokens: directInputTokens + cacheCreationTokens + cacheReadTokens,
+      outputTokens: readNumber(messageUsage.output_tokens ?? messageUsage.outputTokens),
       cacheReadTokens,
       cacheCreationTokens,
-      cacheTokens,
-      breakdown: {
-        input: inputTokens,
-        output: outputTokens,
-      },
-    };
+    });
   }
 
   if (!sdkMessage.modelUsage || typeof sdkMessage.modelUsage !== 'object') {
     return null;
   }
 
-  // Fallback for older SDK messages with only modelUsage
-  const modelKey = Object.keys(sdkMessage.modelUsage)[0];
-  const modelData = sdkMessage.modelUsage[modelKey];
+  // Fallback for older SDK messages carrying only `modelUsage`.
+  //
+  // Every model entry is summed rather than reading `Object.keys(...)[0]`: a run
+  // that delegated to a subagent records one entry per model, so reading only the
+  // first reported whichever model happened to be inserted first (often the small
+  // subagent model) as the entire run's usage.
+  //
+  // Cache tokens are folded into `inputTokens` exactly as the `usage` branch
+  // above does. They occupy the context window all the same, so leaving them out
+  // made the same run report a wildly smaller `used` purely based on which branch
+  // the SDK message happened to hit.
+  const modelEntries = Object.values(sdkMessage.modelUsage)
+    .filter((entry) => Boolean(entry) && typeof entry === 'object');
 
-  if (!modelData || typeof modelData !== 'object') {
+  if (modelEntries.length === 0) {
     return null;
   }
 
-  const inputTokens = readNumber(modelData.cumulativeInputTokens ?? modelData.inputTokens);
-  const outputTokens = readNumber(modelData.cumulativeOutputTokens ?? modelData.outputTokens);
-  const totalUsed = inputTokens + outputTokens;
-  const contextWindow = parseInt(process.env.CONTEXT_WINDOW, 10) || 160000;
+  let directInputTokens = 0;
+  let outputTokens = 0;
+  let cacheCreationTokens = 0;
+  let cacheReadTokens = 0;
 
-  return {
-    used: totalUsed,
-    total: contextWindow,
-    inputTokens,
+  for (const modelData of modelEntries) {
+    directInputTokens += readNumber(modelData.cumulativeInputTokens ?? modelData.inputTokens);
+    outputTokens += readNumber(modelData.cumulativeOutputTokens ?? modelData.outputTokens);
+    cacheCreationTokens += readNumber(modelData.cacheCreationInputTokens ?? modelData.cacheCreationTokens);
+    cacheReadTokens += readNumber(modelData.cacheReadInputTokens ?? modelData.cacheReadTokens);
+  }
+
+  return buildTokenBudget({
+    inputTokens: directInputTokens + cacheCreationTokens + cacheReadTokens,
     outputTokens,
-    breakdown: {
-      input: inputTokens,
-      output: outputTokens,
-    },
-  };
+    cacheReadTokens,
+    cacheCreationTokens,
+  });
 }
 
 /**
@@ -1030,6 +1062,8 @@ export {
   reconnectSessionWriter,
   isSpawnRaceError,
   parseMsEnv,
+  extractTokenBudget,
+  mapCliOptionsToSDK,
   findStaleToolApprovals,
   reapStaleToolApprovals,
   startStaleToolApprovalReaper,
