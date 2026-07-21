@@ -493,7 +493,11 @@ test('a database failure while resolving the run still completes it and releases
     connect(socket, dependencies);
 
     // The handler's own pre-flight lookup succeeds; the one inside the dispatch
-    // path (which re-reads the row to resolve the provider id) blows up.
+    // path (which re-reads the row to resolve the provider id) blows up. Only
+    // that second read is poisoned — the completion path reads the row again to
+    // broadcast the Done state, and failing that too would test two things at
+    // once. `lookups` is asserted below so this ordinal coupling cannot rot into
+    // a vacuous test.
     const originalGet = sessionsDb.getSessionById;
     let lookups = 0;
     sessionsDb.getSessionById = ((sessionId: string) => {
@@ -513,6 +517,7 @@ test('a database failure while resolving the run still completes it and releases
       sessionsDb.getSessionById = originalGet;
     }
 
+    assert.ok(lookups >= 2, 'the dispatch path really did re-read the session row');
     assert.equal(calls.length, 0, 'nothing is spawned when the row cannot be resolved');
     assert.equal(errors.calls.length, 1);
     assert.match(String(errors.calls[0]?.[0]), /Failed to dispatch run/);
