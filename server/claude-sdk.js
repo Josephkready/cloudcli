@@ -162,6 +162,37 @@ function resolveToolApproval(requestId, decision) {
 }
 
 /**
+ * The approval-wait timeout for a tool, in ms. Interactive tools (#62,
+ * `TOOLS_REQUIRING_INTERACTION` — AskUserQuestion / ExitPlanMode) always wait
+ * indefinitely (`0` = never auto-deny) so a plan / question prompt can never be
+ * silently timed out mid-task. Every other tool uses the configured default
+ * (`undefined` → `TOOL_APPROVAL_TIMEOUT_MS`, itself 0 unless the env var is set).
+ * Split out so the "interactive tools never auto-deny" rule is unit-testable.
+ */
+function approvalTimeoutForTool(toolName) {
+  return TOOLS_REQUIRING_INTERACTION.has(toolName) ? 0 : undefined;
+}
+
+/**
+ * Maps a settled tool-approval decision that is NOT an allow into the
+ * `canUseTool` deny result (#62). Each non-allow outcome carries a distinct
+ * message so the UI can tell them apart:
+ *   - `null` (finite-timeout auto-deny) → "Permission request timed out"
+ *   - `{ cancelled: true }` (abort / interrupt) → "Permission request cancelled"
+ *   - `{ allow: false, message? }` (user denial) → the user's message (or default)
+ * Split out so this mapping is unit-testable without driving a full SDK run.
+ */
+function denyResultForDecision(decision) {
+  if (!decision) {
+    return { behavior: 'deny', message: 'Permission request timed out' };
+  }
+  if (decision.cancelled) {
+    return { behavior: 'deny', message: 'Permission request cancelled' };
+  }
+  return { behavior: 'deny', message: decision.message ?? 'User denied tool use' };
+}
+
+/**
  * Selects pending tool approvals idle for at least `thresholdMs`, keyed off the
  * `_receivedAt` timestamp stored with each resolver. Pure over the passed map so
  * the reap policy is unit-testable in isolation; a non-positive threshold
@@ -718,7 +749,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       let decision;
       try {
         decision = await waitForToolApproval(requestId, {
-          timeoutMs: requiresInteraction ? 0 : undefined,
+          timeoutMs: approvalTimeoutForTool(toolName),
           signal: context?.signal,
           metadata: {
             _sessionId: capturedSessionId || sessionId || null,
@@ -734,11 +765,11 @@ async function queryClaudeSDK(command, options = {}, ws) {
         ws.setBlocked?.(false);
       }
       if (!decision) {
-        return { behavior: 'deny', message: 'Permission request timed out' };
+        return denyResultForDecision(decision);
       }
 
       if (decision.cancelled) {
-        return { behavior: 'deny', message: 'Permission request cancelled' };
+        return denyResultForDecision(decision);
       }
 
       if (decision.allow) {
@@ -753,7 +784,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
         return { behavior: 'allow', updatedInput: decision.updatedInput ?? input };
       }
 
-      return { behavior: 'deny', message: decision.message ?? 'User denied tool use' };
+      return denyResultForDecision(decision);
     };
 
     // Whether the SDK stream has yielded anything yet. A spawn race fails
@@ -1026,6 +1057,8 @@ export {
   getActiveClaudeSDKSessions,
   resolveToolApproval,
   waitForToolApproval,
+  approvalTimeoutForTool,
+  denyResultForDecision,
   getPendingApprovalsForSession,
   reconnectSessionWriter,
   isSpawnRaceError,
