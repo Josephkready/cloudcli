@@ -61,8 +61,8 @@ The floors are per-suite and tunable in
 **Ratchet the floors up as coverage grows.** When a suite's real coverage
 climbs, raise its floor in the script, leaving a couple of points of headroom so
 an unrelated PR isn't blocked by noise. Never lower a floor just to make a red
-run pass — investigate the regression instead. The parser has self-tests:
-`node scripts/check-coverage-floor.mjs --self-test`.
+run pass — investigate the regression instead. The LCOV parser has self-tests
+(`npm run coverage:floor:selftest`) that CI runs before trusting the gate.
 
 ## Two test runners, split by filename
 

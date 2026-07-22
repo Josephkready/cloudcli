@@ -35,6 +35,7 @@
     "test:unit:coverage": "node -e \"require('node:fs').mkdirSync('coverage', { recursive: true })\" && tsx --tsconfig tsconfig.json --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/unit.lcov \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
     "test:component:coverage": "vitest run --coverage",
     "coverage:floor": "node scripts/check-coverage-floor.mjs",
+    "coverage:floor:selftest": "node scripts/check-coverage-floor.mjs --self-test",
     "coverage:check": "npm run test:coverage && npm run coverage:floor",
     "lint": "eslint src/ server/",
     "lint:fix": "eslint src/ server/ --fix",

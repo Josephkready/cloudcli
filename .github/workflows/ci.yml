@@ -49,6 +49,11 @@ jobs:
       - name: Frontend component tests (with coverage)
         run: npm run test:component:coverage
 
+      # Guard the floor gate's own LCOV parser against regressions before we
+      # trust it (issue #185). Runs the script's built-in parser self-tests.
+      - name: Coverage floor self-tests
+        run: npm run coverage:floor:selftest
+
       # Separate, tunable gate (issue #185): the steps above emit LCOV reports;
       # this fails the build if any suite's line coverage drops below its floor.
       # A red "Coverage floor" is distinguishable from a red test run above.

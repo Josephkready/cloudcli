@@ -65,13 +65,24 @@ const SUITES = {
   },
 };
 
+/** True when `pct` meets or exceeds `floor`. The boundary is inclusive: a suite
+ *  exactly at its floor PASSES. Kept as a named helper so a self-test can pin
+ *  the `>=` operator against an accidental `>` flip. */
+export function passesFloor(pct, floor) {
+  return pct >= floor;
+}
+
 /**
- * Aggregate LINE coverage from LCOV text. Sums the `LF` (lines found) and `LH`
- * (lines hit) records across every `SF` section and returns { lf, lh, pct }.
+ * Aggregate LINE coverage from LCOV text. Walks each `SF` (source file) section,
+ * pairing its `LF` (lines found) with its `LH` (lines hit), sums them across all
+ * sections, and returns { lf, lh, pct }.
  *
- * Fails LOUD (throws) when the report has no `LF` records or zero instrumented
- * lines — that means coverage never ran, the report is empty, or the format
- * drifted, and we must NOT let a broken report pass silently at 0/0.
+ * Fails LOUD (throws) on anything that smells like a broken or drifted report,
+ * so a bad report can never pass silently:
+ *   - no `LF` record anywhere (empty report / coverage never ran)
+ *   - a section with `LH` but no `LF` (malformed pairing)
+ *   - a section where `LH > LF` (impossible: more lines hit than exist)
+ *   - non-finite totals, or zero total instrumented lines
  *
  * @param {string} text raw LCOV report contents
  * @returns {{ lf: number, lh: number, pct: number }}
@@ -80,20 +91,45 @@ export function parseLcovLineCoverage(text) {
   let lf = 0;
   let lh = 0;
   let sawLf = false;
+  // Per-section accumulators, reset at each SF/end_of_record boundary.
+  let sectionLf = null;
+  let sectionLh = null;
+
+  const flushSection = () => {
+    if (sectionLf === null && sectionLh === null) return;
+    if (sectionLf === null) {
+      throw new Error('LCOV section has an "LH:" with no matching "LF:" (malformed report)');
+    }
+    const secLh = sectionLh ?? 0;
+    if (!Number.isFinite(sectionLf) || !Number.isFinite(secLh)) {
+      throw new Error('LCOV section has non-numeric LF/LH');
+    }
+    if (secLh > sectionLf) {
+      throw new Error(`LCOV section reports more lines hit than found (LH ${secLh} > LF ${sectionLf})`);
+    }
+    lf += sectionLf;
+    lh += secLh;
+    sawLf = true;
+    sectionLf = null;
+    sectionLh = null;
+  };
+
   for (const raw of text.split('\n')) {
     const line = raw.trim();
-    if (line.startsWith('LF:')) {
-      lf += Number(line.slice(3));
-      sawLf = true;
+    if (line.startsWith('SF:')) {
+      flushSection(); // close any prior section missing an end_of_record
+    } else if (line.startsWith('LF:')) {
+      sectionLf = Number(line.slice(3));
     } else if (line.startsWith('LH:')) {
-      lh += Number(line.slice(3));
+      sectionLh = Number(line.slice(3));
+    } else if (line === 'end_of_record') {
+      flushSection();
     }
   }
+  flushSection(); // trailing section with no end_of_record
+
   if (!sawLf) {
     throw new Error('no "LF:" records found — not a valid/complete LCOV report');
-  }
-  if (!Number.isFinite(lf) || !Number.isFinite(lh)) {
-    throw new Error('LCOV LF/LH totals are not finite numbers');
   }
   if (lf === 0) {
     throw new Error('LCOV reports 0 instrumented lines (LF total is 0)');
@@ -122,7 +158,7 @@ function checkReport({ label, lcov, floor }) {
   }
   const pct = result.pct;
   const shown = pct.toFixed(2);
-  if (pct < floor) {
+  if (!passesFloor(pct, floor)) {
     console.error(
       `✗ ${label}: ${shown}% line coverage is BELOW the ${floor}% floor ` +
         `(${result.lh}/${result.lf} lines).`,
@@ -167,10 +203,26 @@ function runSelfTests() {
   // Full coverage: 5/5 = 100%.
   assert(parseLcovLineCoverage('SF:d.ts\nLF:5\nLH:5\nend_of_record\n').pct === 100, 'fully-covered file is 100%');
 
-  // Loud failures on degenerate input.
+  // A trailing section with no end_of_record still counts: 6/10 = 60%.
+  assert(parseLcovLineCoverage('SF:g.ts\nLF:10\nLH:6\n').pct === 60, 'section without end_of_record still counts');
+
+  // Loud failures on degenerate / malformed input.
   assertThrows(() => parseLcovLineCoverage(''), 'empty report throws');
   assertThrows(() => parseLcovLineCoverage('SF:e.ts\nend_of_record\n'), 'report with no LF throws');
   assertThrows(() => parseLcovLineCoverage('SF:f.ts\nLF:0\nLH:0\nend_of_record\n'), 'zero instrumented lines throws');
+  assertThrows(
+    () => parseLcovLineCoverage('SF:h.ts\nLH:5\nend_of_record\nSF:i.ts\nLF:10\nLH:2\nend_of_record\n'),
+    'section with LH but no LF throws',
+  );
+  assertThrows(
+    () => parseLcovLineCoverage('SF:j.ts\nLF:3\nLH:7\nend_of_record\n'),
+    'section with LH > LF throws',
+  );
+
+  // Floor comparison is inclusive at the boundary (pins the >= operator).
+  assert(passesFloor(80, 80) === true, 'exactly at floor passes');
+  assert(passesFloor(79.99, 80) === false, 'just below floor fails');
+  assert(passesFloor(80.01, 80) === true, 'just above floor passes');
 
   if (failures > 0) {
     console.error(`\nself-tests: ${failures} failed`);
@@ -180,13 +232,14 @@ function runSelfTests() {
 }
 
 function parseArgs(argv) {
-  const opts = { lcov: null, floor: null, label: null, area: null };
+  const opts = { lcov: null, floor: null, label: null, area: null, unknown: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--lcov') opts.lcov = argv[(i += 1)];
     else if (arg === '--floor') opts.floor = Number(argv[(i += 1)]);
     else if (arg === '--label') opts.label = argv[(i += 1)];
-    else if (!arg.startsWith('--')) opts.area = arg;
+    else if (arg.startsWith('--')) opts.unknown = arg; // catch typos loudly, don't fall through
+    else opts.area = arg;
   }
   return opts;
 }
@@ -200,6 +253,14 @@ function main() {
   }
 
   const opts = parseArgs(argv);
+
+  if (opts.unknown) {
+    console.error(
+      `unknown option "${opts.unknown}". ` +
+        'Usage: [<area>] | --lcov <path> --floor <n> [--label <name>] | --self-test',
+    );
+    process.exit(2);
+  }
 
   // Explicit report mode: --lcov <path> --floor <n> [--label <name>].
   if (opts.lcov !== null || opts.floor !== null) {
@@ -239,4 +300,9 @@ function main() {
   console.log('\nCoverage floor check passed.');
 }
 
-main();
+// Only act as a CLI when run directly (`node check-coverage-floor.mjs ...`), so
+// the pure `parseLcovLineCoverage` / `passesFloor` exports can be imported by a
+// test without triggering CLI side effects or process.exit().
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
+}
