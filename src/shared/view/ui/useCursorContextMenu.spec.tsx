@@ -32,7 +32,7 @@ function spyContextMenuEvent(clientX: number, clientY: number) {
 }
 
 /** Minimal consumer that wires `menuRef` to real markup, like CursorContextMenu does. */
-function MenuHarness({ disabled = false }: { disabled?: boolean }) {
+function MenuHarness({ disabled = false, empty = false }: { disabled?: boolean; empty?: boolean }) {
   const { isMenuOpen, menuPosition, menuRef, openContextMenuAtCursor } = useCursorContextMenu({
     disabled,
   });
@@ -45,12 +45,19 @@ function MenuHarness({ disabled = false }: { disabled?: boolean }) {
       <div data-testid="outside">elsewhere</div>
       {isMenuOpen && (
         <div ref={menuRef} role="menu" aria-label="Test menu" data-position={`${menuPosition.x},${menuPosition.y}`}>
-          <button type="button" role="menuitem">
-            First
-          </button>
-          <button type="button" role="menuitem">
-            Second
-          </button>
+          {empty ? (
+            // An open menu with no menuitems - keyboard nav has nothing to rove to.
+            <span data-testid="empty-note">No actions available</span>
+          ) : (
+            <>
+              <button type="button" role="menuitem">
+                First
+              </button>
+              <button type="button" role="menuitem">
+                Second
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -184,6 +191,23 @@ describe('useCursorContextMenu', () => {
 
     fireEvent.keyDown(document, { key: 'ArrowUp' });
     expect(document.activeElement).toBe(second);
+  });
+
+  it('treats arrow and Enter keys as no-ops when the open menu has no menuitems', () => {
+    // Exercises the empty-menuitems early return in the roving handler: an open menu
+    // with nothing to rove to must not throw or move focus on navigation keys.
+    render(<MenuHarness empty />);
+
+    fireEvent.contextMenu(screen.getByTestId('trigger'), { clientX: 20, clientY: 20 });
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+
+    const before = document.activeElement;
+    fireEvent.keyDown(document, { key: 'ArrowDown' });
+    fireEvent.keyDown(document, { key: 'ArrowUp' });
+    fireEvent.keyDown(document, { key: 'Enter' });
+
+    expect(document.activeElement).toBe(before);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
   });
 
   it('clamps the open position to stay inside the viewport near an edge', () => {
