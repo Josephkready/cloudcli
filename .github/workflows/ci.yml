@@ -2,8 +2,10 @@ name: CI
 
 # Quality gate for every pull request and every push to main. Until this
 # landed, nothing in CI ran the tests or lint, so a regression could merge
-# freely (#101). There is no coverage floor yet: the suites gate on test / lint
-# / type failures and emit a coverage summary to ratchet against over time.
+# freely (#101). The suites gate on test / lint / type failures, emit LCOV
+# coverage reports, and the "Coverage floor" step (issue #185) fails the build
+# if any suite's line coverage drops below its per-suite floor
+# (see scripts/check-coverage-floor.mjs — ratchet the floors up as coverage grows).
 on:
   pull_request:
   push:
@@ -46,3 +48,9 @@ jobs:
 
       - name: Frontend component tests (with coverage)
         run: npm run test:component:coverage
+
+      # Separate, tunable gate (issue #185): the steps above emit LCOV reports;
+      # this fails the build if any suite's line coverage drops below its floor.
+      # A red "Coverage floor" is distinguishable from a red test run above.
+      - name: Coverage floor
+        run: npm run coverage:floor

@@ -36,6 +36,34 @@ The first two use Node's built-in `--experimental-test-coverage`; the component
 one uses vitest's v8 provider and also writes a browsable report to
 `coverage/component/`.
 
+### Coverage floor
+
+Each coverage script also emits a machine-readable LCOV report
+(`coverage/server.lcov`, `coverage/unit.lcov`,
+`coverage/component/lcov.info`). CI runs a separate **Coverage floor** step that
+parses those and fails the build if any suite's line coverage drops below its
+floor:
+
+```bash
+npm run coverage:floor   # checks the reports left by test:coverage
+npm run coverage:check   # test:coverage + coverage:floor in one go
+```
+
+The floors are per-suite and tunable in
+[`scripts/check-coverage-floor.mjs`](scripts/check-coverage-floor.mjs):
+
+| Suite | Floor | Notes |
+| --- | --- | --- |
+| server (node:test) | 80% | |
+| front-end unit (node:test) | 85% | |
+| front-end component (vitest) | 3% | Young suite — vitest instruments every `src/` file, so this ratchets up fast as specs land. |
+
+**Ratchet the floors up as coverage grows.** When a suite's real coverage
+climbs, raise its floor in the script, leaving a couple of points of headroom so
+an unrelated PR isn't blocked by noise. Never lower a floor just to make a red
+run pass — investigate the regression instead. The parser has self-tests:
+`node scripts/check-coverage-floor.mjs --self-test`.
+
 ## Two test runners, split by filename
 
 | Suite | Files | Runner | Command |

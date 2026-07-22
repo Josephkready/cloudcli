@@ -31,8 +31,10 @@ export default defineConfig((configEnv) =>
         exclude: ['src/**/*.spec.{ts,tsx}', 'src/**/*.test.{ts,tsx}', 'src/test/**'],
         // `text-summary` keeps CI logs readable while the suite is young (a
         // per-file `text` table would be ~370 rows of 0%); the HTML report is
-        // there for local drill-down.
-        reporter: ['text-summary', 'html'],
+        // there for local drill-down; `lcov` writes `coverage/component/lcov.info`,
+        // the machine-readable report the coverage floor gate parses (see
+        // scripts/check-coverage-floor.mjs).
+        reporter: ['text-summary', 'html', 'lcov'],
         reportsDirectory: 'coverage/component',
       },
     },
