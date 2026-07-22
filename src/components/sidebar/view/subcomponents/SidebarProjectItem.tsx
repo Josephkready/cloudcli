@@ -249,6 +249,7 @@ export default function SidebarProjectItem({
 
         <Button
           variant="ghost"
+          data-testid="sidebar-project-row"
           className={cn(
             'hidden md:flex w-full justify-between p-2 h-auto font-normal hover:bg-accent/50',
             isSelected && 'bg-accent text-accent-foreground',

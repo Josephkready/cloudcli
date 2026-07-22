@@ -1,0 +1,58 @@
+name: E2E
+
+# Browser (Playwright) end-to-end gate for the core user workflows (#102).
+#
+# Deliberately a SEPARATE workflow from `ci.yml` so it can be iterated on (and,
+# if it ever flakes, temporarily made non-blocking) without touching the primary
+# lint/typecheck/unit quality gate. It runs the deterministic in-process mock
+# provider (AGENT_MOCK_PROVIDER, wired in the per-worker server fixture), so no
+# real CLI/SDK, network, or credentials are needed.
+#
+# NOTE: whether this check is *required* to merge is a branch-protection
+# setting, not encoded here. It is intended to start as an informational gate.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Playwright e2e (core workflows)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Only the chromium browser is needed; --with-deps pulls its OS libraries.
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+
+      # `npm run test:e2e` builds the client bundle (VITE_AUTH_DISABLED baked in)
+      # once via the Playwright global-setup, then boots a per-worker server for
+      # each spec.
+      - name: Run e2e suite
+        run: npm run test:e2e
+
+      - name: Upload Playwright report and traces
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore

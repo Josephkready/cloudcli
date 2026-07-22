@@ -149,3 +149,8 @@ tasks/
 /release/
 cloudcli-sidebar-app-source.tar.gz
 cloudcli-sidebar.html
+
+# Playwright e2e artifacts
+test-results/
+playwright-report/
+playwright/.cache/
