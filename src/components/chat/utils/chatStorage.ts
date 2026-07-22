@@ -157,7 +157,11 @@ export function getClaudeSettings(): ClaudeSettings {
       allowedTools: [],
       disallowedTools: [],
       skipPermissions: false,
-      projectSortOrder: 'name',
+      // Match the no-settings and valid-settings defaults ('count', the
+      // documented DEFAULT_PROJECT_SORT_ORDER). This branch previously returned
+      // 'name', a leftover from before the default sort-order flip, so corrupt
+      // settings silently disagreed with an empty store.
+      projectSortOrder: 'count',
     };
   }
 }
