@@ -194,4 +194,40 @@ test('one-line getValue extractors read the expected input field', () => {
   assert.equal(TOOL_CONFIGS.Grep.input.getValue!({ pattern: 'TODO' }), 'TODO');
   assert.equal(TOOL_CONFIGS.Grep.input.getSecondary!({ path: 'src' }), 'in src');
   assert.equal(TOOL_CONFIGS.Grep.input.getSecondary!({}), undefined);
+  assert.equal(TOOL_CONFIGS.Glob.input.getValue!({ pattern: '**/*.ts' }), '**/*.ts');
+});
+
+test('TaskUpdate getValue joins the present fields (id -> status -> "subject")', () => {
+  const getValue = TOOL_CONFIGS.TaskUpdate.input.getValue!;
+  assert.equal(getValue({ taskId: 7, status: 'done', subject: 'Ship it' }), '#7 → done → "Ship it"');
+  assert.equal(getValue({ taskId: 7 }), '#7');
+  assert.equal(getValue({ status: 'in-progress' }), 'in-progress');
+  // No usable fields -> the 'updating' placeholder.
+  assert.equal(getValue({}), 'updating');
+});
+
+test('other task one-liners read their fields with sensible fallbacks', () => {
+  assert.equal(TOOL_CONFIGS.TaskCreate.input.getValue!({ subject: 'New task' }), 'New task');
+  assert.equal(TOOL_CONFIGS.TaskCreate.input.getValue!({}), 'Creating task');
+  assert.equal(TOOL_CONFIGS.TaskCreate.input.getSecondary!({ status: 'open' }), 'open');
+  assert.equal(TOOL_CONFIGS.TaskCreate.input.getSecondary!({}), undefined);
+  assert.equal(TOOL_CONFIGS.TaskList.input.getValue!({}), 'listing tasks');
+  assert.equal(TOOL_CONFIGS.TaskGet.input.getValue!({ taskId: 3 }), '#3');
+  assert.equal(TOOL_CONFIGS.TaskGet.input.getValue!({}), 'fetching');
+});
+
+test('ApplyPatch title uses the basename and getContentProps builds a "Patch" diff', () => {
+  const title = TOOL_CONFIGS.ApplyPatch.input.title as (i: unknown) => string;
+  assert.equal(title({ file_path: '/x/y/patch.ts' }), 'patch.ts');
+  assert.deepEqual(TOOL_CONFIGS.ApplyPatch.input.getContentProps!({
+    file_path: '/x/patch.ts',
+    old_string: 'a',
+    new_string: 'b',
+  }), {
+    oldContent: 'a',
+    newContent: 'b',
+    filePath: '/x/patch.ts',
+    badge: 'Patch',
+    badgeColor: 'gray',
+  });
 });

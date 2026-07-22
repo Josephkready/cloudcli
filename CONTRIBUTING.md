@@ -65,6 +65,16 @@ between tests (`localStorage`/`sessionStorage`, the `<html>` class list, fake
 timers, and the rendered DOM). Add shared stubs there rather than hand-rolling
 them per file; `src/test/setup.spec.ts` guards that they stay installed.
 
+For the `node:test` (`*.test.ts`) side, `src/test/setup.ts`'s auto-install
+model doesn't apply — there's no jsdom and no before-each hook. Instead,
+`src/test/nodeStubs.ts` provides opt-in helpers a pure-logic test calls
+directly: `withGlobals` (install/restore arbitrary `globalThis` keys, even on
+throw), `createLocalStorage`/`withLocalStorage` (an in-memory `localStorage`
+whose entries stay own-enumerable so `Object.keys(localStorage)` works), and
+`makeTranslator` (a recording i18n `t()` stub). Prefer these over hand-rolling
+the same `localStorage`/`window`/`t()` boilerplate; `src/test/nodeStubs.test.ts`
+guards their behavior.
+
 ## Testing expectations
 
 Changes should ship with tests on every tier they touch:
