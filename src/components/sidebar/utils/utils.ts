@@ -57,6 +57,44 @@ export const readHideCliOriginChats = (): boolean => {
 };
 
 /**
+ * Flips the "hide CLI-origin chats" preference by writing back to the same
+ * `claude-settings` blob the settings dialog owns — the single source of truth
+ * that {@link readHideCliOriginChats} and `useSettingsController` already read.
+ *
+ * Powers the sidebar's "N CLI chats hidden · Show" affordance (#216): rather
+ * than introduce a second preference, "Show" merges `hideCliOriginChats` into
+ * the existing blob (preserving sibling keys like permissions and sort order),
+ * then fires a synthetic `storage` event so same-tab readers
+ * (`useHideCliOriginChats`, which the browser never storage-notifies about its
+ * own writes) refresh immediately instead of waiting for their focus poll.
+ */
+export const writeHideCliOriginChats = (value: boolean): void => {
+  try {
+    let settings: Record<string, unknown> = {};
+    const rawSettings = localStorage.getItem('claude-settings');
+    if (rawSettings) {
+      try {
+        const parsed = JSON.parse(rawSettings) as unknown;
+        if (parsed && typeof parsed === 'object') {
+          settings = parsed as Record<string, unknown>;
+        }
+      } catch {
+        // Corrupt blob: start fresh rather than lose the write.
+      }
+    }
+
+    settings.hideCliOriginChats = value;
+    settings.lastUpdated = new Date().toISOString();
+    localStorage.setItem('claude-settings', JSON.stringify(settings));
+
+    // Notify same-tab readers; other tabs get the native storage event.
+    window.dispatchEvent(new StorageEvent('storage', { key: 'claude-settings' }));
+  } catch {
+    // Storage/DOM may be unavailable (private mode, SSR); keep the UI usable.
+  }
+};
+
+/**
  * Drops sessions started outside CloudCLI (`origin === 'cli'`, the marker the
  * "CLI" badge already renders from) when `hide` is set. Returns the input array
  * untouched when the preference is off, so the un-filtered path allocates

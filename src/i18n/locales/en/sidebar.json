@@ -173,7 +173,9 @@
     "newConversationNoResults": "No folders found",
     "cliOrigin": "Session not driven by cloudcli",
     "cliOriginBadge": "CLI",
-    "cliOriginTooltip": "Not driven by cloudcli — started from a terminal/CLI (or created before session tracking), so its live status is unknown"
+    "cliOriginTooltip": "Not driven by cloudcli — started from a terminal/CLI (or created before session tracking), so its live status is unknown",
+    "cliChatsHidden": "CLI chats hidden",
+    "showCliChats": "Show"
   },
   "sessionContext": {
     "menuLabel": "Session actions",

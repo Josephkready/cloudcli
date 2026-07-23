@@ -6,6 +6,7 @@ import {
   filterCliOriginConversations,
   filterCliOriginSessions,
   readHideCliOriginChats,
+  writeHideCliOriginChats,
 } from './utils';
 
 // #216: a global preference (default ON) hides sessions started outside
@@ -67,6 +68,37 @@ test('ignores a non-boolean stored value and falls back to the default', () => {
 test('falls back to hiding on corrupt settings JSON', () => {
   store['claude-settings'] = '{not valid json';
   assert.equal(readHideCliOriginChats(), true);
+});
+
+test('writeHideCliOriginChats round-trips through readHideCliOriginChats', () => {
+  // node:test has no `window`, so the synthetic storage dispatch throws and is
+  // swallowed — the localStorage write still lands, which is what we assert.
+  writeHideCliOriginChats(false);
+  assert.equal(readHideCliOriginChats(), false);
+
+  writeHideCliOriginChats(true);
+  assert.equal(readHideCliOriginChats(), true);
+});
+
+test('writeHideCliOriginChats preserves sibling keys in the settings blob', () => {
+  store['claude-settings'] = JSON.stringify({
+    projectSortOrder: 'name',
+    allowedTools: ['Read'],
+    hideCliOriginChats: true,
+  });
+
+  writeHideCliOriginChats(false);
+
+  const saved = JSON.parse(store['claude-settings']) as Record<string, unknown>;
+  assert.equal(saved.hideCliOriginChats, false);
+  assert.equal(saved.projectSortOrder, 'name');
+  assert.deepEqual(saved.allowedTools, ['Read']);
+});
+
+test('writeHideCliOriginChats starts fresh from a corrupt settings blob', () => {
+  store['claude-settings'] = '{not valid json';
+  writeHideCliOriginChats(false);
+  assert.equal(readHideCliOriginChats(), false);
 });
 
 const sessions = [
