@@ -78,6 +78,7 @@ export default function MainContentHeader({
         selectedProject={selectedProject}
         selectedSession={selectedSession}
         processingSessions={processingSessions}
+        isMobile={isMobile}
         onSessionSelect={onSessionSelect}
         onNewSession={onNewSession}
       />
