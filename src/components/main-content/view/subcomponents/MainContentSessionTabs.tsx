@@ -4,10 +4,11 @@ import { useTranslation } from 'react-i18next';
 
 import type { Project, ProjectSession } from '../../../../types/app';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
+import { useHideCliOriginChats } from '../../../../hooks/useHideCliOriginChats';
 import { PillBar, Pill, Tooltip } from '../../../../shared/view/ui';
 import { cn } from '../../../../lib/utils';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
-import { getAllSessions, getSessionName } from '../../../sidebar/utils/utils';
+import { filterCliOriginSessions, getAllSessions, getSessionName } from '../../../sidebar/utils/utils';
 import {
   buildSessionTabs,
   SESSION_TAB_STATUS_BORDER,
@@ -64,8 +65,14 @@ export default function MainContentSessionTabs({
     setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 2);
   }, []);
 
+  // Global preference (#216): terminal-started sessions are hidden by default.
+  const hideCliOriginChats = useHideCliOriginChats();
   const selectedId = selectedSession ? String(selectedSession.id) : null;
-  const tabs = buildSessionTabs(getAllSessions(selectedProject), processingSessions, selectedId);
+  const tabs = buildSessionTabs(
+    filterCliOriginSessions(getAllSessions(selectedProject), hideCliOriginChats),
+    processingSessions,
+    selectedId,
+  );
 
   useEffect(() => {
     if (isMobile) return;

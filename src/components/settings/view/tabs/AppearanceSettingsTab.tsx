@@ -9,6 +9,8 @@ import SettingsToggle from '../SettingsToggle';
 type AppearanceSettingsTabProps = {
   projectSortOrder: ProjectSortOrder;
   onProjectSortOrderChange: (value: ProjectSortOrder) => void;
+  hideCliOriginChats: boolean;
+  onHideCliOriginChatsChange: (value: boolean) => void;
   codeEditorSettings: CodeEditorSettingsState;
   onCodeEditorWordWrapChange: (value: boolean) => void;
   onCodeEditorShowMinimapChange: (value: boolean) => void;
@@ -19,6 +21,8 @@ type AppearanceSettingsTabProps = {
 export default function AppearanceSettingsTab({
   projectSortOrder,
   onProjectSortOrderChange,
+  hideCliOriginChats,
+  onHideCliOriginChatsChange,
   codeEditorSettings,
   onCodeEditorWordWrapChange,
   onCodeEditorShowMinimapChange,
@@ -55,6 +59,21 @@ export default function AppearanceSettingsTab({
               <option value="name">{t('appearanceSettings.projectSorting.alphabetical')}</option>
               <option value="date">{t('appearanceSettings.projectSorting.recentActivity')}</option>
             </select>
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection title={t('appearanceSettings.conversationLists.title')}>
+        <SettingsCard>
+          <SettingsRow
+            label={t('appearanceSettings.hideCliOriginChats.label')}
+            description={t('appearanceSettings.hideCliOriginChats.description')}
+          >
+            <SettingsToggle
+              checked={hideCliOriginChats}
+              onChange={onHideCliOriginChatsChange}
+              ariaLabel={t('appearanceSettings.hideCliOriginChats.label')}
+            />
           </SettingsRow>
         </SettingsCard>
       </SettingsSection>

@@ -7,6 +7,7 @@ import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuth
 import { normalizeMainTab } from '../utils/settingsTabs';
 import {
   DEFAULT_CODE_EDITOR_SETTINGS,
+  DEFAULT_HIDE_CLI_ORIGIN_CHATS,
   DEFAULT_PROJECT_SORT_ORDER,
 } from '../constants/constants';
 import type {
@@ -34,6 +35,7 @@ type ClaudeSettingsStorage = {
   disallowedTools?: string[];
   skipPermissions?: boolean;
   projectSortOrder?: ProjectSortOrder;
+  hideCliOriginChats?: boolean;
 };
 
 type CodexSettingsStorage = {
@@ -121,6 +123,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
   const [activeTab, setActiveTab] = useState<SettingsMainTab>(() => normalizeMainTab(initialTab));
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
   const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>(DEFAULT_PROJECT_SORT_ORDER);
+  const [hideCliOriginChats, setHideCliOriginChats] = useState<boolean>(DEFAULT_HIDE_CLI_ORIGIN_CHATS);
   const [codeEditorSettings, setCodeEditorSettings] = useState<CodeEditorSettingsState>(() => (
     readCodeEditorSettings()
   ));
@@ -159,6 +162,11 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
           ? savedClaudeSettings.projectSortOrder
           : DEFAULT_PROJECT_SORT_ORDER,
       );
+      setHideCliOriginChats(
+        typeof savedClaudeSettings.hideCliOriginChats === 'boolean'
+          ? savedClaudeSettings.hideCliOriginChats
+          : DEFAULT_HIDE_CLI_ORIGIN_CHATS,
+      );
 
       const savedCodexSettings = parseJson<CodexSettingsStorage>(
         localStorage.getItem('codex-settings'),
@@ -188,6 +196,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
       setNotificationPreferences(createDefaultNotificationPreferences());
       setCodexPermissionMode('default');
       setProjectSortOrder(DEFAULT_PROJECT_SORT_ORDER);
+      setHideCliOriginChats(DEFAULT_HIDE_CLI_ORIGIN_CHATS);
     }
   }, []);
 
@@ -222,6 +231,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
         disallowedTools: claudePermissions.disallowedTools,
         skipPermissions: claudePermissions.skipPermissions,
         projectSortOrder,
+        hideCliOriginChats,
         lastUpdated: now,
       }));
 
@@ -250,6 +260,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     codexPermissionMode,
     notificationPreferences,
     projectSortOrder,
+    hideCliOriginChats,
   ]);
 
   const updateCodeEditorSetting = useCallback(
@@ -343,6 +354,8 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     saveStatus,
     projectSortOrder,
     setProjectSortOrder,
+    hideCliOriginChats,
+    setHideCliOriginChats,
     codeEditorSettings,
     updateCodeEditorSetting,
     claudePermissions,
