@@ -72,7 +72,6 @@ export default function MainContentHeader({
                 type="button"
                 onClick={handleArchiveClick}
                 aria-label={t('mainContent.archiveSession')}
-                title={t('mainContent.archiveSession')}
                 className="flex-shrink-0 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
               >
                 <Archive className="h-4 w-4" />
