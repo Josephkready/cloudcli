@@ -99,15 +99,19 @@ describe('MainContentSessionTabs — mobile hamburger (#217)', () => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
-  it('closes the overlay on Escape', async () => {
+  it('closes the overlay on Escape and hands focus back to the trigger', async () => {
     const user = userEvent.setup();
     renderTabs(true);
 
-    await user.click(screen.getByRole('button', { name: 'Open sessions menu' }));
+    const trigger = screen.getByRole('button', { name: 'Open sessions menu' });
+    await user.click(trigger);
     expect(screen.getByRole('menu')).toBeInTheDocument();
+    // Focus moves into the overlay so the menu roles are keyboard-reachable.
+    expect(screen.getAllByRole('menuitem')[0]).toHaveFocus();
 
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('menu')).toBeNull();
+    expect(trigger).toHaveFocus();
   });
 
   it('renders nothing when the space has no sessions', () => {

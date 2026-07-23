@@ -51,6 +51,8 @@ export default function MainContentSessionTabs({
 }: MainContentSessionTabsProps) {
   const { t } = useTranslation(['sidebar', 'common']);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -81,15 +83,28 @@ export default function MainContentSessionTabs({
     return () => observer.disconnect();
   }, [updateScrollState, tabs.length, isMobile]);
 
-  // Escape closes the mobile overlay. Outside taps are handled by the backdrop,
-  // which also stops taps from falling through to the chat underneath.
+  // Escape closes the mobile overlay and hands focus back to the trigger, which
+  // is the same keyboard contract the shared ActionMenu offers. Outside taps are
+  // handled by the backdrop, which also stops taps from falling through to the
+  // chat underneath.
   useEffect(() => {
     if (!isMenuOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsMenuOpen(false);
+      if (event.key !== 'Escape') return;
+      setIsMenuOpen(false);
+      triggerRef.current?.focus();
     };
     document.addEventListener('keydown', closeOnEscape);
     return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [isMenuOpen]);
+
+  // Move focus into the overlay on open so the `menu`/`menuitem` roles are
+  // actually reachable by keyboard and screen readers.
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const menu = menuRef.current;
+    const firstItem = menu?.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    (firstItem ?? menu)?.focus();
   }, [isMenuOpen]);
 
   // Switching spaces must not leave a stale overlay open over the new one.
@@ -126,6 +141,7 @@ export default function MainContentSessionTabs({
       <div className="relative mt-1.5">
         <div className="flex items-center gap-1">
           <button
+            ref={triggerRef}
             type="button"
             onClick={() => setIsMenuOpen((open) => !open)}
             aria-haspopup="menu"
@@ -159,7 +175,9 @@ export default function MainContentSessionTabs({
           <>
             <div className="fixed inset-0 z-40" aria-hidden onClick={() => setIsMenuOpen(false)} />
             <div
+              ref={menuRef}
               role="menu"
+              tabIndex={-1}
               aria-label={t('sessions.openSessions', 'Open sessions')}
               className="absolute inset-x-0 top-full z-50 mt-1 max-h-[60vh] overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-lg"
             >
