@@ -11,6 +11,7 @@ import { useDeviceSettings } from '../../hooks/useDeviceSettings';
 import { useSessionProtection } from '../../hooks/useSessionProtection';
 import { useProjectsState } from '../../hooks/useProjectsState';
 import { useQueuedMessageAutoSend } from '../../hooks/useQueuedMessageAutoSend';
+import { useArchiveSession } from '../../hooks/useArchiveSession';
 import { api } from '../../utils/api';
 
 type RunningSessionApiItem = {
@@ -85,6 +86,14 @@ function AppContentInner() {
     subscribe,
     isMobile,
     activeSessions: processingSessions,
+  });
+
+  // Soft-archive from the chat view's header. Reuses the same handler the
+  // sidebar rows use; `onSessionDelete` drops the session from the tree and
+  // deselects it, so the view falls back to the empty state.
+  const archiveSession = useArchiveSession({
+    t,
+    onSessionDelete: sidebarSharedProps.onSessionDelete,
   });
 
   // Queued messages for sessions that finish while another session (or none)
@@ -288,6 +297,7 @@ function AppContentInner() {
           newSessionTrigger={newSessionTrigger}
           onSessionSelect={handleSessionSelect}
           onNewSession={handleNewSession}
+          onArchiveSession={archiveSession}
         />
       </div>
 

@@ -5,6 +5,7 @@ import { api } from '../../../utils/api';
 import { usePaletteOps } from '../../../contexts/PaletteOpsContext';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 import type { SessionActivityMap } from '../../../hooks/useSessionProtection';
+import { useArchiveSession } from '../../../hooks/useArchiveSession';
 import type {
   ArchivedProjectListItem,
   ArchivedSessionListItem,
@@ -731,26 +732,11 @@ export function useSidebarController({
   // to raise the archive/permanent-delete dialog — archiving is always the
   // right default. Permanent delete stays reachable via shift-click (the dialog)
   // and the archived-sessions view.
-  const archiveSession = useCallback(async (sessionId: string) => {
-    try {
-      const response = await api.deleteSession(sessionId, false);
-
-      if (response.ok) {
-        onSessionDelete?.(sessionId);
-        await fetchArchivedSessions();
-      } else {
-        const errorText = await response.text();
-        console.error('[Sidebar] Failed to archive session:', {
-          status: response.status,
-          error: errorText,
-        });
-        alert(t('messages.archiveSessionFailed', 'Failed to archive session. Please try again.'));
-      }
-    } catch (error) {
-      console.error('[Sidebar] Error archiving session:', error);
-      alert(t('messages.archiveSessionError', 'Error archiving session. Please try again.'));
-    }
-  }, [fetchArchivedSessions, onSessionDelete, t]);
+  const archiveSession = useArchiveSession({
+    t,
+    onSessionDelete,
+    onArchived: fetchArchivedSessions,
+  });
 
   const requestProjectDelete = useCallback(
     (project: Project) => {

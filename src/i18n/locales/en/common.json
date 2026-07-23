@@ -43,7 +43,9 @@
     "notFound": "Not found",
     "invalidInput": "Invalid input",
     "requiredField": "This field is required",
-    "unknownError": "An unknown error occurred"
+    "unknownError": "An unknown error occurred",
+    "archiveSessionFailed": "Failed to archive session. Please try again.",
+    "archiveSessionError": "Error archiving session. Please try again."
   },
   "navigation": {
     "settings": "Settings",
@@ -95,7 +97,9 @@
     "untitledSession": "Untitled Session",
     "projectFiles": "Project Files",
     "renameSession": "Rename session",
-    "renameSessionHint": "Click to rename"
+    "renameSessionHint": "Click to rename",
+    "archiveSession": "Archive conversation",
+    "archiveSessionTooltip": "Archive this conversation"
   },
   "fileTree": {
     "loading": "Loading files...",

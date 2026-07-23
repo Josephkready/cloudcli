@@ -38,6 +38,7 @@ function MainContent({
   newSessionTrigger,
   onSessionSelect,
   onNewSession,
+  onArchiveSession,
 }: MainContentProps) {
   const { preferences } = useUiPreferences();
   const { showRawParameters, showThinking, sendByCtrlEnter } = preferences;
@@ -93,6 +94,7 @@ function MainContent({
         onSessionSelect={onSessionSelect}
         onNewSession={onNewSession}
         onRenameSession={onRenameSession}
+        onArchiveSession={onArchiveSession}
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">

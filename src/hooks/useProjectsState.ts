@@ -545,6 +545,13 @@ export function useProjectsState({
       setProjects((prevProjects) =>
         prevProjects.map((project) => removeSessionFromProject(project, sessionIdToDelete)),
       );
+
+      // `selectedProject` is a separate snapshot of the project object, so it
+      // has to be pruned too — otherwise the per-space session tab bar keeps
+      // showing a pill for the session that was just archived/deleted.
+      setSelectedProject((previous) =>
+        previous ? removeSessionFromProject(previous, sessionIdToDelete) : previous,
+      );
     },
     [navigate, selectedSession?.id],
   );

@@ -33,6 +33,8 @@ export type MainContentProps = {
   onSessionSelect: (session: ProjectSession) => void;
   // Start a fresh session in the given space (the tab bar's ＋ affordance).
   onNewSession: (project: Project) => void;
+  // Soft-archive the active session from the chat view's header.
+  onArchiveSession: (sessionId: string) => void | Promise<void>;
 };
 
 export type MainContentHeaderProps = {
@@ -46,6 +48,7 @@ export type MainContentHeaderProps = {
   onSessionSelect: (session: ProjectSession) => void;
   onNewSession: (project: Project) => void;
   onRenameSession: (sessionId: string, summary: string) => void | Promise<void>;
+  onArchiveSession: (sessionId: string) => void | Promise<void>;
 };
 
 export type MainContentStateViewProps = {

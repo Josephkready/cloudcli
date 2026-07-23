@@ -100,6 +100,8 @@
     "enterProjectPath": "Please enter a project path",
     "deleteSessionFailed": "Failed to delete session. Please try again.",
     "deleteSessionError": "Error deleting session. Please try again.",
+    "archiveSessionFailed": "Failed to archive session. Please try again.",
+    "archiveSessionError": "Error archiving session. Please try again.",
     "renameSessionFailed": "Failed to rename session. Please try again.",
     "renameSessionError": "Error renaming session. Please try again.",
     "deleteProjectFailed": "Failed to remove project. Please try again.",
