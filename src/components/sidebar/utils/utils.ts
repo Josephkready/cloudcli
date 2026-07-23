@@ -69,26 +69,20 @@ export const filterCliOriginSessions = <T extends { origin?: string }>(
 ): T[] => (hide ? sessions.filter((session) => session.origin !== 'cli') : sessions);
 
 /**
- * Project-level counterpart of {@link filterCliOriginSessions}: rewrites each
- * project's `sessions` with the CLI-origin ones removed. Projects left with no
- * visible session are dropped entirely so the conversation list doesn't render
- * empty spaces.
+ * Row-level counterpart of {@link filterCliOriginSessions}, for already-built
+ * conversation list items.
+ *
+ * This deliberately filters the *rows* rather than rewriting each `Project`'s
+ * `sessions` array: a row carries its originating project through to
+ * `onSelect`, which feeds `setSelectedProject`. Handing over a filtered copy
+ * would push a truncated session list into global app state, so turning the
+ * preference back off would leave the open space missing its CLI sessions until
+ * the next refresh. Filtering rows keeps every project reference untouched.
  */
-export const filterCliOriginSessionsFromProjects = (
-  projects: Project[],
+export const filterCliOriginConversations = <T extends { session: { origin?: string } }>(
+  items: T[],
   hide: boolean,
-): Project[] => {
-  if (!hide) {
-    return projects;
-  }
-
-  return projects
-    .map((project) => ({
-      ...project,
-      sessions: filterCliOriginSessions(project.sessions || [], true),
-    }))
-    .filter((project) => project.sessions.length > 0);
-};
+): T[] => (hide ? items.filter((item) => item.session.origin !== 'cli') : items);
 
 const LEGACY_STARRED_PROJECTS_STORAGE_KEY = 'starredProjects';
 

@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict';
 import test, { afterEach, beforeEach } from 'node:test';
 
-import type { Project } from '../../../types/app';
-
 import {
   DEFAULT_HIDE_CLI_ORIGIN_CHATS,
+  filterCliOriginConversations,
   filterCliOriginSessions,
-  filterCliOriginSessionsFromProjects,
   readHideCliOriginChats,
 } from './utils';
 
@@ -94,38 +92,32 @@ test('filterCliOriginSessions tolerates an empty list', () => {
   assert.deepEqual(filterCliOriginSessions([], true), []);
 });
 
-function projectWith(projectId: string, origins: (string | undefined)[]): Project {
-  return {
-    projectId,
-    displayName: projectId,
-    fullPath: `/repos/${projectId}`,
-    sessions: origins.map((origin, index) => ({ id: `${projectId}-${index}`, origin })),
-  } as unknown as Project;
-}
+const project = { projectId: 'p1' };
+const items = [
+  { project, session: { id: 'a', origin: 'cli' as const } },
+  { project, session: { id: 'b', origin: 'cloudcli' as const } },
+  { project, session: { id: 'c' } },
+];
 
-test('filterCliOriginSessionsFromProjects strips cli sessions per project', () => {
-  const projects = [projectWith('p1', ['cli', 'cloudcli']), projectWith('p2', [undefined])];
-  const filtered = filterCliOriginSessionsFromProjects(projects, true);
-
+test('filterCliOriginConversations drops only cli-origin rows when hiding', () => {
   assert.deepEqual(
-    filtered.map((project) => project.sessions?.map((session) => session.id)),
-    [['p1-1'], ['p2-0']],
+    filterCliOriginConversations(items, true).map((item) => item.session.id),
+    ['b', 'c'],
   );
 });
 
-test('filterCliOriginSessionsFromProjects drops projects left with no sessions', () => {
-  const projects = [projectWith('p1', ['cli', 'cli']), projectWith('p2', ['cloudcli'])];
-  const filtered = filterCliOriginSessionsFromProjects(projects, true);
-
-  assert.deepEqual(filtered.map((project) => project.projectId), ['p2']);
+test('filterCliOriginConversations preserves each row\'s project reference', () => {
+  // Load-bearing: the row's project is handed to onSelect -> setSelectedProject,
+  // so a filtered *copy* would push a truncated session list into app state.
+  for (const item of filterCliOriginConversations(items, true)) {
+    assert.equal(item.project, project);
+  }
 });
 
-test('filterCliOriginSessionsFromProjects tolerates a project with no sessions array', () => {
-  const projects = [{ projectId: 'p1', displayName: 'p1', fullPath: '/p1' } as unknown as Project];
-  assert.deepEqual(filterCliOriginSessionsFromProjects(projects, true), []);
+test('filterCliOriginConversations returns the input untouched when not hiding', () => {
+  assert.equal(filterCliOriginConversations(items, false), items);
 });
 
-test('filterCliOriginSessionsFromProjects returns the input untouched when not hiding', () => {
-  const projects = [projectWith('p1', ['cli'])];
-  assert.equal(filterCliOriginSessionsFromProjects(projects, false), projects);
+test('filterCliOriginConversations tolerates an empty list', () => {
+  assert.deepEqual(filterCliOriginConversations([], true), []);
 });
