@@ -6,10 +6,11 @@ import { cn } from '../../../../lib/utils';
 import { CursorContextMenu } from '../../../../shared/view/ui';
 import type { LLMProvider, Project, ProjectSession } from '../../../../types/app';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
+import { useHideCliOriginChats } from '../../../../hooks/useHideCliOriginChats';
 import type { SessionWithProvider } from '../../types/types';
 import { buildConversationList, formatCompactAge, STATUS_ORDER, type ConversationListItem, type ConversationStatus } from '../../utils/conversationList';
 import { buildSessionContextMenuActions } from '../../utils/sessionContextMenu';
-import { getSessionName } from '../../utils/utils';
+import { filterCliOriginSessionsFromProjects, getSessionName } from '../../utils/utils';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 
 import SidebarNewConversationButton from './SidebarNewConversationButton';
@@ -351,9 +352,15 @@ export default function SidebarConversationsList({
   t,
 }: SidebarConversationsListProps) {
   const selectedSessionId = selectedSession?.id ?? null;
+  // Global preference (#216): terminal-started sessions are hidden by default.
+  const hideCliOriginChats = useHideCliOriginChats();
+  const visibleProjects = useMemo(
+    () => filterCliOriginSessionsFromProjects(projects, hideCliOriginChats),
+    [projects, hideCliOriginChats],
+  );
   const items = useMemo(
-    () => buildConversationList(projects, activeSessions, selectedSessionId),
-    [projects, activeSessions, selectedSessionId],
+    () => buildConversationList(visibleProjects, activeSessions, selectedSessionId),
+    [visibleProjects, activeSessions, selectedSessionId],
   );
 
   if (items.length === 0) {

@@ -156,3 +156,80 @@ describe('MainContentSessionTabs — desktop strip unchanged (#217)', () => {
     expect(onSessionSelect.mock.calls[0][0]).toMatchObject({ id: 's2', __projectId: 'p1' });
   });
 });
+
+/*
+ * #216: the global "hide CLI-origin chats" preference (default ON) also filters
+ * the per-space open-session tab strip. The preference lives in the
+ * `claude-settings` localStorage blob; the shared setup clears storage between
+ * tests, so "nothing stored" exercises the default.
+ */
+
+function projectWithOrigins(
+  sessions: Array<{ id: string; summary: string; origin?: string }>,
+): Project {
+  return {
+    projectId: 'p1',
+    displayName: 'p1',
+    fullPath: '/repos/p1',
+    sessions: sessions.map((session) => ({
+      ...session,
+      lastActivity: '2026-07-20T00:00:00Z',
+      __provider: 'claude',
+    })),
+  } as unknown as Project;
+}
+
+const mixedOriginProject = projectWithOrigins([
+  { id: 's1', summary: 'CloudCLI chat', origin: 'cloudcli' },
+  { id: 's2', summary: 'Terminal chat', origin: 'cli' },
+  { id: 's3', summary: 'Origin-less chat' },
+]);
+
+function renderOriginTabs(project: Project = mixedOriginProject) {
+  return render(
+    <MainContentSessionTabs
+      selectedProject={project}
+      selectedSession={{ id: 's1' } as unknown as ProjectSession}
+      processingSessions={new Map() as SessionActivityMap}
+      onSessionSelect={vi.fn()}
+      onNewSession={vi.fn()}
+    />,
+  );
+}
+
+function setHideCliOriginChats(hideCliOriginChats: boolean) {
+  window.localStorage.setItem('claude-settings', JSON.stringify({ hideCliOriginChats }));
+}
+
+describe('MainContentSessionTabs — CLI-origin filter (#216)', () => {
+  it('hides CLI-origin session tabs by default', () => {
+    renderOriginTabs();
+
+    expect(screen.getByText('CloudCLI chat')).toBeInTheDocument();
+    expect(screen.getByText('Origin-less chat')).toBeInTheDocument();
+    expect(screen.queryByText('Terminal chat')).toBeNull();
+  });
+
+  it('hides CLI-origin session tabs when the preference is explicitly on', () => {
+    setHideCliOriginChats(true);
+    renderOriginTabs();
+
+    expect(screen.queryByText('Terminal chat')).toBeNull();
+  });
+
+  it('shows CLI-origin session tabs when the preference is off', () => {
+    setHideCliOriginChats(false);
+    renderOriginTabs();
+
+    expect(screen.getByText('Terminal chat')).toBeInTheDocument();
+    expect(screen.getByText('CloudCLI chat')).toBeInTheDocument();
+  });
+
+  it('renders nothing when every session in the space is CLI-origin', () => {
+    const { container } = renderOriginTabs(
+      projectWithOrigins([{ id: 's2', summary: 'Terminal chat', origin: 'cli' }]),
+    );
+
+    expect(container).toBeEmptyDOMElement();
+  });
+});

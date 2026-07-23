@@ -158,6 +158,13 @@
       "recentActivity": "Recent Activity",
       "sessionCount": "Session Count"
     },
+    "conversationLists": {
+      "title": "Conversation Lists"
+    },
+    "hideCliOriginChats": {
+      "label": "Hide Terminal-Started Chats",
+      "description": "Leave out conversations started from a local CLI, which CloudCLI can't drive"
+    },
     "codeEditor": {
       "title": "Code Editor",
       "theme": {

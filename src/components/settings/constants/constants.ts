@@ -41,6 +41,10 @@ export const AGENT_CATEGORIES: AgentCategory[] = ['account', 'permissions', 'mcp
 // `src/components/sidebar/utils/utils.ts` — the sidebar list and this Appearance
 // settings dropdown must agree on the default order.
 export const DEFAULT_PROJECT_SORT_ORDER: ProjectSortOrder = 'count';
+// Keep in sync with `DEFAULT_HIDE_CLI_ORIGIN_CHATS` in
+// `src/components/sidebar/utils/utils.ts` — the lists that read the preference
+// and this Appearance toggle must agree on the default (#216).
+export const DEFAULT_HIDE_CLI_ORIGIN_CHATS = true;
 export const DEFAULT_SAVE_STATUS = null;
 export const DEFAULT_CODE_EDITOR_SETTINGS: CodeEditorSettingsState = {
   wordWrap: false,

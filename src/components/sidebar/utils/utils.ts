@@ -27,6 +27,69 @@ export const readProjectSortOrder = (): ProjectSortOrder => {
   }
 };
 
+/**
+ * Hide terminal-started sessions by default (#216). CloudCLI can't drive a
+ * session it didn't start and its live status is unknown, so for most users
+ * they're noise in the conversation lists. Power users can flip the toggle in
+ * Appearance settings to see them again.
+ */
+export const DEFAULT_HIDE_CLI_ORIGIN_CHATS = true;
+
+/**
+ * Reads the "hide CLI-origin chats" preference from the same `claude-settings`
+ * blob that carries `projectSortOrder`. Anything other than an explicit boolean
+ * (missing key, corrupt JSON, unreadable storage) falls back to the default.
+ */
+export const readHideCliOriginChats = (): boolean => {
+  try {
+    const rawSettings = localStorage.getItem('claude-settings');
+    if (!rawSettings) {
+      return DEFAULT_HIDE_CLI_ORIGIN_CHATS;
+    }
+
+    const settings = JSON.parse(rawSettings) as { hideCliOriginChats?: unknown };
+    return typeof settings.hideCliOriginChats === 'boolean'
+      ? settings.hideCliOriginChats
+      : DEFAULT_HIDE_CLI_ORIGIN_CHATS;
+  } catch {
+    return DEFAULT_HIDE_CLI_ORIGIN_CHATS;
+  }
+};
+
+/**
+ * Drops sessions started outside CloudCLI (`origin === 'cli'`, the marker the
+ * "CLI" badge already renders from) when `hide` is set. Returns the input array
+ * untouched when the preference is off, so the un-filtered path allocates
+ * nothing. Pure, so both the sidebar list and the session tab strip can share
+ * one predicate.
+ */
+export const filterCliOriginSessions = <T extends { origin?: string }>(
+  sessions: T[],
+  hide: boolean,
+): T[] => (hide ? sessions.filter((session) => session.origin !== 'cli') : sessions);
+
+/**
+ * Project-level counterpart of {@link filterCliOriginSessions}: rewrites each
+ * project's `sessions` with the CLI-origin ones removed. Projects left with no
+ * visible session are dropped entirely so the conversation list doesn't render
+ * empty spaces.
+ */
+export const filterCliOriginSessionsFromProjects = (
+  projects: Project[],
+  hide: boolean,
+): Project[] => {
+  if (!hide) {
+    return projects;
+  }
+
+  return projects
+    .map((project) => ({
+      ...project,
+      sessions: filterCliOriginSessions(project.sessions || [], true),
+    }))
+    .filter((project) => project.sessions.length > 0);
+};
+
 const LEGACY_STARRED_PROJECTS_STORAGE_KEY = 'starredProjects';
 
 /**

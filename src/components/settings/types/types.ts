@@ -46,7 +46,11 @@ export type CodeEditorSettingsState = {
 };
 
 export type SettingsStoragePayload = {
-  claude: ClaudePermissionsState & { projectSortOrder: ProjectSortOrder; lastUpdated: string };
+  claude: ClaudePermissionsState & {
+    projectSortOrder: ProjectSortOrder;
+    hideCliOriginChats: boolean;
+    lastUpdated: string;
+  };
   codex: { permissionMode: CodexPermissionMode; lastUpdated: string };
 };
 

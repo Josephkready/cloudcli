@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { afterEach, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import React from 'react';
@@ -17,6 +17,36 @@ import SidebarConversationsList from './SidebarConversationsList';
 
 const t = ((key: string, fallback?: string) => fallback ?? key) as never;
 const noop = () => {};
+
+// #216 made "hide CLI-origin chats" a global preference read from
+// `claude-settings`. The `tsx --test` runner has no DOM, so stub the one method
+// the reader touches; tests that care about CLI sessions opt out of hiding.
+let settingsStore: Record<string, string> = {};
+const localStorageStub = {
+  getItem: (key: string) => (key in settingsStore ? settingsStore[key] : null),
+  setItem: (key: string, value: string) => {
+    settingsStore[key] = value;
+  },
+  removeItem: (key: string) => {
+    delete settingsStore[key];
+  },
+  clear: () => {
+    settingsStore = {};
+  },
+} as unknown as Storage;
+
+function showCliOriginChats() {
+  settingsStore['claude-settings'] = JSON.stringify({ hideCliOriginChats: false });
+}
+
+beforeEach(() => {
+  settingsStore = {};
+  (globalThis as { localStorage?: Storage }).localStorage = localStorageStub;
+});
+
+afterEach(() => {
+  delete (globalThis as { localStorage?: Storage }).localStorage;
+});
 
 function projectWith(sessionId: string, sessionExtra: Record<string, unknown> = {}): Project {
   return {
@@ -77,6 +107,8 @@ test('renders a New conversation button above the list', () => {
 });
 
 test('badges a CLI-driven session with the origin chip (#71)', () => {
+  // The badge only applies once CLI sessions are shown at all (#216).
+  showCliOriginChats();
   const html = render(new Map(), 's', { origin: 'cli' });
   assert.ok(html.includes('Session not driven by cloudcli'), 'a cli-origin session shows the CLI origin badge');
 });
@@ -84,6 +116,25 @@ test('badges a CLI-driven session with the origin chip (#71)', () => {
 test('leaves a cloudcli-driven session unbadged (#71)', () => {
   const html = render(new Map(), 's', { origin: 'cloudcli' });
   assert.ok(!html.includes('Session not driven by cloudcli'), 'a cloudcli-origin session has no CLI origin badge');
+});
+
+test('hides a CLI-origin session by default (#216)', () => {
+  // Nothing stored => preference defaults ON => the only session is filtered
+  // out, so the list falls through to its empty state.
+  const html = render(new Map(), 's', { origin: 'cli' });
+  assert.ok(!html.includes('Session not driven by cloudcli'), 'the CLI badge must not render for a hidden session');
+  assert.ok(!html.includes('>s</'), 'the CLI-origin session title must not render');
+});
+
+test('shows a CLI-origin session again when the preference is off (#216)', () => {
+  showCliOriginChats();
+  const html = render(new Map(), 's', { origin: 'cli' });
+  assert.ok(html.includes('Session not driven by cloudcli'), 'the CLI session reappears with its badge');
+});
+
+test('never hides a cloudcli-origin session (#216)', () => {
+  const html = render(new Map(), 's', { origin: 'cloudcli' });
+  assert.ok(html.includes('Archive session'), 'a cloudcli-origin session still renders with the default preference');
 });
 
 test('renders a New conversation button in the empty state (no projects/sessions)', () => {
