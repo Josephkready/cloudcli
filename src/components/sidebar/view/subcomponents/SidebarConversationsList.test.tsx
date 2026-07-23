@@ -137,6 +137,25 @@ test('never hides a cloudcli-origin session (#216)', () => {
   assert.ok(html.includes('Archive session'), 'a cloudcli-origin session still renders with the default preference');
 });
 
+test('shows the hidden-count affordance when a CLI session is filtered out (#216)', () => {
+  // Default preference (ON) hides the only session, so the list is empty. The
+  // affordance must surface how many are hidden and offer a Show action.
+  const html = render(new Map(), 's', { origin: 'cli' });
+  assert.ok(html.includes('1 CLI chats hidden'), 'the affordance should render the hidden count');
+  assert.ok(html.includes('>Show<'), 'the affordance should offer a Show action');
+});
+
+test('omits the hidden-count affordance when CLI chats are shown (#216)', () => {
+  showCliOriginChats();
+  const html = render(new Map(), 's', { origin: 'cli' });
+  assert.ok(!html.includes('CLI chats hidden'), 'no affordance when the preference is off');
+});
+
+test('omits the hidden-count affordance when nothing is hidden (#216)', () => {
+  const html = render(new Map(), 's', { origin: 'cloudcli' });
+  assert.ok(!html.includes('CLI chats hidden'), 'no affordance when no CLI session is filtered');
+});
+
 test('renders a New conversation button in the empty state (no projects/sessions)', () => {
   // No projects => no conversations => the empty-state branch renders. That branch
   // also mounts the button, so a fresh user can still start their first chat.

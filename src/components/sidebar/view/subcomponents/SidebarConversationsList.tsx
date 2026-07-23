@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { Activity, AlertCircle, Check, CheckCircle2, Clock, Edit2, Loader2, MessageSquare, Terminal, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -10,7 +10,7 @@ import { useHideCliOriginChats } from '../../../../hooks/useHideCliOriginChats';
 import type { SessionWithProvider } from '../../types/types';
 import { buildConversationList, formatCompactAge, STATUS_ORDER, type ConversationListItem, type ConversationStatus } from '../../utils/conversationList';
 import { buildSessionContextMenuActions } from '../../utils/sessionContextMenu';
-import { filterCliOriginConversations, getSessionName } from '../../utils/utils';
+import { filterCliOriginConversations, getSessionName, writeHideCliOriginChats } from '../../utils/utils';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 
 import SidebarNewConversationButton from './SidebarNewConversationButton';
@@ -333,6 +333,38 @@ function ConversationRow({
   );
 }
 
+// Subtle affordance shown when the "hide CLI-origin chats" preference (#216) is
+// filtering one or more sessions out of this list. Without it, a user whose
+// conversations are mostly terminal-started sees only the "No conversations yet"
+// empty state and the hidden sessions are undiscoverable. "Show" flips the same
+// global preference off (single source of truth) rather than adding a local one.
+function HiddenCliChatsRow({
+  count,
+  onShow,
+  t,
+}: {
+  count: number;
+  onShow: () => void;
+  t: TFunction;
+}) {
+  return (
+    <div className="flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] text-muted-foreground">
+      <Terminal className="h-3 w-3 flex-shrink-0 opacity-70" aria-hidden="true" />
+      <span>
+        {count} {t('conversations.cliChatsHidden', 'CLI chats hidden')}
+      </span>
+      <span aria-hidden="true">·</span>
+      <button
+        type="button"
+        onClick={onShow}
+        className="rounded-sm font-medium text-muted-foreground underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+      >
+        {t('conversations.showCliChats', 'Show')}
+      </button>
+    </div>
+  );
+}
+
 export default function SidebarConversationsList({
   projects,
   activeSessions,
@@ -354,13 +386,23 @@ export default function SidebarConversationsList({
   const selectedSessionId = selectedSession?.id ?? null;
   // Global preference (#216): terminal-started sessions are hidden by default.
   const hideCliOriginChats = useHideCliOriginChats();
-  const items = useMemo(
-    () => filterCliOriginConversations(
-      buildConversationList(projects, activeSessions, selectedSessionId),
-      hideCliOriginChats,
-    ),
-    [projects, activeSessions, selectedSessionId, hideCliOriginChats],
+  const allItems = useMemo(
+    () => buildConversationList(projects, activeSessions, selectedSessionId),
+    [projects, activeSessions, selectedSessionId],
   );
+  const items = useMemo(
+    () => filterCliOriginConversations(allItems, hideCliOriginChats),
+    [allItems, hideCliOriginChats],
+  );
+  // filterCliOriginConversations only ever removes origin==='cli' rows, so the
+  // drop between the full and filtered lists is exactly the hidden CLI count.
+  const hiddenCliCount = hideCliOriginChats ? allItems.length - items.length : 0;
+
+  // "Show" flips the global preference off; the shared useHideCliOriginChats
+  // reader picks up the synthetic storage event and re-renders this list.
+  const handleShowCliChats = useCallback(() => {
+    writeHideCliOriginChats(false);
+  }, []);
 
   if (items.length === 0) {
     return (
@@ -382,6 +424,11 @@ export default function SidebarConversationsList({
             t={t}
           />
         </div>
+        {hiddenCliCount > 0 && (
+          <div className="mt-4 md:mt-3">
+            <HiddenCliChatsRow count={hiddenCliCount} onShow={handleShowCliChats} t={t} />
+          </div>
+        )}
       </div>
     );
   }
@@ -442,6 +489,9 @@ export default function SidebarConversationsList({
           </div>
         );
       })}
+      {hiddenCliCount > 0 && (
+        <HiddenCliChatsRow count={hiddenCliCount} onShow={handleShowCliChats} t={t} />
+      )}
     </div>
   );
 }
