@@ -96,6 +96,9 @@ test('a pending AskUserQuestion ranks blocked and shares the long interaction wi
   assert.equal(classifyClaudeLiveStatus(QUESTION_TAIL, NOW - 2 * SECONDS, NOW), 'blocked');
   // 30 min old: still blocked (interaction wait), unlike a generic prompt.
   assert.equal(classifyClaudeLiveStatus(QUESTION_TAIL, NOW - 30 * MINUTES, NOW), 'blocked');
+  // Shares the 4h interaction boundary with plans: at the edge blocked, past it idle.
+  assert.equal(classifyClaudeLiveStatus(QUESTION_TAIL, NOW - 4 * 60 * MINUTES, NOW), 'blocked');
+  assert.equal(classifyClaudeLiveStatus(QUESTION_TAIL, NOW - (4 * 60 * MINUTES + 1), NOW), 'idle');
 });
 
 test('an interaction tool wins over a co-issued generic tool in the same turn', () => {
@@ -229,6 +232,22 @@ test('resolveSessionLiveStatus reads a plan transcript older than the generic wi
       projectPath: null,
     });
     assert.equal(status, 'plan');
+  });
+});
+
+test('resolveSessionLiveStatus fast-paths a plan transcript older than the 4h interaction window to idle', async () => {
+  await withTempTranscript(PLAN_TAIL, async (jsonlPath) => {
+    // Backdate past the 4h interaction window: the disk fast-path must skip the
+    // read and return idle (a plan parked this long is treated as abandoned).
+    const pastWindow = new Date(Date.now() - (4 * 60 + 1) * 60_000);
+    await utimes(jsonlPath, pastWindow, pastWindow);
+    const status = await resolveSessionLiveStatus({
+      provider: 'claude',
+      sessionId: 'plan-stale',
+      jsonlPath,
+      projectPath: null,
+    });
+    assert.equal(status, 'idle');
   });
 });
 
