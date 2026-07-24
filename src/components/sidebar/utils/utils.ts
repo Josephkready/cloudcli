@@ -1,5 +1,6 @@
 import type { TFunction } from 'i18next';
 
+import { getSessionDisplayName } from '../../../utils/sessionDisplayName';
 import type { LLMProvider, Project, ProjectSession } from '../../../types/app';
 import type { ProjectSortOrder, SettingsProject, SessionViewModel, SessionWithProvider } from '../types/types';
 
@@ -178,7 +179,7 @@ export const getSessionDate = (session: SessionWithProvider): Date => {
 };
 
 export const getSessionName = (session: SessionWithProvider, t: TFunction): string => {
-  return session.summary || session.name || t('projects.newSession');
+  return getSessionDisplayName(session, t('projects.newSession'));
 };
 
 export const getSessionTime = (session: SessionWithProvider): string => {
