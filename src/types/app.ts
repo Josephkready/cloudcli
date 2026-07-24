@@ -48,7 +48,7 @@ export interface ProjectSession {
   // derived from the transcript on disk (mtime recency + last-event inspection).
   // The Conversations list ranks terminal sessions from this when they're absent
   // from the client `activeSessions` map; client-driven status wins when present.
-  liveStatus?: 'blocked' | 'working' | 'idle';
+  liveStatus?: 'plan' | 'blocked' | 'working' | 'idle';
   provider?: LLMProvider;
   __provider?: LLMProvider;
   // Tags the session with the owning project's DB `projectId` so UI handlers

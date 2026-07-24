@@ -5,7 +5,7 @@ import { Button } from '../../../../shared/view/ui';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import type { Project, ProjectSession, LLMProvider } from '../../../../types/app';
 import type { SessionWithProvider } from '../../types/types';
-import { isSessionDone } from '../../utils/conversationList';
+import { resolveStatus } from '../../utils/conversationList';
 
 import SidebarSessionItem from './SidebarSessionItem';
 
@@ -120,20 +120,21 @@ export default function SidebarProjectSessions({
         </div>
       ) : (
         <>
-          {sessions.map((session) => (
+          {sessions.map((session) => {
+            // Derive the attention dot from the same status the Conversations
+            // bands use, so a session parked on a plan / permission prompt (live
+            // run OR transcript-detected terminal session) or finished-but-unviewed
+            // all warrant it — previously this looked only at the live-run blocked
+            // flag and missed transcript-detected waits.
+            const status = resolveStatus(session, activeSessions, selectedSession?.id ?? null);
+            return (
             <SidebarSessionItem
               key={session.id}
               project={project}
               session={session}
               selectedSession={selectedSession}
               isProcessing={activeSessions.has(session.id)}
-              // Blocked-on-you or finished-but-unviewed both warrant the dot,
-              // derived from the same server-authoritative state as the
-              // Conversations bands (see conversationList.resolveStatus).
-              needsAttention={
-                Boolean(activeSessions.get(session.id)?.blocked)
-                || isSessionDone(session, selectedSession?.id ?? null)
-              }
+              needsAttention={status === 'plan' || status === 'blocked' || status === 'done'}
               currentTime={currentTime}
               editingSession={editingSession}
               editingSessionName={editingSessionName}
@@ -147,7 +148,8 @@ export default function SidebarProjectSessions({
               onArchiveSession={onArchiveSession}
               t={t}
             />
-          ))}
+            );
+          })}
 
           {hasMoreSessions && (
             <Button

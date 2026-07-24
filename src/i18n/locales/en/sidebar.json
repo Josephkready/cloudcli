@@ -157,10 +157,12 @@
     "bulkByAgeDismissAction": "OK"
   },
   "conversations": {
+    "planHeader": "Plan ready",
     "blockedHeader": "Blocked",
     "doneHeader": "Done",
     "runningHeader": "Running",
     "recentHeader": "Recent",
+    "planStatus": "Plan ready — review",
     "blockedStatus": "Blocked — needs you",
     "doneStatus": "Done — unreviewed",
     "runningStatus": "Working",

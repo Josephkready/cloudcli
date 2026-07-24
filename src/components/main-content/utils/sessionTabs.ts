@@ -35,6 +35,7 @@ export function buildSessionTabs(
  * session that is neither running, blocked, nor finished-unseen).
  */
 export const SESSION_TAB_STATUS_DOT: Record<ConversationStatus, string | null> = {
+  plan: 'bg-violet-500',
   blocked: 'bg-amber-500',
   running: 'bg-emerald-500',
   done: 'bg-sky-500',
@@ -47,6 +48,7 @@ export const SESSION_TAB_STATUS_DOT: Record<ConversationStatus, string | null> =
  * border width (no layout shift) while only status-bearing tabs are tinted.
  */
 export const SESSION_TAB_STATUS_BORDER: Record<ConversationStatus, string> = {
+  plan: 'border-violet-500',
   blocked: 'border-amber-500',
   running: 'border-emerald-500',
   done: 'border-sky-500',

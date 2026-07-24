@@ -57,8 +57,14 @@ test('with no selection, nothing is active', () => {
   assert.equal(tabs.every((t) => !t.isActive), true);
 });
 
+test('buildSessionTabs surfaces a plan-parked session as status "plan"', () => {
+  const tabs = buildSessionTabs([mkSession('planned', { liveStatus: 'plan' })], new Map(), null);
+  assert.equal(tabs[0].status, 'plan');
+});
+
 test('status-dot map: each status maps to its own distinct color, recent gets none', () => {
   // Exact values (not just truthiness) so a color swap between statuses fails.
+  assert.equal(SESSION_TAB_STATUS_DOT.plan, 'bg-violet-500');
   assert.equal(SESSION_TAB_STATUS_DOT.blocked, 'bg-amber-500');
   assert.equal(SESSION_TAB_STATUS_DOT.running, 'bg-emerald-500');
   assert.equal(SESSION_TAB_STATUS_DOT.done, 'bg-sky-500');
@@ -68,6 +74,7 @@ test('status-dot map: each status maps to its own distinct color, recent gets no
 test('status-border map: outline color matches the dot color, recent is transparent', () => {
   // The tab outline uses the same status palette as the dot; recent stays
   // transparent so every pill keeps an equal border width (no layout shift).
+  assert.equal(SESSION_TAB_STATUS_BORDER.plan, 'border-violet-500');
   assert.equal(SESSION_TAB_STATUS_BORDER.blocked, 'border-amber-500');
   assert.equal(SESSION_TAB_STATUS_BORDER.running, 'border-emerald-500');
   assert.equal(SESSION_TAB_STATUS_BORDER.done, 'border-sky-500');
