@@ -13,9 +13,9 @@ import { readFileTail } from '@/shared/utils.js';
  * no live run for it and would always rank it idle. This module recovers a live
  * status straight from the transcript on disk (mtime recency + last-event
  * inspection) so those sessions rank alongside cloudcli-driven ones. Herdr-style
- * order: blocked > working > idle.
+ * order: plan > blocked > working > idle.
  */
-export type SessionLiveStatus = 'blocked' | 'working' | 'idle';
+export type SessionLiveStatus = 'plan' | 'blocked' | 'working' | 'idle';
 
 // A transcript touched within this window is treated as an agent that is
 // actively writing (streaming assistant text / a rapid tool loop). Kept short so
@@ -23,11 +23,27 @@ export type SessionLiveStatus = 'blocked' | 'working' | 'idle';
 // gaps between successive tool calls without the status flapping.
 const WORKING_WINDOW_MS = 15_000;
 
-// An assistant turn that ends on an unanswered tool_use is either parked on a
-// permission / plan-approval prompt or running a slow tool; either way it still
-// "needs me" for up to this long. Beyond it we assume the terminal session was
-// abandoned (closed without answering) and let it fall back to idle history.
+// An assistant turn that ends on an unanswered *generic* tool_use (a permission
+// prompt or a slow tool) still "needs me" for up to this long. Beyond it we
+// assume the terminal session was abandoned (closed without answering) and let
+// it fall back to idle history. Interaction tools (below) get a longer window.
 const AWAITING_INPUT_WINDOW_MS = 5 * 60_000;
+
+// An assistant turn parked on an *interaction* tool — a plan submitted for
+// approval (`ExitPlanMode`) or a direct question (`AskUserQuestion`) — is a
+// deliberate, indefinite wait on the user, not a slow tool that will resolve on
+// its own. A finished plan can sit for a long time before I get back to it, so
+// it stays flagged far longer than a generic prompt. Bounded (rather than
+// forever) because it also caps how far back resolveSessionLiveStatus reads
+// transcripts on every projects fetch — 4h covers a realistic step-away while
+// keeping the disk fan-out predictable.
+const INTERACTION_INPUT_WINDOW_MS = 4 * 60 * 60_000;
+
+// Tools whose unanswered tool_use marks a deliberate wait on the user. Names are
+// matched against the on-disk tool_use `name` (PascalCase in Claude transcripts);
+// `exit_plan_mode` is accepted defensively in case the snake_case id ever lands.
+const PLAN_TOOL_NAMES = new Set(['ExitPlanMode', 'exit_plan_mode']);
+const INTERACTION_TOOL_NAMES = new Set([...PLAN_TOOL_NAMES, 'AskUserQuestion']);
 
 // Initial bytes read from the end of the transcript. A handful of ordinary
 // JSONL events fit easily. The final event can be far larger than this, though
@@ -61,17 +77,20 @@ function parseTailEvents(tail: string): AnyRecord[] {
 }
 
 /**
- * True when the transcript's final assistant turn ends on a `tool_use` that has
- * no matching `tool_result` yet — the on-disk proxy for "awaiting the user".
+ * Name of the `tool_use` the transcript's final assistant turn is parked on with
+ * no matching `tool_result` yet — the on-disk proxy for "awaiting the user" — or
+ * `null` when the latest turn resolved (or never issued) its tools.
  *
  * Claude does not persist permission / plan-approval prompts to the JSONL (those
  * are live SDK-only events), so an unanswered tool_use is the best available
  * signal that the agent is parked waiting on input rather than still producing
  * output. Plan mode's `ExitPlanMode` is itself a tool_use, so it is covered too.
+ * The name lets the caller tell a deliberate interaction wait (plan / question)
+ * from a generic permission prompt or slow tool.
  */
-function eventsEndAwaitingUserInput(events: AnyRecord[]): boolean {
+function trailingUnansweredToolName(events: AnyRecord[]): string | null {
   if (events.length === 0) {
-    return false;
+    return null;
   }
 
   // Every tool_result anywhere in the tail resolves its originating tool_use.
@@ -89,7 +108,9 @@ function eventsEndAwaitingUserInput(events: AnyRecord[]): boolean {
   }
 
   // Inspect the most recent assistant message: an unanswered tool_use means the
-  // turn is parked waiting on the user.
+  // turn is parked waiting on the user. When a turn issues several tools, prefer
+  // an interaction tool (a plan / question the user must answer) over a generic
+  // one so the whole turn is classified by the wait that actually needs a human.
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (event.message?.role !== 'assistant') {
@@ -98,29 +119,46 @@ function eventsEndAwaitingUserInput(events: AnyRecord[]): boolean {
 
     const content = event.message?.content;
     if (!Array.isArray(content)) {
-      return false;
+      return null;
     }
 
+    let pendingGenericTool: string | null = null;
     for (const part of content as AnyRecord[]) {
       if (part?.type === 'tool_use' && typeof part.id === 'string' && !resolvedToolUseIds.has(part.id)) {
-        return true;
+        const name = typeof part.name === 'string' ? part.name : '';
+        if (INTERACTION_TOOL_NAMES.has(name)) {
+          return name;
+        }
+        pendingGenericTool ??= name;
       }
     }
 
-    // The latest assistant turn resolved (or never issued) its tools → not waiting.
-    return false;
+    // The latest assistant turn resolved (or never issued) its tools → not
+    // waiting; otherwise it is parked on a generic (non-interaction) tool.
+    return pendingGenericTool;
   }
 
-  return false;
+  return null;
 }
 
 function classifyFromEvents(events: AnyRecord[], mtimeMs: number, nowMs: number): SessionLiveStatus {
   const ageMs = nowMs - mtimeMs;
+  const pendingTool = trailingUnansweredToolName(events);
 
-  // Awaiting user input (permission / plan approval / a parked tool) needs
-  // attention and outranks everything else while it is still recent enough.
-  if (ageMs <= AWAITING_INPUT_WINDOW_MS && eventsEndAwaitingUserInput(events)) {
-    return 'blocked';
+  if (pendingTool !== null) {
+    // A plan submitted for approval / a direct question is a deliberate wait on
+    // the user and stays flagged for the long interaction window. A finished
+    // plan gets its own status so the UI can present it as a deliverable to
+    // review rather than a generic "blocked" prompt.
+    if (INTERACTION_TOOL_NAMES.has(pendingTool)) {
+      if (ageMs <= INTERACTION_INPUT_WINDOW_MS) {
+        return PLAN_TOOL_NAMES.has(pendingTool) ? 'plan' : 'blocked';
+      }
+    } else if (ageMs <= AWAITING_INPUT_WINDOW_MS) {
+      // A generic permission prompt / slow tool: needs attention only while
+      // recent, then decays as a likely-abandoned turn.
+      return 'blocked';
+    }
   }
 
   // Actively producing output.
@@ -176,8 +214,12 @@ export async function resolveSessionLiveStatus(
     }
 
     const { mtimeMs, size } = await stat(jsonlPath);
-    // Fast path: an old transcript is idle history — skip the tail read.
-    if (nowMs - mtimeMs > AWAITING_INPUT_WINDOW_MS) {
+    // Fast path: a transcript older than the longest window we still classify
+    // (the interaction window, which covers a plan/question parked awaiting the
+    // user) is idle history — skip the tail read. Uses the interaction window,
+    // not the shorter generic one, so a plan submitted for approval hours ago is
+    // still read and ranked rather than silently decaying to idle.
+    if (nowMs - mtimeMs > INTERACTION_INPUT_WINDOW_MS) {
       return 'idle';
     }
 

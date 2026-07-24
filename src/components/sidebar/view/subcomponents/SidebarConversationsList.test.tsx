@@ -96,6 +96,22 @@ test('hides the archive/delete button for a blocked-but-running session', () => 
   assert.ok(!html.includes('Archive session'), 'archive/delete button must be absent for an active session');
 });
 
+test('renders the Plan-ready band for a session parked on a plan (transcript liveStatus)', () => {
+  // A terminal session whose transcript ends on an unanswered ExitPlanMode ranks
+  // `plan` → the violet "Plan ready" band, ClipboardCheck indicator, and tint.
+  const html = render(new Map(), 's', { liveStatus: 'plan' });
+  assert.ok(html.includes('Plan ready'), 'the Plan ready section header should render');
+  assert.ok(html.includes('Plan ready — review'), 'the plan status indicator aria-label should render');
+  assert.ok(html.includes('border-violet-500/30'), 'the plan row uses the violet highlight');
+});
+
+test('a live run blocked on a plan renders Plan-ready, not the generic blocked band', () => {
+  // Live blocked run + transcript identifies the parked tool as a plan → plan.
+  const html = render(new Map([['s', activity(true)]]), 's', { liveStatus: 'plan' });
+  assert.ok(html.includes('Plan ready — review'), 'a blocked-on-plan run surfaces the plan indicator');
+  assert.ok(!html.includes('Blocked — needs you'), 'it must not fall back to the generic blocked indicator');
+});
+
 test('shows the archive/delete button for an idle session', () => {
   const html = render(new Map(), 's');
   assert.ok(html.includes('Archive session'), 'archive/delete button should render for an idle session');

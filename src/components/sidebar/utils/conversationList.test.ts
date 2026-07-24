@@ -128,6 +128,41 @@ test('server liveStatus "blocked" ranks a terminal session at the top (needs att
   assert.deepEqual(list.map((item) => item.status), ['blocked', 'running']);
 });
 
+test('server liveStatus "plan" ranks a terminal session at the very top (plan ready to review)', () => {
+  const p = project('p1', [
+    session('blocked', '2026-07-18T05:00:00Z', { liveStatus: 'blocked' }),
+    session('plan', '2026-07-18T04:00:00Z', { liveStatus: 'plan' }),
+  ]);
+
+  const list = buildConversationList([p], new Map(), null);
+
+  // Plan outranks Blocked despite being older.
+  assert.deepEqual(list.map((item) => item.session.id), ['plan', 'blocked']);
+  assert.deepEqual(list.map((item) => item.status), ['plan', 'blocked']);
+});
+
+test('a live run blocked on a plan resolves to plan; blocked without a plan stays blocked', () => {
+  // Live run reports blocked AND the transcript identifies the parked tool as a plan.
+  const planned = project('p1', [session('s', 'x', { liveStatus: 'plan' })]);
+  assert.equal(buildConversationList([planned], blockedSessions('s'), null)[0].status, 'plan');
+
+  // Blocked live run with no plan signal (generic permission prompt) stays blocked.
+  const generic = project('p2', [session('s', 'x', { liveStatus: 'blocked' })]);
+  assert.equal(buildConversationList([generic], blockedSessions('s'), null)[0].status, 'blocked');
+});
+
+test('a live (non-blocked) run ignores a stale transcript "plan" and ranks running', () => {
+  // The run resumed after approval but the transcript scan hasn't refreshed yet:
+  // the live-run flag (not the stale liveStatus) decides, so it must not flash plan.
+  const p = project('p1', [session('s', 'x', { liveStatus: 'plan' })]);
+  assert.equal(buildConversationList([p], activeSessions('s'), null)[0].status, 'running');
+});
+
+test('isActive is true for a plan-parked terminal session', () => {
+  const p = project('p1', [session('s-plan', 'x', { liveStatus: 'plan' })]);
+  assert.equal(buildConversationList([p], new Map(), null)[0].isActive, true);
+});
+
 test('client-driven status wins over server liveStatus (no regression for cloudcli runs)', () => {
   // Server says idle, but cloudcli has a live run → the client state is authoritative.
   const p = project('p1', [session('s', 'x', { liveStatus: 'idle' })]);

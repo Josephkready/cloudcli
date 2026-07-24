@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
-import { Activity, AlertCircle, Check, CheckCircle2, Clock, Edit2, Loader2, MessageSquare, Terminal, Trash2, X } from 'lucide-react';
+import { Activity, AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Edit2, Loader2, MessageSquare, Terminal, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { cn } from '../../../../lib/utils';
@@ -52,6 +52,7 @@ type SectionMeta = {
 // Presentation metadata per status band, keyed so rendering walks STATUS_ORDER
 // (the single ordering source in conversationList.ts) instead of a parallel list.
 const SECTION_META: Record<ConversationStatus, SectionMeta> = {
+  plan: { icon: ClipboardCheck, iconClassName: 'text-violet-500', labelKey: 'conversations.planHeader', labelFallback: 'Plan ready' },
   blocked: { icon: AlertCircle, iconClassName: 'text-amber-500', labelKey: 'conversations.blockedHeader', labelFallback: 'Blocked' },
   done: { icon: CheckCircle2, iconClassName: 'text-sky-500', labelKey: 'conversations.doneHeader', labelFallback: 'Done' },
   running: { icon: Activity, iconClassName: 'text-emerald-500', labelKey: 'conversations.runningHeader', labelFallback: 'Running' },
@@ -149,7 +150,14 @@ function ConversationRow({
   );
 
   let statusIndicator: ReactNode = null;
-  if (status === 'blocked') {
+  if (status === 'plan') {
+    statusIndicator = (
+      <ClipboardCheck
+        aria-label={t('conversations.planStatus', 'Plan ready — review')}
+        className="h-3.5 w-3.5 flex-shrink-0 animate-pulse text-violet-500"
+      />
+    );
+  } else if (status === 'blocked') {
     statusIndicator = (
       <span
         role="status"
@@ -188,7 +196,9 @@ function ConversationRow({
           'flex w-full min-w-0 items-center gap-2 rounded-md border p-2 text-left transition-all duration-150',
           isSelected
             ? 'border-primary bg-primary/15 ring-1 ring-primary/50 dark:bg-primary/25'
-            : status === 'blocked'
+            : status === 'plan'
+              ? 'border-violet-500/30 bg-violet-50/10 hover:bg-violet-50/20 dark:bg-violet-900/5 dark:hover:bg-violet-900/10'
+              : status === 'blocked'
               ? 'border-amber-500/30 bg-amber-50/10 hover:bg-amber-50/20 dark:bg-amber-900/5 dark:hover:bg-amber-900/10'
               : status === 'running'
                 ? 'border-emerald-500/30 bg-emerald-50/10 hover:bg-emerald-50/20 dark:bg-emerald-900/5 dark:hover:bg-emerald-900/10'

@@ -6,13 +6,16 @@ import { getAllSessions, getSessionDate } from './utils';
 
 /**
  * Durable "what needs me now" status for a conversation row. Ordered
- * Blocked > Done > Running > Recent: a run waiting on my input beats one that
- * finished and I haven't looked at, which beats one still working, which beats
- * anything old/reviewed. Derived from server-authoritative state (the live
- * `blocked` flag + persisted `last_completed_at`/`last_viewed_at`), not a
- * per-tab ephemeral set — so it's the same on every device and survives reload.
+ * Plan > Blocked > Done > Running > Recent: an agent that finished a plan and is
+ * parked awaiting my review, and one blocked on a permission prompt, both need me
+ * before anything else; a plan-approval leads because it's a completed deliverable
+ * to act on. Then a run that finished and I haven't looked at, then one still
+ * working, then anything old/reviewed. Derived from server-authoritative state
+ * (the live `blocked` flag + transcript `liveStatus` + persisted
+ * `last_completed_at`/`last_viewed_at`), not a per-tab ephemeral set — so it's the
+ * same on every device and survives reload.
  */
-export type ConversationStatus = 'blocked' | 'done' | 'running' | 'recent';
+export type ConversationStatus = 'plan' | 'blocked' | 'done' | 'running' | 'recent';
 
 export type ConversationListItem = {
   project: Project;
@@ -29,12 +32,13 @@ export type ConversationListItem = {
   activityTime: number;
 };
 
-// Lower number sorts first: Blocked > Done > Running > Recent.
+// Lower number sorts first: Plan > Blocked > Done > Running > Recent.
 const STATUS_RANK: Record<ConversationStatus, number> = {
-  blocked: 0,
-  done: 1,
-  running: 2,
-  recent: 3,
+  plan: 0,
+  blocked: 1,
+  done: 2,
+  running: 3,
+  recent: 4,
 };
 
 // Single source of truth for band order: the render layer derives its section
@@ -73,7 +77,11 @@ export function isSessionDone(
  * launched, the client's own live state is authoritative.
  */
 function isServerLive(session: SessionWithProvider): boolean {
-  return session.liveStatus === 'blocked' || session.liveStatus === 'working';
+  return (
+    session.liveStatus === 'plan' ||
+    session.liveStatus === 'blocked' ||
+    session.liveStatus === 'working'
+  );
 }
 
 export function resolveStatus(
@@ -82,18 +90,27 @@ export function resolveStatus(
   selectedSessionId: string | null,
 ): ConversationStatus {
   const sessionId = String(session.id);
+  const activeRun = activeSessions.get(sessionId);
   // A live run the server reports as blocked (waiting on a permission prompt or
-  // plan-mode approval) needs me now — in any tab, regardless of who started it.
-  if (activeSessions.get(sessionId)?.blocked) {
-    return 'blocked';
+  // an interaction tool) needs me now — in any tab, regardless of who started
+  // it. Distinguish a plan submitted for approval from a generic prompt via the
+  // transcript-derived status, which resolved the parked tool's identity. The
+  // live `blocked` flag gates this so a stale transcript can't flash "plan" once
+  // the run has already resumed.
+  if (activeRun?.blocked) {
+    return session.liveStatus === 'plan' ? 'plan' : 'blocked';
   }
   // Actively working, no action needed from me.
-  if (activeSessions.has(sessionId)) {
+  if (activeRun) {
     return 'running';
   }
-  // No client-side run for this session — cloudcli didn't launch it. Fall back
-  // to the server's transcript-derived live status so terminal sessions rank
-  // alongside cloudcli-driven ones. Blocked (awaiting input) outranks Done.
+  // No client-side run for this session — cloudcli didn't launch it (or it was
+  // reloaded / cleaned up). Fall back to the server's transcript-derived live
+  // status so terminal sessions rank alongside cloudcli-driven ones. A plan
+  // parked for review, then a generic prompt, both outrank Done.
+  if (session.liveStatus === 'plan') {
+    return 'plan';
+  }
   if (session.liveStatus === 'blocked') {
     return 'blocked';
   }
