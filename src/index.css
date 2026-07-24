@@ -703,7 +703,15 @@
     .touch\:opacity-100 {
       opacity: 1 !important;
     }
-    
+
+    /* Reserve room for row actions that are permanently visible on touch, so
+       they stop sharing coordinates with the row's timestamp / status
+       indicator (#244). Without this the always-on cluster is drawn straight
+       on top of the "11m" text. */
+    .touch\:pr-16 {
+      padding-right: 4rem !important;
+    }
+
     /* Completely disable hover states on touch devices */
     * {
       -webkit-tap-highlight-color: transparent !important;

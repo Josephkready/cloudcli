@@ -279,7 +279,9 @@ export default function SidebarSessionItem({
               <SessionProviderLogo provider={session.__provider} className="h-3 w-3" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
+              {/* The action cluster is permanently visible on touch, so the
+                  timestamp/spinner has to clear it rather than sit under it. */}
+              <div className="touch:pr-16 flex items-center gap-2">
                 <div className="min-w-0 flex-1 truncate text-sm font-normal text-foreground">{sessionView.sessionName}</div>
                 {isProcessing ? (
                   <span
@@ -317,7 +319,9 @@ export default function SidebarSessionItem({
           ref={editingContainerRef}
           className={cn(
             'absolute right-2 top-1/2 flex -translate-y-1/2 transform items-center gap-1 transition-all duration-200',
-            isEditing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+            // A touch device never hovers, so without `touch:` the cluster stays
+            // invisible yet clickable, on top of the timestamp (#244).
+            isEditing ? 'opacity-100' : 'touch:opacity-100 opacity-0 group-hover:opacity-100',
           )}
         >
             {isEditing ? (
