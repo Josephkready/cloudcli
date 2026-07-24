@@ -19,6 +19,10 @@ const getErrorMessage = (error: unknown) => {
 
 export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocumentParams) => {
   const [content, setContent] = useState('');
+  // What the buffer looked like the last time it matched disk. Comparing
+  // against it (rather than tracking a "touched" flag) means undoing an edit by
+  // hand correctly reports the buffer as clean again (#231).
+  const [savedContent, setSavedContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -38,6 +42,13 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
 
   useEffect(() => {
     const loadFileContent = async () => {
+      // Whatever the load produces is by definition the on-disk baseline, so
+      // the editor never opens already flagged as dirty.
+      const applyLoadedContent = (loaded: string) => {
+        setContent(loaded);
+        setSavedContent(loaded);
+      };
+
       try {
         setLoading(true);
         setIsBinary(false);
@@ -47,14 +58,14 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
         // Clear any buffer left over from a previously opened text file so a
         // stray save can't write stale content over the binary file.
         if (getPreviewKind(file.name)) {
-          setContent('');
+          applyLoadedContent('');
           setLoading(false);
           return;
         }
 
         // Check if file is binary by extension
         if (isBinaryFile(file.name)) {
-          setContent('');
+          applyLoadedContent('');
           setIsBinary(true);
           setLoading(false);
           return;
@@ -62,7 +73,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
 
         // Diff payload may already include full old/new snapshots, so avoid disk read.
         if (file.diffInfo && fileDiffNewString !== undefined && fileDiffOldString !== undefined) {
-          setContent(fileDiffNewString);
+          applyLoadedContent(fileDiffNewString);
           setLoading(false);
           return;
         }
@@ -77,11 +88,11 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
         }
 
         const data = await response.json();
-        setContent(data.content);
+        applyLoadedContent(data.content);
       } catch (error) {
         const message = getErrorMessage(error);
         console.error('Error loading file:', error);
-        setContent(`// Error loading file: ${message}\n// File: ${fileName}\n// Path: ${filePath}`);
+        applyLoadedContent(`// Error loading file: ${message}\n// File: ${fileName}\n// Path: ${filePath}`);
       } finally {
         setLoading(false);
       }
@@ -94,7 +105,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
     // Preview-only and binary files have no editable text buffer; never write
     // them back (e.g. via Cmd/Ctrl+S) or we'd corrupt the file on disk.
     if (previewKind || isBinaryFile(fileName)) {
-      return;
+      return true;
     }
 
     setSaving(true);
@@ -121,12 +132,20 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
 
       await response.json();
 
+      // Baseline the exact text that reached disk — not whatever the buffer
+      // holds now — so keystrokes during the write stay flagged as unsaved.
+      setSavedContent(content);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
+      return true;
     } catch (error) {
       const message = getErrorMessage(error);
       console.error('Error saving file:', error);
       setSaveError(message);
+      // Reported rather than thrown: this runs straight off an onClick, so a
+      // rejection would surface as an unhandled promise. Callers that close on
+      // save (the unsaved-changes prompt) check the result and stay open (#231).
+      return false;
     } finally {
       setSaving(false);
     }
@@ -150,6 +169,8 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
   return {
     content,
     setContent,
+    // Preview/binary files have no editable buffer, so they can never be dirty.
+    isDirty: !previewKind && !isBinary && content !== savedContent,
     loading,
     saving,
     saveSuccess,
