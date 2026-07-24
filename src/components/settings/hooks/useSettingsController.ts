@@ -120,6 +120,15 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
   const { isDarkMode, toggleDarkMode } = useTheme() as ThemeContextValue;
   const closeTimerRef = useRef<number | null>(null);
 
+  // Auto-save must fire on a real edit, never on the open sequence. `saveSettings`
+  // is a useCallback over ~10 pieces of asynchronously-loaded state, so it takes
+  // on several identities while the dialog opens — ordering-based guards can't
+  // distinguish those from a user action, so track the user action directly (#232).
+  const hasUserEditedRef = useRef(false);
+  const markUserEdited = useCallback(() => {
+    hasUserEditedRef.current = true;
+  }, []);
+
   const [activeTab, setActiveTab] = useState<SettingsMainTab>(() => normalizeMainTab(initialTab));
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
   const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>(DEFAULT_PROJECT_SORT_ORDER);
@@ -270,6 +279,34 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     [],
   );
 
+  // The setters handed to the settings controls are the *only* way a value
+  // changes because the user asked for it — `loadSettings` keeps using the raw
+  // setters below, so hydrating the dialog never looks like an edit.
+  const editProjectSortOrder = useCallback<typeof setProjectSortOrder>((value) => {
+    markUserEdited();
+    setProjectSortOrder(value);
+  }, [markUserEdited]);
+
+  const editHideCliOriginChats = useCallback<typeof setHideCliOriginChats>((value) => {
+    markUserEdited();
+    setHideCliOriginChats(value);
+  }, [markUserEdited]);
+
+  const editClaudePermissions = useCallback<typeof setClaudePermissions>((value) => {
+    markUserEdited();
+    setClaudePermissions(value);
+  }, [markUserEdited]);
+
+  const editNotificationPreferences = useCallback<typeof setNotificationPreferences>((value) => {
+    markUserEdited();
+    setNotificationPreferences(value);
+  }, [markUserEdited]);
+
+  const editCodexPermissionMode = useCallback<typeof setCodexPermissionMode>((value) => {
+    markUserEdited();
+    setCodexPermissionMode(value);
+  }, [markUserEdited]);
+
   useEffect(() => {
     if (!isOpen) {
       return;
@@ -294,12 +331,12 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
 
   // Auto-save permissions and sort order with debounce
   const autoSaveTimerRef = useRef<number | null>(null);
-  const isInitialLoadRef = useRef(true);
 
   useEffect(() => {
-    // Skip auto-save on initial load (settings are being loaded from localStorage)
-    if (isInitialLoadRef.current) {
-      isInitialLoadRef.current = false;
+    // Only a user edit is worth persisting. Without this, every identity change
+    // of `saveSettings` during the open sequence wrote back whatever slices had
+    // resolved so far — clobbering the ones that hadn't (#232).
+    if (!hasUserEditedRef.current) {
       return;
     }
 
@@ -328,10 +365,10 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     return () => window.clearTimeout(timer);
   }, [saveStatus]);
 
-  // Reset initial load flag when settings dialog opens
+  // A freshly opened dialog is clean again, whatever the previous session did.
   useEffect(() => {
     if (isOpen) {
-      isInitialLoadRef.current = true;
+      hasUserEditedRef.current = false;
     }
   }, [isOpen]);
 
@@ -353,17 +390,17 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     toggleDarkMode,
     saveStatus,
     projectSortOrder,
-    setProjectSortOrder,
+    setProjectSortOrder: editProjectSortOrder,
     hideCliOriginChats,
-    setHideCliOriginChats,
+    setHideCliOriginChats: editHideCliOriginChats,
     codeEditorSettings,
     updateCodeEditorSetting,
     claudePermissions,
-    setClaudePermissions,
+    setClaudePermissions: editClaudePermissions,
     notificationPreferences,
-    setNotificationPreferences,
+    setNotificationPreferences: editNotificationPreferences,
     codexPermissionMode,
-    setCodexPermissionMode,
+    setCodexPermissionMode: editCodexPermissionMode,
     providerAuthStatus,
     openLoginForProvider,
     showLoginModal,
