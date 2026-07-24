@@ -22,7 +22,9 @@
     "fullscreen": "Fullscreen",
     "close": "Close",
     "previewMarkdown": "Preview markdown",
-    "editMarkdown": "Edit markdown"
+    "editMarkdown": "Edit markdown",
+    "unsavedChanges": "Unsaved changes",
+    "saveUnsaved": "Save (unsaved changes)"
   },
   "footer": {
     "lines": "Lines:",
@@ -37,5 +39,13 @@
     "loading": "Loading preview...",
     "error": "Unable to display this file.",
     "openInNewTab": "Open in new tab"
+  },
+  "unsavedChanges": {
+    "title": "Unsaved changes",
+    "message": "You have unsaved changes in {{fileName}}. Save them before closing?",
+    "save": "Save",
+    "saving": "Saving...",
+    "discard": "Discard",
+    "cancel": "Cancel"
   }
 }

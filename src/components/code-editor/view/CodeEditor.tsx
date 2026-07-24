@@ -9,6 +9,7 @@ import { useTheme } from '../../../contexts/ThemeContext';
 import { useCodeEditorDocument } from '../hooks/useCodeEditorDocument';
 import { useCodeEditorSettings } from '../hooks/useCodeEditorSettings';
 import { useEditorKeyboardShortcuts } from '../hooks/useEditorKeyboardShortcuts';
+import { useUnsavedChangesGuard } from '../hooks/useUnsavedChangesGuard';
 import type { CodeEditorFile } from '../types/types';
 import { createMinimapExtension, createScrollToFirstChunkExtension, getLanguageExtensions } from '../utils/editorExtensions';
 import { getEditorStyles } from '../utils/editorStyles';
@@ -20,6 +21,7 @@ import CodeEditorLoadingState from './subcomponents/CodeEditorLoadingState';
 import CodeEditorSurface from './subcomponents/CodeEditorSurface';
 import CodeEditorBinaryFile from './subcomponents/CodeEditorBinaryFile';
 import CodeEditorMediaPreview from './subcomponents/CodeEditorMediaPreview';
+import CodeEditorUnsavedChangesPrompt from './subcomponents/CodeEditorUnsavedChangesPrompt';
 
 type CodeEditorProps = {
   file: CodeEditorFile;
@@ -59,6 +61,7 @@ export default function CodeEditor({
   const {
     content,
     setContent,
+    isDirty,
     loading,
     saving,
     saveSuccess,
@@ -72,6 +75,16 @@ export default function CodeEditor({
     file,
     projectPath,
   });
+
+  // Every close path — Esc, the X button — goes through the guard, so unsaved
+  // work can't be discarded by a single keypress (#231).
+  const {
+    isPromptOpen: showUnsavedPrompt,
+    requestClose,
+    cancel: cancelClose,
+    discard: discardAndClose,
+    saveAndClose,
+  } = useUnsavedChangesGuard({ isDirty, onSave: handleSave, onClose });
 
   const isMarkdownFile = useMemo(() => {
     const extension = file.name.split('.').pop()?.toLowerCase();
@@ -179,7 +192,7 @@ export default function CodeEditor({
 
   useEditorKeyboardShortcuts({
     onSave: handleSave,
-    onClose,
+    onClose: requestClose,
     dependency: content,
   });
 
@@ -246,7 +259,7 @@ export default function CodeEditor({
     <>
       <style>{getEditorStyles(isDarkMode)}</style>
       <div className={outerContainerClassName}>
-        <div className={innerContainerClassName}>
+        <div className={`relative ${innerContainerClassName}`}>
           <CodeEditorHeader
             file={file}
             isSidebar={isSidebar}
@@ -256,13 +269,14 @@ export default function CodeEditor({
             markdownPreview={markdownPreview}
             saving={saving}
             saveSuccess={saveSuccess}
+            isDirty={isDirty}
             onToggleMarkdownPreview={() => setMarkdownPreview((previous) => !previous)}
             onOpenHtmlPreview={openHtmlPreview}
             onOpenSettings={() => paletteOps.openSettings('appearance')}
             onDownload={handleDownload}
             onSave={handleSave}
             onToggleFullscreen={() => setIsFullscreen((previous) => !previous)}
-            onClose={onClose}
+            onClose={requestClose}
             labels={{
               showingChanges: t('header.showingChanges'),
               editMarkdown: t('actions.editMarkdown'),
@@ -273,6 +287,8 @@ export default function CodeEditor({
               save: t('actions.save'),
               saving: t('actions.saving'),
               saved: t('actions.saved'),
+              unsavedChanges: t('actions.unsavedChanges'),
+              saveUnsaved: t('actions.saveUnsaved'),
               fullscreen: t('actions.fullscreen'),
               exitFullscreen: t('actions.exitFullscreen'),
               close: t('actions.close'),
@@ -304,6 +320,24 @@ export default function CodeEditor({
             charactersLabel={t('footer.characters')}
             shortcutsLabel={t('footer.shortcuts')}
           />
+
+          {showUnsavedPrompt && (
+            <CodeEditorUnsavedChangesPrompt
+              fileName={file.name}
+              saving={saving}
+              onSave={() => { void saveAndClose(); }}
+              onDiscard={discardAndClose}
+              onCancel={cancelClose}
+              labels={{
+                title: t('unsavedChanges.title'),
+                message: t('unsavedChanges.message', { fileName: file.name }),
+                save: t('unsavedChanges.save'),
+                saving: t('unsavedChanges.saving'),
+                discard: t('unsavedChanges.discard'),
+                cancel: t('unsavedChanges.cancel'),
+              }}
+            />
+          )}
         </div>
       </div>
     </>

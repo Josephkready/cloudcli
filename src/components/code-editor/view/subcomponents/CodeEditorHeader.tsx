@@ -11,6 +11,7 @@ type CodeEditorHeaderProps = {
   markdownPreview: boolean;
   saving: boolean;
   saveSuccess: boolean;
+  isDirty: boolean;
   onToggleMarkdownPreview: () => void;
   onOpenHtmlPreview: () => void;
   onOpenSettings: () => void;
@@ -28,6 +29,8 @@ type CodeEditorHeaderProps = {
     save: string;
     saving: string;
     saved: string;
+    unsavedChanges: string;
+    saveUnsaved: string;
     fullscreen: string;
     exitFullscreen: string;
     close: string;
@@ -43,6 +46,7 @@ export default function CodeEditorHeader({
   markdownPreview,
   saving,
   saveSuccess,
+  isDirty,
   onToggleMarkdownPreview,
   onOpenHtmlPreview,
   onOpenSettings,
@@ -52,7 +56,13 @@ export default function CodeEditorHeader({
   onClose,
   labels,
 }: CodeEditorHeaderProps) {
-  const saveTitle = saveSuccess ? labels.saved : saving ? labels.saving : labels.save;
+  const saveTitle = saveSuccess
+    ? labels.saved
+    : saving
+      ? labels.saving
+      : isDirty
+        ? labels.saveUnsaved
+        : labels.save;
 
   return (
     <div className="flex min-w-0 flex-shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-1.5">
@@ -61,6 +71,15 @@ export default function CodeEditorHeader({
         <div className="min-w-0 shrink">
           <div className="flex min-w-0 items-center gap-2">
             <h3 className="truncate text-sm font-medium text-gray-900 dark:text-white">{file.name}</h3>
+            {/* The only signal that the buffer differs from disk (#231). */}
+            {isDirty && (
+              <span
+                role="img"
+                aria-label={labels.unsavedChanges}
+                title={labels.unsavedChanges}
+                className="h-2 w-2 shrink-0 rounded-full bg-amber-500 dark:bg-amber-400"
+              />
+            )}
             {file.diffInfo && (
               <span className="shrink-0 whitespace-nowrap rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-600 dark:bg-blue-900 dark:text-blue-300">
                 {labels.showingChanges}
@@ -124,7 +143,9 @@ export default function CodeEditorHeader({
           className={`flex items-center justify-center rounded-md p-1.5 transition-colors disabled:opacity-50 ${
             saveSuccess
               ? 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400'
-              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white'
+              : isDirty
+                ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
+                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white'
           }`}
           title={saveTitle}
         >
