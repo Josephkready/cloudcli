@@ -246,5 +246,10 @@
       "showSidebar": "Show sidebar",
       "closeSidebar": "Close sidebar"
     }
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "That address doesn't match anything in CloudCLI. It may be a stale link or a typo.",
+    "backToApp": "Back to CloudCLI"
   }
 }
