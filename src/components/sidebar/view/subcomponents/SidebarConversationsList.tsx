@@ -193,7 +193,9 @@ function ConversationRow({
       <a
         href={`/session/${session.id}`}
         className={cn(
-          'flex w-full min-w-0 items-center gap-2 rounded-md border p-2 text-left transition-all duration-150',
+          // `touch:pr-16` keeps the row's own content clear of the action
+          // cluster, which is permanently visible on touch devices (#244).
+          'touch:pr-16 flex w-full min-w-0 items-center gap-2 rounded-md border p-2 text-left transition-all duration-150',
           isSelected
             ? 'border-primary bg-primary/15 ring-1 ring-primary/50 dark:bg-primary/25'
             : status === 'plan'
@@ -264,7 +266,9 @@ function ConversationRow({
         ref={editingContainerRef}
         className={cn(
           'absolute right-2 top-1/2 flex -translate-y-1/2 transform items-center gap-1 transition-all duration-200',
-          isEditing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+          // A touch device never hovers, so without `touch:` the cluster stays
+          // invisible yet clickable, on top of the status indicator (#244).
+          isEditing ? 'opacity-100' : 'touch:opacity-100 opacity-0 group-hover:opacity-100',
         )}
       >
         {isEditing ? (
