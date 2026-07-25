@@ -152,7 +152,10 @@ export const PromptInputButton = React.forwardRef<HTMLButtonElement, PromptInput
         type="button"
         variant="ghost"
         size="icon"
-        className={cn('h-8 w-8 [&_svg]:size-4', className)}
+        // 32x32 painted, but `touch:hit-h-44` gives it a 44px-tall tap target on
+        // coarse pointers (#275). Height only: the tools row is `gap-1`, so a
+        // 44px-wide overlay would spill over the next button's visible edge.
+        className={cn('touch:hit-h-44 h-8 w-8 [&_svg]:size-4', className)}
         {...props}
       >
         {children}
@@ -202,7 +205,9 @@ export const PromptInputSubmit = React.forwardRef<HTMLButtonElement, PromptInput
         type={isActive ? 'button' : 'submit'}
         variant="default"
         size="icon"
-        className={cn('h-8 w-8 shrink-0 rounded-lg', className)}
+        // Wide enough for the full 44x44 overlay — it only has the footer's own
+        // padding and `gap-2` to grow into, and it does not grow at all (#275).
+        className={cn('touch:hit-44 h-8 w-8 shrink-0 rounded-lg', className)}
         {...props}
       >
         {children ?? (isActive ? (

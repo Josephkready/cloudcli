@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+import type { ComponentProps } from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -22,7 +26,9 @@ vi.mock('../../hooks/useVoiceInput', () => ({
 }));
 vi.mock('../../hooks/useVoiceAvailable', () => ({ useVoiceAvailable: () => false }));
 
-function renderComposer(permissionMode: PermissionMode) {
+type ComposerOverrides = Partial<ComponentProps<typeof ChatComposer>>;
+
+function renderComposer(permissionMode: PermissionMode, overrides: ComposerOverrides = {}) {
   const noop = vi.fn();
   return render(
     <ChatComposer
@@ -76,6 +82,7 @@ function renderComposer(permissionMode: PermissionMode) {
       onTextareaInput={noop}
       placeholder="Type a message"
       isTextareaExpanded={false}
+      {...overrides}
     />,
   );
 }
@@ -131,5 +138,80 @@ describe('ChatComposer — permission-mode pill on phones (#239)', () => {
 
     expect(screen.getByRole('button', { name: /attach images/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /show all commands/i })).toBeInTheDocument();
+  });
+});
+
+/*
+ * Touch targets in the composer's control row (#275).
+ *
+ * jsdom does no layout — every `getBoundingClientRect()` here is zeros — so the
+ * 44px itself is not measurable in this suite and is verified in a browser
+ * instead. What jsdom *can* hold is the wiring: each control in the row claims
+ * a hit-area utility, and that utility is one the stylesheet actually backs.
+ * `touch:` is hand-written CSS rather than a Tailwind variant, so a control
+ * carrying a class with no rule looks fixed in the markup and ships a 32px tap
+ * target (#244). Reading the rule names out of index.css instead of hardcoding
+ * them means a renamed utility fails here rather than silently doing nothing.
+ */
+
+// jsdom rewrites `import.meta.url` to an http: URL, so resolve from the vitest
+// root instead.
+const CSS = readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+
+/** Utilities that index.css backs with a 44px-tall `::after` overlay. */
+const hitAreaUtilities = new Set(
+  Array.from(CSS.matchAll(/\.touch\\:([a-z0-9-]+)::after/g), (match) => match[1]),
+);
+
+function hitAreaClassOf(element: Element): string | undefined {
+  return element.className
+    .split(/\s+/)
+    .find((token) => token.startsWith('touch:') && hitAreaUtilities.has(token.slice('touch:'.length)));
+}
+
+describe('ChatComposer — control-row touch targets (#275)', () => {
+  it('backs every control in the row with a hit-area rule that exists', () => {
+    const { container } = renderComposer('default', {
+      availableEffortOptions: [{ value: 'high' }],
+      tokenBudget: { used: 1234 },
+      hasInput: true,
+    });
+
+    const footer = container.querySelector('[data-slot="prompt-input-footer"]');
+    const controls = Array.from(footer?.querySelectorAll('button') ?? []);
+
+    // The row is the attach button, the pill, effort, token usage, the command
+    // menu, clear, and submit — if a control is ever added without a hit area,
+    // this is the test that notices.
+    expect(controls.length).toBeGreaterThanOrEqual(6);
+    expect(hitAreaUtilities.size).toBeGreaterThan(0);
+
+    for (const control of controls) {
+      expect(
+        hitAreaClassOf(control),
+        `"${control.getAttribute('aria-label') ?? control.textContent}" has no hit-area utility backed by index.css`,
+      ).toBeDefined();
+    }
+  });
+
+  it('widens only the controls that have room, and never the icon-only ones', () => {
+    renderComposer('default');
+
+    // The pill is wide enough for a 44x44 overlay after #239, so it floors both
+    // axes. The icon buttons are 32px in a `gap-1` row, where a wider overlay
+    // would cover the neighbour's visible edge, so they floor height only.
+    expect(hitAreaClassOf(modePill())).toBe('touch:hit-44');
+    expect(hitAreaClassOf(screen.getByRole('button', { name: /attach images/i }))).toBe('touch:hit-h-44');
+    expect(hitAreaClassOf(screen.getByRole('button', { name: /show all commands/i }))).toBe('touch:hit-h-44');
+  });
+
+  it('leaves the painted height alone so the row keeps its alignment', () => {
+    renderComposer('default');
+
+    // The fix is the overlay, not the box: an `h-11` here would be option 1 from
+    // #275 (raise the row) and would break the row's shared 32px rhythm.
+    const pill = modePill();
+    expect(pill.className).toMatch(/(^|\s)h-8(\s|$)/);
+    expect(pill.className).not.toMatch(/(^|\s)h-(9|10|11|12)(\s|$)/);
   });
 });

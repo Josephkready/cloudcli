@@ -43,7 +43,9 @@ export default function TokenUsageSummary({ usage, onClick }: TokenUsageSummaryP
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-background/70 px-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-primary/25 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:gap-2 sm:px-2.5"
+      // Tap target only — `touch:hit-44` leaves the painted chip at h-8 so the
+      // composer row stays aligned (#275).
+      className="touch:hit-44 inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-background/70 px-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-primary/25 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:gap-2 sm:px-2.5"
       title={`${usedTokens.toLocaleString()} tokens used`}
       aria-label="Show token usage"
     >

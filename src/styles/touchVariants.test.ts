@@ -88,3 +88,42 @@ test('the reveal and the spacing utilities the sidebar rows rely on both exist',
   assert.ok(coarse.includes('.touch\\:opacity-100'), 'missing .touch\\:opacity-100');
   assert.ok(coarse.includes('.touch\\:pr-16'), 'missing .touch\\:pr-16');
 });
+
+/*
+ * The composer's hit-area utilities (#275) are a second silent-failure mode: the
+ * class can have a rule and still do nothing, because the tap target is the
+ * `::after` overlay, not the element. A rule that forgot the pseudo-element, or
+ * that floored the box at anything under 44px, would read as "fixed" in the
+ * markup while shipping the same 32px target.
+ */
+test('the composer hit-area utilities floor the overlay at 44px', () => {
+  const coarse = coarsePointerBlocks();
+
+  for (const name of ['hit-44', 'hit-h-44']) {
+    assert.ok(
+      coarse.includes(`.touch\\:${name}::after`),
+      `.touch\\:${name} has no ::after overlay, so it enlarges nothing`,
+    );
+  }
+
+  // Both floor the height; only `hit-44` may widen, since the tools row is
+  // gap-1 and a wider overlay on the 32px icon buttons would cover a slice of
+  // the neighbour's visible edge.
+  assert.match(coarse, /\.touch\\:hit-44::after[\s\S]*?min-height:\s*44px/);
+  assert.match(coarse, /\.touch\\:hit-44::after\s*\{[^}]*min-width:\s*44px/);
+  assert.doesNotMatch(coarse, /\.touch\\:hit-h-44::after\s*\{[^}]*min-width/);
+});
+
+/*
+ * The overlay is only invisible if it stays transparent and out of flow. A
+ * background, a border, or a static position would turn a hit-area fix into a
+ * visible change to the composer row, which is exactly what #275 ruled out.
+ */
+test('the hit-area overlay stays transparent and out of flow', () => {
+  const coarse = coarsePointerBlocks();
+  const overlay = coarse.match(/\.touch\\:hit-44::after,[\s\S]*?\{([^}]*)\}/)?.[1];
+
+  assert.ok(overlay, 'expected a shared ::after block for the hit-area utilities');
+  assert.match(overlay, /position:\s*absolute/);
+  assert.ok(!/background|border|box-shadow|outline/.test(overlay), `overlay paints something: ${overlay}`);
+});
