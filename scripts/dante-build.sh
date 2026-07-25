@@ -86,6 +86,16 @@ npm ci --no-audit --no-fund
 log "building client -> staging (VITE_AUTH_DISABLED=${VITE_AUTH_DISABLED})"
 npx vite build --outDir "$STAGE/dist" --emptyOutDir
 
+log "precompressing client assets -> staging"
+# `npm run build:client` chains vite -> build:precompress, but the vite step above is
+# invoked directly (staging, not the live tree) so that chain never runs here. Without
+# this the deploy would ship no .br/.gz siblings and fall back to compressing every
+# bundle on the fly, per request, on a 2-vCPU box — which is the exact cost issue #266
+# removed. Same entry point and arguments as the npm script, except the target is the
+# staged dist rather than the live one; `public` stays repo-relative because that tree is
+# served from the live checkout, not from the build output.
+npx tsx --tsconfig server/tsconfig.json server/shared/precompress-assets.ts "$STAGE/dist" public
+
 log "building server -> staging"
 # Invoked directly rather than via `npm run build:server` because that script's
 # `prebuild:server` hook hard-codes rm -rf of the LIVE dist-server/, which is exactly
@@ -111,6 +121,15 @@ for artifact in \
 do
   [ -s "$artifact" ] || die "expected build artifact missing or empty: ${artifact#"$ROOT"/}"
 done
+
+# Precompressed siblings are invisible at runtime — a build that emits none still boots
+# and still serves every asset, just compressed per request instead of once per build.
+# That is exactly the regression that shipped when precompression was wired into
+# `npm run build:client` while this script kept calling vite directly, so it gets a gate
+# of its own: at least one non-empty .br under the staged assets dir.
+if ! find "$STAGE/dist/assets" -name '*.br' -size +0c -print -quit 2>/dev/null | grep -q .; then
+  die "no non-empty *.br files in staged dist/assets — the precompress step did not run or produced nothing"
+fi
 
 # tsc emits the `@/...` path aliases verbatim; node cannot resolve them at runtime, so
 # a skipped tsc-alias yields a server that dies on its first aliased import. Catch it

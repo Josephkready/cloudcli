@@ -59,9 +59,7 @@ import { initializeDatabase, projectsDb, sessionsDb } from './modules/database/i
 import { configureWebPush } from './services/vapid-keys.js';
 import {
     createCompressionMiddleware,
-    createPrecompressedAssets,
-    setPublicAssetHeaders,
-    setStaticAssetHeaders,
+    mountStaticAssets,
 } from './middleware/compression.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM, AUTH_DISABLED } from './constants/config.js';
@@ -219,13 +217,6 @@ app.use('/api/agent', agentRoutes);
 
 app.use('/api/voice', authenticateToken, voiceRoutes);
 
-// Serve public files (like api-docs.html, and the self-hosted fonts from
-// public/fonts). This handler sits ahead of the dist/ one, so it owns the cache
-// policy for anything that exists in both — see setPublicAssetHeaders.
-app.use(express.static(path.join(APP_ROOT, 'public'), {
-    setHeaders: setPublicAssetHeaders,
-}));
-
 // Serve the SPA's index.html through a small response transform so we can
 // inject `window.__ROUTER_BASENAME__` before any client JS executes. This is
 // what lets the SPA work when mounted behind a reverse-proxy path prefix
@@ -253,30 +244,30 @@ function sendIndexHtmlWithBasename(req, res) {
     return true;
 }
 
-// Intercept the two SPA entry paths that express.static would otherwise serve
-// directly from disk (`/` via its directory-index behaviour, and `/index.html`
-// explicitly). Every other static asset still flows through express.static
-// below unchanged.
+// Intercept the two SPA entry paths that the static handlers would otherwise
+// serve directly from disk (`/` via directory-index behaviour, and
+// `/index.html` explicitly), so the basename transform above is the only thing
+// that answers them. Mounted ahead of the static stack for that reason; every
+// other asset flows through express.static below unchanged. Neither static root
+// contains an index.html of its own, so nothing else changes hands here.
 app.get(['/', '/index.html'], (req, res, next) => {
     if (!sendIndexHtmlWithBasename(req, res)) {
         return next();
     }
 });
 
-// Serve the build-time compressed sibling (`<asset>.br` / `<asset>.gz`) when the
-// client accepts it, by rewriting the request before express.static sees it.
-// Must stay directly above the static handler that does the sending.
+// Static files served after API routes. mountStaticAssets owns the ordering of
+// all three static handlers — public/ first (it decides the cache policy for
+// the files vite copies into both trees, notably sw.js and the fonts), then the
+// rewriter that points a request at its build-time compressed sibling
+// (`<asset>.br` / `<asset>.gz`) and, directly after it, the express.static that
+// sends it. Keeping them in one function is what makes the shipped order the
+// tested order.
 const DIST_DIR = path.join(APP_ROOT, 'dist');
-app.use(createPrecompressedAssets({ root: DIST_DIR }));
-
-// Static files served after API routes
-// Add cache control: HTML files should not be cached, but assets can be cached
-// `index: false` disables the built-in directory-index lookup so the handler
-// above is the single source of truth for serving index.html.
-app.use(express.static(DIST_DIR, {
-    index: false,
-    setHeaders: setStaticAssetHeaders,
-}));
+mountStaticAssets(app, {
+    publicDir: path.join(APP_ROOT, 'public'),
+    distDir: DIST_DIR,
+});
 
 // API Routes (protected)
 // /api/config endpoint removed - no longer needed
