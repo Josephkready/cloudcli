@@ -17,6 +17,7 @@
     "dev": "concurrently --kill-others \"npm run server:dev\" \"npm run client\"",
     "server": "node dist-server/server/index.js",
     "server:dev": "tsx --tsconfig server/tsconfig.json server/index.js",
+    "usage": "tsx --tsconfig server/tsconfig.json server/cli.js usage",
     "server:dev-watch": "tsx watch --tsconfig server/tsconfig.json server/index.js",
     "client": "vite",
     "build": "npm run build:client && npm run build:server",

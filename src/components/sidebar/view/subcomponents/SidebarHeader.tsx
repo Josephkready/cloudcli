@@ -6,6 +6,7 @@ import { Button, Input } from '../../../../shared/view/ui';
 import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '../../../../constants/branding';
 import { IS_PLATFORM } from '../../../../constants/config';
 import { cn } from '../../../../lib/utils';
+import { recordFeatureUse } from '../../../../utils/featureUsage';
 import type { SidebarOverlay } from '../../types/types';
 
 const MOD_KEY =
@@ -94,7 +95,17 @@ export default function SidebarHeader({
   const archivedLabel = t('search.archivedLabel', 'Archived');
 
   const toggleSearch = () => onSetOverlay(sidebarOverlay === 'search' ? 'none' : 'search');
-  const toggleArchived = () => onSetOverlay(sidebarOverlay === 'archived' ? 'none' : 'archived');
+  const toggleArchived = () => {
+    if (sidebarOverlay !== 'archived') recordFeatureUse('sidebar.archived_view');
+    onSetOverlay(sidebarOverlay === 'archived' ? 'none' : 'archived');
+  };
+
+  // Shared by the desktop and mobile search inputs. Counted once per search
+  // session (empty -> non-empty) rather than per keystroke.
+  const handleSearchFilterChange = (value: string) => {
+    if (value && !searchFilter) recordFeatureUse('sidebar.search');
+    onSearchFilterChange(value);
+  };
 
   const LogoBlock = () => (
     <div className="flex min-w-0 items-center gap-2.5">
@@ -177,7 +188,7 @@ export default function SidebarHeader({
                 type="text"
                 placeholder={searchPlaceholder}
                 value={searchFilter}
-                onChange={(event) => onSearchFilterChange(event.target.value)}
+                onChange={(event) => handleSearchFilterChange(event.target.value)}
                 className="nav-search-input h-9 rounded-xl border-0 pl-9 pr-14 text-sm transition-all duration-200 placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0"
               />
               {searchFilter ? (
@@ -256,7 +267,7 @@ export default function SidebarHeader({
                 type="text"
                 placeholder={searchPlaceholder}
                 value={searchFilter}
-                onChange={(event) => onSearchFilterChange(event.target.value)}
+                onChange={(event) => handleSearchFilterChange(event.target.value)}
                 className="nav-search-input h-10 rounded-xl border-0 pl-10 pr-9 text-sm transition-all duration-200 placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0"
               />
               {searchFilter && (

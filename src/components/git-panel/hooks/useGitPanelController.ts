@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { authenticatedFetch } from '../../../utils/api';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import { DEFAULT_BRANCH, RECENT_COMMITS_LIMIT } from '../constants/constants';
 import type {
   GitApiErrorResponse,
@@ -221,6 +222,8 @@ export function useGitPanelController({
         return false;
       }
 
+      recordFeatureUse('git.branch_switch');
+
       try {
         const response = await fetchWithAuth('/api/git/checkout', {
           method: 'POST',
@@ -254,6 +257,8 @@ export function useGitPanelController({
       if (!selectedProject || !trimmedBranchName) {
         return false;
       }
+
+      recordFeatureUse('git.branch_create');
 
       setIsCreatingBranch(true);
       try {
@@ -441,6 +446,8 @@ export function useGitPanelController({
         return;
       }
 
+      recordFeatureUse('git.discard');
+
       try {
         const response = await fetchWithAuth('/api/git/discard', {
           method: 'POST',
@@ -500,6 +507,8 @@ export function useGitPanelController({
       if (!selectedProject || files.length === 0) {
         return false;
       }
+
+      recordFeatureUse('git.stage');
 
       try {
         const response = await fetchWithAuth('/api/git/stage', {
@@ -610,6 +619,8 @@ export function useGitPanelController({
         return null;
       }
 
+      recordFeatureUse('git.ai_commit_message');
+
       try {
         const response = await authenticatedFetch('/api/git/generate-commit-message', {
           method: 'POST',
@@ -641,6 +652,8 @@ export function useGitPanelController({
       if (!selectedProject || !message.trim() || files.length === 0) {
         return false;
       }
+
+      recordFeatureUse('git.commit');
 
       try {
         const response = await fetchWithAuth('/api/git/commit', {

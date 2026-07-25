@@ -3,6 +3,7 @@ import { Activity, AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Edit
 import type { TFunction } from 'i18next';
 
 import { cn } from '../../../../lib/utils';
+import { recordFeatureUse } from '../../../../utils/featureUsage';
 import { CursorContextMenu } from '../../../../shared/view/ui';
 import type { LLMProvider, Project, ProjectSession } from '../../../../types/app';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
@@ -112,12 +113,14 @@ function ConversationRow({
   }, [isEditing, onCancelEditingSession]);
 
   const saveEditedSession = () => {
+    recordFeatureUse('session.rename');
     onSaveEditingSession(project.projectId, session.id, editingSessionName, session.__provider);
   };
   const requestDeleteSession = () => {
     onDeleteSession(project.projectId, session.id, title, session.__provider);
   };
   const requestArchiveSession = () => {
+    recordFeatureUse('session.archive');
     onArchiveSession(session.id);
   };
 

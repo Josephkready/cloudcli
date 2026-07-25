@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { FolderPlus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { recordFeatureUse } from '../../utils/featureUsage';
 import { useFocusTrap } from '../../shared/view/ui/useFocusTrap';
 import { useOverlayDismiss } from '../../shared/view/ui/useOverlayDismiss';
 import ErrorBanner from './components/ErrorBanner';
@@ -91,6 +92,7 @@ export default function ProjectCreationWizard({
   }, []);
 
   const handleCreate = useCallback(async () => {
+    recordFeatureUse('project.create');
     setIsCreating(true);
     setError(null);
     setCloneProgress('');

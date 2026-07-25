@@ -50,6 +50,7 @@ import agentRoutes from './routes/agent.js';
 import projectModuleRoutes from './modules/projects/projects.routes.js';
 import userRoutes from './routes/user.js';
 import pluginsRoutes from './routes/plugins.js';
+import usageRoutes from './routes/usage.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import { pruneOrphanedBrowserMcp } from './modules/providers/services/orphaned-mcp-cleanup.service.js';
 import voiceRoutes from './voice-proxy.js';
@@ -208,6 +209,9 @@ app.use('/api/user', authenticateToken, userRoutes);
 
 // Plugins API Routes (protected)
 app.use('/api/plugins', authenticateToken, pluginsRoutes);
+
+// Local feature-usage counters (protected, issue #248)
+app.use('/api/usage', authenticateToken, usageRoutes);
 
 // Unified provider MCP routes (protected)
 app.use('/api/providers', authenticateToken, providerRoutes);

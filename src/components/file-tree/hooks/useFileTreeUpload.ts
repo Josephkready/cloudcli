@@ -4,6 +4,7 @@ import type { DragEvent } from 'react';
 import { IS_PLATFORM } from '../../../constants/config';
 import type { Project } from '../../../types/app';
 import { isValidRefreshedToken } from '../../../utils/api';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import {
   MAX_FILE_UPLOAD_COUNT,
   MAX_FILE_UPLOAD_SIZE_BYTES,
@@ -296,6 +297,7 @@ export const useFileTreeUpload = ({
         return;
       }
 
+      recordFeatureUse('files.upload');
       const fileName = files.length === 1 ? getFileDisplayName(files[0]) : undefined;
 
       if (!selectedProject) {

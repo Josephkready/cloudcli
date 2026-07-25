@@ -3,6 +3,7 @@ import { Database } from 'better-sqlite3';
 import {
   ACTIVE_RUNS_TABLE_SCHEMA_SQL,
   APP_CONFIG_TABLE_SCHEMA_SQL,
+  FEATURE_USAGE_TABLE_SCHEMA_SQL,
   LAST_SCANNED_AT_SQL,
   PROJECTS_TABLE_SCHEMA_SQL,
   PUSH_SUBSCRIPTIONS_TABLE_SCHEMA_SQL,
@@ -504,6 +505,10 @@ export const runMigrations = (db: Database) => {
     db.exec(ACTIVE_RUNS_TABLE_SCHEMA_SQL);
     db.exec('CREATE INDEX IF NOT EXISTS idx_active_runs_session ON active_runs(session_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_active_runs_status ON active_runs(status)');
+
+    // Aggregate local feature-usage counters (issue #248). Created here as well
+    // as in INIT_SCHEMA_SQL so upgraded installs pick it up on the next boot.
+    db.exec(FEATURE_USAGE_TABLE_SCHEMA_SQL);
 
     console.log('Database migrations completed successfully');
   } catch (error: any) {

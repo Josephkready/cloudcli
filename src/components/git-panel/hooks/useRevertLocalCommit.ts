@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { authenticatedFetch } from '../../../utils/api';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import type { GitOperationResponse } from '../types/types';
 
 type UseRevertLocalCommitOptions = {
@@ -21,6 +22,7 @@ export function useRevertLocalCommit({ projectId, onSuccess }: UseRevertLocalCom
       return;
     }
 
+    recordFeatureUse('git.revert');
     setIsRevertingLocalCommit(true);
     try {
       const response = await authenticatedFetch('/api/git/revert-local-commit', {

@@ -30,6 +30,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { usePaletteOps } from '../../contexts/PaletteOpsContext';
 import { SETTINGS_MAIN_TABS } from '../settings/constants/constants';
 import type { AppTab, Project } from '../../types/app';
+import { recordFeatureUse } from '../../utils/featureUsage';
 
 import { useSessionsSource } from './sources/useSessionsSource';
 import { useFilesSource } from './sources/useFilesSource';
@@ -131,6 +132,9 @@ export default function CommandPalette({
   }, [sessions, messageMatches, showSessions]);
 
   const run = React.useCallback((fn: () => void) => {
+    // Every CommandItem's onSelect funnels through here, so one line covers
+    // the whole palette action surface.
+    recordFeatureUse('palette.action');
     onOpenChange(false);
     fn();
   }, [onOpenChange]);

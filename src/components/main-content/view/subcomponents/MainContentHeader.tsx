@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Tooltip } from '../../../../shared/view/ui';
 import type { MainContentHeaderProps } from '../../types/types';
+import { recordFeatureUse } from '../../../../utils/featureUsage';
 
 import MobileMenuButton from './MobileMenuButton';
 import MainContentTabSwitcher from './MainContentTabSwitcher';
@@ -40,6 +41,7 @@ export default function MainContentHeader({
   // deselects the session so the view returns to its empty state.
   const handleArchiveClick = useCallback(() => {
     if (!selectedSession) return;
+    recordFeatureUse('session.archive');
     void onArchiveSession(selectedSession.id);
   }, [onArchiveSession, selectedSession]);
 

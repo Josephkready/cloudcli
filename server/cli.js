@@ -8,6 +8,7 @@
  *   (no args)     - Start the server (default)
  *   start         - Start the server
  *   status        - Show configuration and data locations
+ *   usage         - Show local feature-usage counters (least-used first)
  *   help          - Show help information
  *   version       - Show version information
  */
@@ -141,6 +142,81 @@ function showStatus() {
     console.log(`      ${c.dim('>')} Access the UI at http://localhost:${process.env.SERVER_PORT || process.env.PORT || '3001'}\n`);
 }
 
+// ── Feature usage readout (issue #248) ──────────────────────
+
+/**
+ * Renders "YYYY-MM-DD HH:MM:SS" (UTC, as stored) plus a coarse age, because the
+ * decision this readout feeds is "has this been touched in the observation
+ * window", not "exactly when".
+ */
+function formatLastUsed(lastUsedAt) {
+    if (!lastUsedAt) return 'never';
+    const parsed = new Date(lastUsedAt.replace(' ', 'T') + 'Z');
+    if (Number.isNaN(parsed.getTime())) return lastUsedAt;
+    const days = Math.floor((Date.now() - parsed.getTime()) / 86_400_000);
+    const age = days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`;
+    return `${lastUsedAt} (${age})`;
+}
+
+/**
+ * Prints every known feature key with its counter, least-used first.
+ *
+ * The zeros are the point: this is meant to produce a defensible remove/keep
+ * candidate list, so a feature that was never touched has to be visible as an
+ * explicit 0 rather than as a missing row. Reading it still needs judgement —
+ * see the "How the data should be read" notes in issue #248.
+ */
+async function showUsage({ clear = false, json = false } = {}) {
+    // Resolve DATABASE_PATH the same way the server does before the database
+    // module is imported, so the CLI always reads the file the app writes.
+    process.env.DATABASE_PATH = getDatabasePath();
+
+    // better-sqlite3 is synchronous and registers no libuv handles, so the
+    // process exits on its own — deliberately not closing the connection here
+    // keeps `--json` output free of the close log.
+    const { featureUsageDb } = await import('./modules/database/index.js');
+
+    if (clear) {
+        const removed = featureUsageDb.clearUsage();
+        console.log(`\n${c.ok('[OK]')} Cleared ${removed} feature-usage row${removed === 1 ? '' : 's'}.\n`);
+        return;
+    }
+
+    const entries = featureUsageDb.listUsage();
+
+    if (json) {
+        console.log(JSON.stringify({ enabled: featureUsageDb.isEnabled(), entries }, null, 2));
+        return;
+    }
+
+    const keyWidth = Math.max(7, ...entries.map((entry) => entry.featureKey.length));
+    const neverUsed = entries.filter((entry) => entry.useCount === 0).length;
+
+    console.log(`\n${c.bright('CloudCLI UI - Feature usage')}\n`);
+    console.log(c.dim('═'.repeat(60)));
+    console.log(`\n${c.info('[INFO]')} Database: ${c.dim(process.env.DATABASE_PATH)}`);
+    console.log(`${c.info('[INFO]')} Recording: ${featureUsageDb.isEnabled() ? c.ok('enabled') : c.warn('disabled (FEATURE_USAGE_ENABLED)')}\n`);
+
+    console.log(`${c.bright('FEATURE'.padEnd(keyWidth))}  ${c.bright('COUNT'.padStart(5))}  ${c.bright('LAST USED')}`);
+    console.log(c.dim('─'.repeat(keyWidth + 9 + 30)));
+
+    for (const entry of entries) {
+        const key = entry.featureKey.padEnd(keyWidth);
+        const count = String(entry.useCount).padStart(5);
+        const lastUsed = formatLastUsed(entry.lastUsedAt);
+        const line = `${key}  ${count}  ${lastUsed}`;
+        console.log(entry.useCount === 0 ? c.warn(line) : line);
+    }
+
+    console.log('\n' + c.dim('═'.repeat(60)));
+    console.log(`\n${c.info('[INFO]')} ${neverUsed} of ${entries.length} features never used.`);
+    console.log(`\n${c.tip('[TIP]')} Zero usage is a candidate, not a verdict:`);
+    console.log(`      ${c.dim('>')} Give it a long window (90+ days) — rare is not dead.`);
+    console.log(`      ${c.dim('>')} Rule out "unused because broken/undiscoverable" first.`);
+    console.log(`      ${c.dim('>')} ${c.bright('cloudcli usage --json')} for machine-readable output`);
+    console.log(`      ${c.dim('>')} ${c.bright('cloudcli usage --clear')} to reset the counters\n`);
+}
+
 // Show help
 function showHelp() {
     console.log(`
@@ -155,12 +231,15 @@ Usage:
 Commands:
   start            Start the CloudCLI server (default)
   status           Show configuration and data locations
+  usage            Show local feature-usage counters (least-used first)
   help             Show this help information
   version          Show version information
 
 Options:
   -p, --port <port>           Set server port (default: 3001)
   --database-path <path>      Set custom database location
+  --json                      (usage) Print counters as JSON
+  --clear                     (usage) Delete every stored counter
   -h, --help                  Show this help information
   -v, --version               Show version information
 
@@ -168,13 +247,16 @@ Examples:
   $ cloudcli                        # Start with defaults
   $ cloudcli --port 8080            # Start on port 8080
   $ cloudcli status                 # Show configuration
+  $ cloudcli usage                  # Least-used features first
+  $ cloudcli usage --clear          # Reset the usage counters
 
 Environment Variables:
-  SERVER_PORT         Set server port (default: 3001)
-  PORT                Set server port (default: 3001) (LEGACY)
-  DATABASE_PATH       Set custom database location
-  CLAUDE_CLI_PATH     Set custom Claude CLI path
-  CONTEXT_WINDOW      Set context window size (default: 160000)
+  SERVER_PORT             Set server port (default: 3001)
+  PORT                    Set server port (default: 3001) (LEGACY)
+  DATABASE_PATH           Set custom database location
+  CLAUDE_CLI_PATH         Set custom Claude CLI path
+  CONTEXT_WINDOW          Set context window size (default: 160000)
+  FEATURE_USAGE_ENABLED   Set to false to stop recording feature usage
 
 Documentation:
   ${packageJson.homepage || 'https://github.com/siteboon/claudecodeui'}
@@ -212,6 +294,10 @@ function parseArgs(args) {
             parsed.options.databasePath = args[++i];
         } else if (arg.startsWith('--database-path=')) {
             parsed.options.databasePath = arg.split('=')[1];
+        } else if (arg === '--json') {
+            parsed.options.json = true;
+        } else if (arg === '--clear') {
+            parsed.options.clear = true;
         } else if (arg === '--help' || arg === '-h') {
             parsed.command = 'help';
         } else if (arg === '--version' || arg === '-v') {
@@ -246,6 +332,9 @@ async function main() {
         case 'status':
         case 'info':
             showStatus();
+            break;
+        case 'usage':
+            await showUsage({ clear: Boolean(options.clear), json: Boolean(options.json) });
             break;
         case 'help':
         case '-h':

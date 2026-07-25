@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Copy, Download, FileText, FolderPlus, Pencil, RefreshCw, Trash2, type LucideIcon } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import { useCursorContextMenu } from '../../../shared/view/ui/useCursorContextMenu';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 
 type FileContextItem = {
   name: string;
@@ -165,7 +166,13 @@ export default function FileContextMenu({
 
   return (
     <>
-      <div onContextMenu={openContextMenuAtCursor} className={cn('contents', className)}>
+      <div
+        onContextMenu={(event) => {
+          recordFeatureUse('files.context_menu');
+          openContextMenuAtCursor(event);
+        }}
+        className={cn('contents', className)}
+      >
         {children}
       </div>
 

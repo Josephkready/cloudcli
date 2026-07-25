@@ -12,6 +12,7 @@ import type {
 import { useDropzone } from 'react-dropzone';
 
 import { authenticatedFetch } from '../../../utils/api';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import type { MarkSessionProcessing } from '../../../hooks/useSessionProtection';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
 import {
@@ -560,6 +561,7 @@ export function useChatComposerState({
     });
 
     if (validFiles.length > 0) {
+      recordFeatureUse('chat.image_attach');
       setAttachedImages((previous) => [...previous, ...validFiles].slice(0, 5));
     }
   }, []);
@@ -661,6 +663,7 @@ export function useChatComposerState({
       // turn ends — still going through slash-command interception, image
       // upload, etc.
       if (isLoading) {
+        recordFeatureUse('chat.queue_message');
         queuedDraftSessionRef.current = sessionKey;
         setQueuedDrafts((prev) => [
           ...prev,
@@ -706,6 +709,7 @@ export function useChatComposerState({
               } as SlashCommand)
             : undefined);
         if (matchedCommand && matchedCommand.type !== 'skill') {
+          recordFeatureUse('chat.slash_command');
           executeCommand(matchedCommand, isHelpAlias ? '/help' : commandInput);
           setInput('');
           inputValueRef.current = '';
@@ -827,6 +831,7 @@ export function useChatComposerState({
       // One message shape for every provider. The backend resolves the
       // provider, project path, and provider-native resume id from the
       // session row; `options` only carries composer-level preferences.
+      recordFeatureUse('chat.send');
       sendMessage({
         type: 'chat.send',
         sessionId: targetSessionId,
@@ -1175,6 +1180,7 @@ export function useChatComposerState({
       return;
     }
 
+    recordFeatureUse('chat.interrupt');
     // The backend resolves the provider from the session row, so no provider
     // field is needed here.
     sendMessage({
