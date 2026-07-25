@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Eye, EyeOff, FolderOpen, FolderPlus, Loader2, Plus, X } from 'lucide-react';
 import { Button, Input } from '../../../shared/view/ui';
+import { useFocusTrap } from '../../../shared/view/ui/useFocusTrap';
 import { useOverlayDismiss } from '../../../shared/view/ui/useOverlayDismiss';
 import { browseFilesystemFolders, createFolderInFilesystem } from '../data/workspaceApi';
 import { getParentPath, joinFolderPath } from '../utils/pathUtils';
@@ -82,6 +83,10 @@ export default function FolderBrowserModal({
     onDismiss: handleClose,
   });
 
+  // The trap stays on for the whole time the picker is open — unlike Esc, the
+  // inline new-folder field never wants Tab to leave the dialog (#274).
+  const { containerRef } = useFocusTrap<HTMLDivElement>({ isActive: isOpen });
+
   const handleCreateFolder = useCallback(async () => {
     if (!newFolderName.trim()) {
       return;
@@ -117,6 +122,7 @@ export default function FolderBrowserModal({
       {...backdropProps}
     >
       <div
+        ref={containerRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="folder-browser-title"

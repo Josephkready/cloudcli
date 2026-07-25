@@ -139,3 +139,110 @@ describe('FolderBrowserModal — Esc and backdrop dismissal (#243)', () => {
     expect(screen.getByRole('button', { name: 'Close folder browser' })).toBeInTheDocument();
   });
 });
+
+/*
+ * #274: #243 fixed dismissal but not focus, so Tab walked straight out of the
+ * picker and into the page behind it while the overlay covered the screen.
+ */
+describe('FolderBrowserModal — focus trap (#274)', () => {
+  function renderPickerOverPage() {
+    const onClose = vi.fn();
+    const onFolderSelected = vi.fn();
+    const result = render(
+      <>
+        <button type="button">behind the picker</button>
+        <FolderBrowserModal
+          isOpen
+          autoAdvanceOnSelect={false}
+          onClose={onClose}
+          onFolderSelected={onFolderSelected}
+        />
+      </>,
+    );
+    return { ...result, onClose, onFolderSelected };
+  }
+
+  it('moves focus into the picker when it opens', async () => {
+    renderPickerOverPage();
+
+    const dialog = await screen.findByRole('dialog', { name: 'Select Folder' });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it('wraps Tab from the last control back to the first', async () => {
+    const user = userEvent.setup();
+    renderPickerOverPage();
+
+    await screen.findByRole('button', { name: /demo-app/ });
+    screen.getByRole('button', { name: 'Use this folder' }).focus();
+    await user.tab();
+
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Show hidden folders' }),
+    );
+  });
+
+  it('wraps Shift+Tab from the first control to the last', async () => {
+    const user = userEvent.setup();
+    renderPickerOverPage();
+
+    await screen.findByRole('button', { name: /demo-app/ });
+    screen.getByRole('button', { name: 'Show hidden folders' }).focus();
+    await user.tab({ shift: true });
+
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Use this folder' }));
+  });
+
+  it('never lets Tab reach the page behind the picker', async () => {
+    const user = userEvent.setup();
+    renderPickerOverPage();
+
+    const dialog = await screen.findByRole('dialog', { name: 'Select Folder' });
+    const behind = screen.getByRole('button', { name: 'behind the picker' });
+
+    for (let press = 0; press < 10; press += 1) {
+      await user.tab();
+      expect(document.activeElement).not.toBe(behind);
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+  });
+
+  it('restores focus to the opener when the picker closes', async () => {
+    const opener = document.createElement('button');
+    opener.textContent = 'opener';
+    document.body.append(opener);
+    opener.focus();
+
+    const { rerender } = render(
+      <FolderBrowserModal
+        isOpen={false}
+        autoAdvanceOnSelect={false}
+        onClose={vi.fn()}
+        onFolderSelected={vi.fn()}
+      />,
+    );
+
+    rerender(
+      <FolderBrowserModal
+        isOpen
+        autoAdvanceOnSelect={false}
+        onClose={vi.fn()}
+        onFolderSelected={vi.fn()}
+      />,
+    );
+    await screen.findByRole('button', { name: /demo-app/ });
+    expect(document.activeElement).not.toBe(opener);
+
+    rerender(
+      <FolderBrowserModal
+        isOpen={false}
+        autoAdvanceOnSelect={false}
+        onClose={vi.fn()}
+        onFolderSelected={vi.fn()}
+      />,
+    );
+
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+});

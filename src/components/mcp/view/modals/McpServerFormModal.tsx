@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { Button, Input } from '../../../../shared/view/ui';
+import { useFocusTrap } from '../../../../shared/view/ui/useFocusTrap';
 import { useOverlayDismiss } from '../../../../shared/view/ui/useOverlayDismiss';
 import {
   MCP_PROVIDER_NAMES,
@@ -115,6 +116,10 @@ export default function McpServerFormModal({
     onDismiss: onClose,
   });
 
+  // Focus stays contained even mid-submit: the form is still on screen, and its
+  // Cancel button must remain reachable by keyboard (#274).
+  const { containerRef } = useFocusTrap<HTMLDivElement>({ isActive: isOpen });
+
   if (!isOpen) {
     return null;
   }
@@ -130,6 +135,7 @@ export default function McpServerFormModal({
   return createPortal(
     <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4" {...backdropProps}>
       <div
+        ref={containerRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="mcp-server-form-title"

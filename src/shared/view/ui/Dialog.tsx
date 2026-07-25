@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 
 import { cn } from '../../../lib/utils';
 
+import { useFocusTrap } from './useFocusTrap';
+
 interface DialogContextValue {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -95,25 +97,16 @@ interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement> {
   wrapperClassName?: string;
 }
 
-const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
   ({ className, children, onEscapeKeyDown, onPointerDownOutside, wrapperClassName, ...props }, ref) => {
     const { open, onOpenChange, triggerRef } = useDialog();
-    const contentRef = React.useRef<HTMLDivElement | null>(null);
-    const previousFocusRef = React.useRef<HTMLElement | null>(null);
-
-    // Save the element that had focus before opening, restore on close
-    React.useEffect(() => {
-      if (open) {
-        previousFocusRef.current = document.activeElement as HTMLElement;
-      } else if (previousFocusRef.current) {
-        // Prefer the trigger, fall back to whatever was focused before
-        const restoreTarget = triggerRef.current || previousFocusRef.current;
-        restoreTarget?.focus();
-        previousFocusRef.current = null;
-      }
-    }, [open, triggerRef]);
+    // Tab containment, initial focus and focus restore all live in the shared
+    // hook the hand-rolled overlays use (#274) — one implementation, one
+    // overlay stack, so a hand-rolled dialog stacked over a Dialog still wins.
+    const { containerRef: contentRef } = useFocusTrap<HTMLDivElement>({
+      isActive: open,
+      restoreFocusRef: triggerRef,
+    });
 
     React.useEffect(() => {
       if (!open) return;
@@ -123,26 +116,6 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
           e.stopPropagation();
           onEscapeKeyDown?.();
           onOpenChange(false);
-          return;
-        }
-
-        // Focus trap: Tab / Shift+Tab cycle within the dialog
-        if (e.key === 'Tab' && contentRef.current) {
-          const focusable = Array.from(
-            contentRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
-          );
-          if (focusable.length === 0) return;
-
-          const first = focusable[0];
-          const last = focusable[focusable.length - 1];
-
-          if (e.shiftKey && document.activeElement === first) {
-            e.preventDefault();
-            last.focus();
-          } else if (!e.shiftKey && document.activeElement === last) {
-            e.preventDefault();
-            first.focus();
-          }
         }
       };
 
@@ -157,17 +130,6 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
         document.body.style.overflow = prev;
       };
     }, [open, onOpenChange, onEscapeKeyDown]);
-
-    // Auto-focus first focusable element on open
-    React.useEffect(() => {
-      if (open && contentRef.current) {
-        // Small delay to let the portal render
-        requestAnimationFrame(() => {
-          const first = contentRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-          first?.focus();
-        });
-      }
-    }, [open]);
 
     if (!open) return null;
 

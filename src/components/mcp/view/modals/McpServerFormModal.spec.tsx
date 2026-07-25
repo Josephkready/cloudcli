@@ -58,3 +58,86 @@ describe('McpServerFormModal — Esc and backdrop dismissal (#243)', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+/*
+ * #274: the modal is portalled to the end of <body>, so Tab from its last
+ * control fell off the end of the document and back into the settings page
+ * behind it.
+ */
+describe('McpServerFormModal — focus trap (#274)', () => {
+  function renderModalOverPage() {
+    const onClose = vi.fn();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const result = render(
+      <>
+        <button type="button">behind the modal</button>
+        <McpServerFormModal
+          provider="claude"
+          isOpen
+          editingServer={null}
+          currentProjects={[]}
+          onClose={onClose}
+          onSubmit={onSubmit}
+        />
+      </>,
+    );
+    return { ...result, onClose, onSubmit };
+  }
+
+  it('moves focus into the modal when it opens', () => {
+    renderModalOverPage();
+
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+  });
+
+  it('never lets Tab reach the page behind the modal', async () => {
+    const user = userEvent.setup();
+    renderModalOverPage();
+
+    const dialog = screen.getByRole('dialog');
+    const behind = screen.getByRole('button', { name: 'behind the modal' });
+
+    for (let press = 0; press < 12; press += 1) {
+      await user.tab();
+      expect(document.activeElement).not.toBe(behind);
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+  });
+
+  it('wraps Shift+Tab backwards inside the modal', async () => {
+    const user = userEvent.setup();
+    renderModalOverPage();
+
+    const dialog = screen.getByRole('dialog');
+    const behind = screen.getByRole('button', { name: 'behind the modal' });
+
+    for (let press = 0; press < 12; press += 1) {
+      await user.tab({ shift: true });
+      expect(document.activeElement).not.toBe(behind);
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+  });
+
+  it('restores focus to the opener when the modal closes', () => {
+    const opener = document.createElement('button');
+    opener.textContent = 'open mcp form';
+    document.body.append(opener);
+    opener.focus();
+
+    const props = {
+      provider: 'claude' as const,
+      editingServer: null,
+      currentProjects: [],
+      onClose: vi.fn(),
+      onSubmit: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const { rerender } = render(<McpServerFormModal isOpen={false} {...props} />);
+    rerender(<McpServerFormModal isOpen {...props} />);
+    expect(document.activeElement).not.toBe(opener);
+
+    rerender(<McpServerFormModal isOpen={false} {...props} />);
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+});

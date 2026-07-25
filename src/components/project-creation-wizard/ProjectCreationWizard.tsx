@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { FolderPlus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { useFocusTrap } from '../../shared/view/ui/useFocusTrap';
 import { useOverlayDismiss } from '../../shared/view/ui/useOverlayDismiss';
 import ErrorBanner from './components/ErrorBanner';
 import StepConfiguration from './components/StepConfiguration';
@@ -142,12 +143,19 @@ export default function ProjectCreationWizard({
   // X button is disabled for the same reason (#243).
   const { backdropProps } = useOverlayDismiss({ isActive: !isCreating, onDismiss: onClose });
 
+  // The wizard is only mounted while it is open, and an in-flight create still
+  // needs its Cancel/Close controls reachable, so the trap runs throughout. The
+  // folder picker mounts inside this subtree and takes the trap over while it
+  // is on top (#274).
+  const { containerRef } = useFocusTrap<HTMLDivElement>({ isActive: true });
+
   return (
     <div
       className="fixed bottom-0 left-0 right-0 top-0 z-[60] flex items-center justify-center bg-black/50 p-0 backdrop-blur-sm sm:p-4"
       {...backdropProps}
     >
       <div
+        ref={containerRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="project-wizard-title"

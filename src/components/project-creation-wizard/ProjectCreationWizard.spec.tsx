@@ -104,3 +104,90 @@ describe('ProjectCreationWizard — Esc and backdrop dismissal (#243)', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+/*
+ * #274: the wizard covers the whole screen but never trapped focus, so Tab
+ * walked out of it into the app behind. The picker stacks on top of the wizard,
+ * so the trap has to follow the topmost overlay exactly like Esc does.
+ */
+describe('ProjectCreationWizard — focus trap (#274)', () => {
+  function renderWizardOverPage() {
+    const onClose = vi.fn();
+    const result = render(
+      <>
+        <button type="button">behind the wizard</button>
+        <ProjectCreationWizard onClose={onClose} />
+      </>,
+    );
+    return { ...result, onClose };
+  }
+
+  it('moves focus into the wizard when it opens', () => {
+    renderWizardOverPage();
+
+    const dialog = screen.getByRole('dialog', { name: /create new project/i });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it('never lets Tab reach the page behind the wizard', async () => {
+    const user = userEvent.setup();
+    renderWizardOverPage();
+
+    const dialog = screen.getByRole('dialog', { name: /create new project/i });
+    const behind = screen.getByRole('button', { name: 'behind the wizard' });
+
+    for (let press = 0; press < 12; press += 1) {
+      await user.tab();
+      expect(document.activeElement).not.toBe(behind);
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+  });
+
+  it('cycles backwards within the wizard too', async () => {
+    const user = userEvent.setup();
+    renderWizardOverPage();
+
+    const dialog = screen.getByRole('dialog', { name: /create new project/i });
+    const behind = screen.getByRole('button', { name: 'behind the wizard' });
+
+    for (let press = 0; press < 12; press += 1) {
+      await user.tab({ shift: true });
+      expect(document.activeElement).not.toBe(behind);
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+  });
+
+  it('hands the trap to the folder picker while it is stacked, and back on close', async () => {
+    const user = userEvent.setup();
+    renderWizardOverPage();
+
+    const wizard = screen.getByRole('dialog', { name: /create new project/i });
+    const browse = screen.getByRole('button', { name: 'Browse folders' });
+    await user.click(browse);
+
+    const picker = await screen.findByRole('dialog', { name: 'Select Folder' });
+    expect(picker.contains(document.activeElement)).toBe(true);
+
+    // The topmost overlay owns Tab: cycling stays inside the picker.
+    screen.getByRole('button', { name: 'Use this folder' }).focus();
+    await user.tab();
+    expect(picker.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Show hidden folders' }),
+    );
+
+    await user.keyboard('{Escape}');
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Select Folder' })).toBeNull(),
+    );
+
+    // Closing the picker returns focus to the control that opened it...
+    expect(document.activeElement).toBe(browse);
+
+    // ...and the wizard is trapping again.
+    for (let press = 0; press < 12; press += 1) {
+      await user.tab();
+      expect(wizard.contains(document.activeElement)).toBe(true);
+    }
+  });
+});
