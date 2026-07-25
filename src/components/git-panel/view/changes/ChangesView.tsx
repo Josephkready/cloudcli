@@ -2,6 +2,7 @@ import { GitBranch, GitCommit, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ConfirmationRequest, FileStatusCode, GitDiffMap, GitStatusResponse } from '../../types/types';
 import { getAllChangedFiles, hasChangedFiles } from '../../utils/gitPanelUtils';
+import { disabledControlClasses } from '../../../../shared/view/ui/disabledState';
 import CommitComposer from './CommitComposer';
 import FileChangeList from './FileChangeList';
 import FileStatusLegend from './FileStatusLegend';
@@ -197,7 +198,7 @@ export default function ChangesView({
             <button
               onClick={() => void onCreateInitialCommit()}
               disabled={isCreatingInitialCommit}
-              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              className={`flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-primary-foreground transition-colors hover:bg-primary/90 ${disabledControlClasses}`}
             >
               {isCreatingInitialCommit ? (
                 <>

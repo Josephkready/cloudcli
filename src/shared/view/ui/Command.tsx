@@ -4,6 +4,8 @@ import { Search } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
 
+import { disabledControlClasses } from './disabledState';
+
 const Command = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive>
@@ -26,7 +28,7 @@ const CommandInput = React.forwardRef<
       ref={ref}
       className={cn(
         'flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none',
-        'placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
+        `placeholder:text-muted-foreground ${disabledControlClasses}`,
         className,
       )}
       {...props}

@@ -1,7 +1,7 @@
 import { Bell, BellOff, BellRing, Loader2, Play, Volume2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { Button } from '../../../../shared/view/ui';
+import { Button, disabledControlClasses } from '../../../../shared/view/ui';
 import { playChatCompletionSound } from '../../../../utils/notificationSound';
 import type { NotificationPreferencesState } from '../../types/types';
 
@@ -57,7 +57,7 @@ export default function NotificationsSettingsTab({
                   onEnablePush();
                 }
               }}
-              className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${disabledControlClasses} ${
                 isPushSubscribed
                   ? 'bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50'
                   : 'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600'

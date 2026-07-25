@@ -1,5 +1,7 @@
 import { RotateCcw, X } from 'lucide-react';
 
+import { disabledControlClasses } from '../../../../shared/view/ui/disabledState';
+
 type ShellHeaderProps = {
   isConnected: boolean;
   isInitialized: boolean;
@@ -69,7 +71,7 @@ export default function ShellHeader({
             type="button"
             onClick={onRestart}
             disabled={disableRestart}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-600/80 bg-gray-700/70 px-3 text-xs font-medium text-gray-100 transition-colors hover:border-blue-400/70 hover:bg-blue-600/80 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-400/70 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:cursor-not-allowed disabled:border-transparent disabled:bg-transparent disabled:text-gray-500 disabled:opacity-60"
+            className={`inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-600/80 bg-gray-700/70 px-3 text-xs font-medium text-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400/70 focus:ring-offset-2 focus:ring-offset-gray-800 enabled:hover:border-blue-400/70 enabled:hover:bg-blue-600/80 enabled:hover:text-white ${disabledControlClasses}`}
             title={restartTitle}
           >
             <RotateCcw className={`h-3.5 w-3.5 ${isRestarting ? 'animate-spin' : ''}`} aria-hidden="true" />

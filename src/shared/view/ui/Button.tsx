@@ -3,9 +3,18 @@ import { cva, type VariantProps } from 'class-variance-authority';
 
 import { cn } from '../../../lib/utils';
 
+import { disabledControlClasses } from './disabledState';
+
 // Keep visual variants centralized so all button usages stay consistent.
+//
+// The disabled treatment lives in ./disabledState so Button, Input and
+// CommandInput cannot drift apart (#276). Note the absence of
+// `disabled:pointer-events-none`: a disabled button stays hit-testable so its
+// `not-allowed` cursor and `title` tooltip can explain the block. That is safe
+// because Button always renders a real <button> (see below), where the native
+// `disabled` attribute — not CSS — is what blocks activation.
 const buttonVariants = cva(
-  'inline-flex touch-manipulation items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+  `inline-flex touch-manipulation items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${disabledControlClasses} [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0`,
   {
     variants: {
       variant: {
@@ -35,6 +44,11 @@ const buttonVariants = cva(
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
   VariantProps<typeof buttonVariants>;
 
+// Button has no `asChild`/Slot escape hatch on purpose: it always renders a
+// native <button>, so `disabled` genuinely blocks activation and the styling
+// above never has to fall back to `pointer-events-none`. `Button.spec.tsx`
+// locks that in. `buttonVariants` is also applied to an <a> elsewhere, which is
+// fine — `disabled:*` utilities only ever match `:disabled` form controls.
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, ...props }, ref) => {
     return (

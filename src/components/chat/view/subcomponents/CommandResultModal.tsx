@@ -17,7 +17,7 @@ import {
   X,
 } from 'lucide-react';
 
-import { Badge, Button, Dialog, DialogContent, DialogTitle, Input } from '../../../../shared/view/ui';
+import { Badge, Button, Dialog, DialogContent, DialogTitle, Input, disabledBusyControlClasses } from '../../../../shared/view/ui';
 import type { LLMProvider, ProviderModelsCacheInfo, ProviderModelsDefinition } from '../../../../types/app';
 import type {
   CommandModalPayload,
@@ -381,7 +381,7 @@ function ModelsContent({
                     onClick={() => handleSelectModel(option.value)}
                     disabled={Boolean(changingModel)}
                     aria-label={`Select model ${option.value}`}
-                    className={`settings-content-enter group flex min-h-16 w-full flex-col rounded-2xl border p-3 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60 ${
+                    className={`settings-content-enter group flex min-h-16 w-full flex-col rounded-2xl border p-3 text-left shadow-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring enabled:hover:-translate-y-0.5 enabled:hover:shadow-md ${disabledBusyControlClasses} ${
                       isCurrent
                         ? 'border-primary/45 bg-primary/10'
                         : isPendingSelection

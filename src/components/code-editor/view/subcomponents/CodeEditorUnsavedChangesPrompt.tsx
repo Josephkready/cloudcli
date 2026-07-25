@@ -1,5 +1,7 @@
 import { AlertTriangle } from 'lucide-react';
 
+import { disabledControlClasses } from '../../../../shared/view/ui/disabledState';
+
 type CodeEditorUnsavedChangesPromptProps = {
   fileName: string;
   saving: boolean;
@@ -66,7 +68,7 @@ export default function CodeEditorUnsavedChangesPrompt({
             onClick={onSave}
             disabled={saving}
             autoFocus
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+            className={`rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 ${disabledControlClasses}`}
           >
             {saving ? labels.saving : labels.save}
           </button>

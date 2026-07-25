@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next';
 
+import { disabledBusyControlClasses } from '../../../../shared/view/ui/disabledState';
+
 const loadAllOverlayAnimationStyle = `
 @keyframes loadAllOverlayAutoFade {
   0%, 80% { opacity: 1; }
@@ -49,7 +51,7 @@ export default function LoadAllMessagesOverlay({
         </div>
       ) : (
         <button
-          className="pointer-events-auto flex items-center space-x-2 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:bg-blue-700 disabled:cursor-wait disabled:opacity-75 dark:bg-blue-500 dark:hover:bg-blue-600"
+          className={`pointer-events-auto flex items-center space-x-2 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-lg transition-all duration-200 enabled:hover:scale-105 enabled:hover:bg-blue-700 dark:bg-blue-500 dark:enabled:hover:bg-blue-600 ${disabledBusyControlClasses}`}
           onClick={onLoadAllMessages}
           disabled={isLoadingAllMessages}
         >

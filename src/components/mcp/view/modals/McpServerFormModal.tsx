@@ -434,11 +434,9 @@ export default function McpServerFormModal({
             <Button type="button" variant="outline" onClick={onClose}>
               {t('mcpForm.actions.cancel')}
             </Button>
-            <Button
-              type="submit"
-              disabled={isSubmitting || !canSubmit}
-              className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
+            {/* No className: the default Button variant already is the primary
+                fill, and its disabled treatment lives in the primitive (#276). */}
+            <Button type="submit" disabled={isSubmitting || !canSubmit}>
               {isSubmitting
                 ? t('mcpForm.actions.saving')
                 : isEditing

@@ -1,6 +1,7 @@
 import { AlertCircle, Check, ChevronDown, Download, GitBranch, Plus, RefreshCw, RotateCcw, Search, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ConfirmationRequest, GitRemoteStatus } from '../types/types';
+import { disabledControlClasses } from '../../../shared/view/ui/disabledState';
 import NewBranchModal from './modals/NewBranchModal';
 
 type GitPanelHeaderProps = {
@@ -232,7 +233,7 @@ export default function GitPanelHeader({
                 <button
                   onClick={requestPublishConfirmation}
                   disabled={anyPending}
-                  className="flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1 text-sm text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  className={`flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1 text-sm text-primary-foreground transition-colors hover:bg-primary/90 ${disabledControlClasses}`}
                   title={`Publish "${currentBranch}" to ${remoteName}`}
                 >
                   <Upload className={`h-3 w-3 ${isPublishing ? 'animate-pulse' : ''}`} />
@@ -244,7 +245,7 @@ export default function GitPanelHeader({
                   <button
                     onClick={() => void onFetch()}
                     disabled={anyPending}
-                    className="flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1 text-sm text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                    className={`flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1 text-sm text-primary-foreground transition-colors hover:bg-primary/90 ${disabledControlClasses}`}
                     title={`Fetch from ${remoteName}`}
                   >
                     <RefreshCw className={`h-3 w-3 ${isFetching ? 'animate-spin' : ''}`} />
@@ -255,7 +256,7 @@ export default function GitPanelHeader({
                     <button
                       onClick={requestPullConfirmation}
                       disabled={anyPending}
-                      className="flex items-center gap-1 rounded-lg bg-green-600 px-2.5 py-1 text-sm text-white transition-colors hover:bg-green-700 disabled:opacity-50"
+                      className={`flex items-center gap-1 rounded-lg bg-green-600 px-2.5 py-1 text-sm text-white transition-colors hover:bg-green-700 ${disabledControlClasses}`}
                       title={`Pull ${behindCount} from ${remoteName}`}
                     >
                       <Download className={`h-3 w-3 ${isPulling ? 'animate-pulse' : ''}`} />
@@ -267,7 +268,7 @@ export default function GitPanelHeader({
                     <button
                       onClick={requestPushConfirmation}
                       disabled={anyPending}
-                      className="flex items-center gap-1 rounded-lg bg-orange-600 px-2.5 py-1 text-sm text-white transition-colors hover:bg-orange-700 disabled:opacity-50"
+                      className={`flex items-center gap-1 rounded-lg bg-orange-600 px-2.5 py-1 text-sm text-white transition-colors hover:bg-orange-700 ${disabledControlClasses}`}
                       title={`Push ${aheadCount} to ${remoteName}`}
                     >
                       <Upload className={`h-3 w-3 ${isPushing ? 'animate-pulse' : ''}`} />
@@ -282,7 +283,7 @@ export default function GitPanelHeader({
           <button
             onClick={requestRevertLocalCommitConfirmation}
             disabled={isRevertingLocalCommit}
-            className={`rounded-lg transition-colors hover:bg-accent disabled:opacity-50 ${isMobile ? 'p-1' : 'p-1.5'}`}
+            className={`rounded-lg transition-colors hover:bg-accent ${disabledControlClasses} ${isMobile ? 'p-1' : 'p-1.5'}`}
             title="Revert latest local commit"
           >
             <RotateCcw

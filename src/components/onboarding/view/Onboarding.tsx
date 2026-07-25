@@ -1,9 +1,12 @@
 import { Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+
 import type { LLMProvider } from '../../../types/app';
 import { authenticatedFetch } from '../../../utils/api';
 import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuthStatus';
 import ProviderLoginModal from '../../provider-auth/view/ProviderLoginModal';
+import { disabledControlClasses } from '../../../shared/view/ui/disabledState';
+
 import AgentConnectionsStep from './subcomponents/AgentConnectionsStep';
 import GitConfigurationStep from './subcomponents/GitConfigurationStep';
 import OnboardingStepProgress from './subcomponents/OnboardingStepProgress';
@@ -161,7 +164,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         <div aria-hidden className="pointer-events-none fixed inset-0">
           <div className="absolute -top-40 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
           <div className="absolute -bottom-32 -left-24 h-[26rem] w-[26rem] rounded-full bg-primary/5 blur-3xl" />
-          <div className="absolute inset-0 bg-[radial-gradient(hsl(var(--foreground)/0.04)_1px,transparent_1px)] [background-size:22px_22px] opacity-60" />
+          <div className="absolute inset-0 bg-[radial-gradient(hsl(var(--foreground)/0.04)_1px,transparent_1px)] opacity-60 [background-size:22px_22px]" />
         </div>
 
         <div className="relative mx-auto flex min-h-full w-full max-w-2xl items-center justify-center p-4">
@@ -197,7 +200,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               <button
                 onClick={handlePreviousStep}
                 disabled={currentStep === 0 || isSubmitting}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                className={`flex items-center gap-2 px-4 py-2 text-sm font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground ${disabledControlClasses}`}
               >
                 <ChevronLeft className="h-4 w-4" />
                 Previous
@@ -212,7 +215,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                     // keeps Next live and surfaces the error on click.
                     onClick={handleNextStep}
                     disabled={isSubmitting}
-                    className="flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 font-medium text-primary-foreground shadow-lg shadow-primary/25 transition-all duration-200 hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
+                    className={`flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 font-medium text-primary-foreground shadow-lg shadow-primary/25 transition-all duration-200 active:scale-[0.99] enabled:hover:brightness-110 ${disabledControlClasses}`}
                   >
                     {isSubmitting ? (
                       <>
@@ -230,7 +233,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   <button
                     onClick={handleFinish}
                     disabled={isSubmitting}
-                    className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-2.5 font-medium text-white shadow-lg shadow-emerald-600/25 transition-all duration-200 hover:bg-emerald-700 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
+                    className={`flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-2.5 font-medium text-white shadow-lg shadow-emerald-600/25 transition-all duration-200 hover:bg-emerald-700 active:scale-[0.99] ${disabledControlClasses}`}
                   >
                     {isSubmitting ? (
                       <>
