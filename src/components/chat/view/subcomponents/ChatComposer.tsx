@@ -383,7 +383,11 @@ export default function ChatComposer({
             <button
               type="button"
               onClick={onModeSwitch}
-              className={`inline-flex h-8 items-center rounded-lg border px-2 text-xs font-medium transition-all duration-200 sm:px-2.5 ${
+              // `touch:hit-44` hangs a transparent 44x44 overlay off the pill on
+              // coarse pointers. The painted pill stays 32px tall so the control
+              // row's alignment and density are untouched, but the tap target
+              // clears the 44px guidance (#275).
+              className={`touch:hit-44 inline-flex h-8 items-center rounded-lg border px-2 text-xs font-medium transition-all duration-200 sm:px-2.5 ${
                 permissionMode === 'default'
                   ? 'border-border/60 bg-muted/50 text-muted-foreground hover:bg-muted'
                   : permissionMode === 'acceptEdits'
