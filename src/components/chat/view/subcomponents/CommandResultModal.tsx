@@ -386,7 +386,7 @@ function ModelsContent({
                         ? 'border-primary/45 bg-primary/10'
                         : isPendingSelection
                           ? 'border-emerald-500/35 bg-emerald-500/10'
-                          : 'border-border/70 bg-background/80 hover:border-primary/30 hover:bg-background'
+                          : 'border-border/70 bg-background/80 enabled:hover:border-primary/30 enabled:hover:bg-background'
                     }`}
                     style={{ animationDelay: `${Math.min(index * 14, 180)}ms` }}
                   >

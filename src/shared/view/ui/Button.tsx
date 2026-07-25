@@ -17,15 +17,23 @@ const buttonVariants = cva(
   `inline-flex touch-manipulation items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${disabledControlClasses} [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0`,
   {
     variants: {
+      // Every hover/active utility is `enabled:`-scoped. Because Button no
+      // longer sets `disabled:pointer-events-none` (see above), :hover and
+      // :active match disabled buttons too — and the shared disabled treatment
+      // overrides opacity, filter, shadow and cursor but NOT background-color
+      // or text-decoration, so an unscoped utility leaks through and a blocked
+      // control animates as if it were live. disabledState.test.ts enforces it.
       variant: {
-        default: 'bg-primary text-primary-foreground shadow hover:bg-primary/90 active:bg-primary/80',
+        default:
+          'bg-primary text-primary-foreground shadow enabled:hover:bg-primary/90 enabled:active:bg-primary/80',
         destructive:
-          'bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 active:bg-destructive/80',
+          'bg-destructive text-destructive-foreground shadow-sm enabled:hover:bg-destructive/90 enabled:active:bg-destructive/80',
         outline:
-          'border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground active:bg-accent/80',
-        secondary: 'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80 active:bg-secondary/70',
-        ghost: 'hover:bg-accent hover:text-accent-foreground active:bg-accent/80',
-        link: 'text-primary underline-offset-4 hover:underline',
+          'border border-input bg-background shadow-sm enabled:hover:bg-accent enabled:hover:text-accent-foreground enabled:active:bg-accent/80',
+        secondary:
+          'bg-secondary text-secondary-foreground shadow-sm enabled:hover:bg-secondary/80 enabled:active:bg-secondary/70',
+        ghost: 'enabled:hover:bg-accent enabled:hover:text-accent-foreground enabled:active:bg-accent/80',
+        link: 'text-primary underline-offset-4 enabled:hover:underline',
       },
       size: {
         default: 'h-10 px-4 py-2',
