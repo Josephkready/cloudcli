@@ -98,6 +98,53 @@ describe('the disabled treatment is defined once (#276)', () => {
   });
 });
 
+/*
+ * Dropping `disabled:pointer-events-none` (#276) made disabled buttons
+ * hit-testable so their cursor and title could explain the block. It also made
+ * `:hover` and `:active` match them — so any unscoped hover/active utility on a
+ * control carrying the disabled treatment now fires *while disabled*. The
+ * shared treatment overrides opacity, filter, box-shadow and cursor; it does
+ * not override background-color or text-decoration, so those leak through: a
+ * disabled `ghost`/`outline` button grows a background wash on hover, and a
+ * disabled `link` button underlines.
+ *
+ * The rule is enforced here rather than asserted in a review, because the
+ * failure is invisible to every runtime test — the button correctly refuses to
+ * activate, it just lies about being interactive.
+ */
+describe('Button variants must not react to hover while disabled', () => {
+  const buttonSource = readFileSync(fileURLToPath(new URL('./Button.tsx', import.meta.url)), 'utf8');
+
+  const variantBlock = () => {
+    const start = buttonSource.indexOf('variants: {');
+    const end = buttonSource.indexOf('defaultVariants:');
+    assert.ok(start !== -1 && end > start, 'could not locate the cva variants block in Button.tsx');
+    return buttonSource.slice(start, end);
+  };
+
+  test('every hover: and active: utility in the variants is enabled:-scoped', () => {
+    const unscoped = [...variantBlock().matchAll(/(?<![\w:-])(hover|active):[\w[\]/.-]+/g)].map(
+      (match) => match[0],
+    );
+
+    assert.deepEqual(
+      unscoped,
+      [],
+      'Button variants carry unscoped hover/active utilities: ' +
+        `${unscoped.join(', ')}. Since #276 removed disabled:pointer-events-none, these fire on ` +
+        'disabled buttons. Prefix them with `enabled:`.',
+    );
+  });
+
+  test('the scoped utilities are still present, so the check is not vacuous', () => {
+    const scoped = [...variantBlock().matchAll(/enabled:(hover|active):/g)];
+    assert.ok(
+      scoped.length >= 8,
+      `expected the variants to still define enabled:hover/active utilities, found ${scoped.length}`,
+    );
+  });
+});
+
 describe('disabledState class strings', () => {
   test('carry a non-colour cue, not just opacity', () => {
     for (const classes of [disabledControlClasses, disabledBusyControlClasses]) {
