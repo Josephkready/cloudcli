@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 
 import { api } from '../../../utils/api';
+import { subscribeToClaudeSettings } from '../../../utils/claudeSettings';
 import { usePaletteOps } from '../../../contexts/PaletteOpsContext';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 import type { SessionActivityMap } from '../../../hooks/useSessionProtection';
@@ -196,6 +197,11 @@ export function useSidebarController({
     }
   }, [projects, isLoading]);
 
+  // The sort order lives in the `claude-settings` localStorage blob the
+  // settings dialog owns. `subscribeToClaudeSettings` handles both the same-tab
+  // custom event (the browser never storage-notifies a tab about its own
+  // writes) and the cross-tab `storage` event, replacing the one-second poll
+  // this used to run (#273).
   useEffect(() => {
     const loadSortOrder = () => {
       setProjectSortOrder(readProjectSortOrder());
@@ -203,24 +209,7 @@ export function useSidebarController({
 
     loadSortOrder();
 
-    const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === 'claude-settings') {
-        loadSortOrder();
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-
-    const interval = setInterval(() => {
-      if (document.hasFocus()) {
-        loadSortOrder();
-      }
-    }, 1000);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      clearInterval(interval);
-    };
+    return subscribeToClaudeSettings(loadSortOrder);
   }, []);
 
   useEffect(() => {
