@@ -47,9 +47,21 @@ export function useFocusTrap<T extends HTMLElement = HTMLElement>({
   const restoreFocusRefRef = useRef(restoreFocusRef);
   restoreFocusRefRef.current = restoreFocusRef;
 
+  // A dialog can legitimately hold nothing focusable — the project wizard
+  // disables its close button and both footer buttons while a create is in
+  // flight. Focusing the container itself keeps an anchor inside the dialog
+  // (WAI-ARIA APG) instead of parking focus on <body>, which would strand a
+  // keyboard user in exactly the window where Esc is disabled too.
   const focusFirst = useCallback((container: T) => {
     const [first] = getFocusable(container);
-    first?.focus();
+    if (first) {
+      first.focus();
+      return;
+    }
+    if (!container.hasAttribute('tabindex')) {
+      container.tabIndex = -1;
+    }
+    container.focus();
   }, []);
 
   useEffect(() => {
@@ -70,6 +82,18 @@ export function useFocusTrap<T extends HTMLElement = HTMLElement>({
     return () => {
       const restoreTarget = restoreFocusRefRef.current?.current ?? previousFocusRef.current;
       previousFocusRef.current = null;
+
+      // This cleanup also runs when the dialog is unmounted while still open (a
+      // settings tab switch, a route change). Only reclaim focus if this dialog
+      // still owns it — or if nothing does, which is where an unmount leaves it.
+      // Otherwise we would steal focus from wherever the user actually moved.
+      const active = document.activeElement as HTMLElement | null;
+      const ownsFocus =
+        !active || active === document.body || (container?.contains(active) ?? false);
+      if (!ownsFocus) {
+        return;
+      }
+
       // A closing dialog often takes its opener with it (a whole page swap, a
       // list row that re-rendered); focusing a detached node just blanks focus.
       if (restoreTarget && document.contains(restoreTarget)) {
@@ -98,7 +122,10 @@ export function useFocusTrap<T extends HTMLElement = HTMLElement>({
       const focusable = getFocusable(container);
       if (focusable.length === 0) {
         // Nothing to move to, but letting Tab through would leave the dialog.
+        // Anchor on the container so focus stays addressable rather than
+        // falling to <body> with no way back in.
         event.preventDefault();
+        focusFirst(container);
         return;
       }
 
@@ -127,7 +154,7 @@ export function useFocusTrap<T extends HTMLElement = HTMLElement>({
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [isActive, isTopmost]);
+  }, [focusFirst, isActive, isTopmost]);
 
   return { containerRef };
 }

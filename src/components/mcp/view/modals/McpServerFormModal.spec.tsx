@@ -104,7 +104,36 @@ describe('McpServerFormModal — focus trap (#274)', () => {
     }
   });
 
-  it('wraps Shift+Tab backwards inside the modal', async () => {
+  /*
+   * Asserting only "still inside the dialog" is not enough here: the modal is
+   * portalled, so a backward Tab from <body> lands inside it by document order
+   * anyway and the test would pass with the trap removed. Pin the actual wrap —
+   * focus on the first control, Shift+Tab, expect the last.
+   */
+  it('wraps Shift+Tab from the first control back to the last', async () => {
+    const user = userEvent.setup();
+    renderModalOverPage();
+
+    const dialog = screen.getByRole('dialog');
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    expect(focusable.length).toBeGreaterThan(1);
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    first.focus();
+    expect(document.activeElement).toBe(first);
+
+    await user.tab({ shift: true });
+
+    expect(document.activeElement).toBe(last);
+  });
+
+  it('never lets Shift+Tab reach the page behind the modal', async () => {
     const user = userEvent.setup();
     renderModalOverPage();
 

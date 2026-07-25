@@ -177,27 +177,86 @@ describe('useFocusTrap (#274)', () => {
     expect(document.activeElement).not.toBe(behind);
   });
 
-  it('swallows Tab when the dialog has nothing focusable', async () => {
-    const user = userEvent.setup();
-
-    function EmptyOverlay() {
-      const { containerRef } = useFocusTrap<HTMLDivElement>({ isActive: true });
-      return (
-        <>
-          <button type="button">behind the overlay</button>
-          <div ref={containerRef} role="dialog" aria-label="empty">
-            <p>nothing to focus here</p>
-          </div>
-        </>
-      );
-    }
-
-    render(<EmptyOverlay />);
-    await user.tab();
-
-    expect(document.activeElement).not.toBe(
-      screen.getByRole('button', { name: 'behind the overlay' }),
+  /*
+   * A dialog can legitimately have nothing focusable — the wizard disables its
+   * close button and both footer buttons while a create is in flight, and Esc
+   * is disabled for that same window. Preventing Tab with nowhere to send focus
+   * parks it on <body>, which strands a keyboard user with no anchor and no way
+   * out. WAI-ARIA APG's answer is to focus the dialog container itself, so the
+   * trap always has a target and screen readers keep an anchor in the dialog.
+   */
+  function EmptyOverlay() {
+    const { containerRef } = useFocusTrap<HTMLDivElement>({ isActive: true });
+    return (
+      <>
+        <button type="button">behind the overlay</button>
+        <div ref={containerRef} role="dialog" aria-label="empty">
+          <p>nothing to focus here</p>
+        </div>
+      </>
     );
+  }
+
+  it('anchors focus on the dialog itself when it has nothing focusable', () => {
+    render(<EmptyOverlay />);
+
+    expect(document.activeElement).toBe(screen.getByRole('dialog'));
+  });
+
+  it('keeps Tab on the dialog rather than stranding focus on the body', async () => {
+    const user = userEvent.setup();
+    render(<EmptyOverlay />);
+
+    const dialog = screen.getByRole('dialog');
+    for (let press = 0; press < 3; press += 1) {
+      await user.tab();
+      expect(document.activeElement).toBe(dialog);
+      expect(document.activeElement).not.toBe(document.body);
+    }
+  });
+
+  /*
+   * The restore runs in the effect cleanup, which also fires when a dialog is
+   * unmounted while still open (a settings tab switch, a route change). If
+   * focus has already legitimately moved on by then, yanking it back to the
+   * old opener steals it from wherever the user actually is.
+   */
+  it('does not steal focus back when focus has already moved elsewhere', () => {
+    const opener = document.createElement('button');
+    opener.textContent = 'opener';
+    document.body.append(opener);
+    opener.focus();
+
+    const { rerender } = render(<PageWithOverlay isActive />);
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+
+    const elsewhere = document.createElement('input');
+    document.body.append(elsewhere);
+    elsewhere.focus();
+
+    rerender(<PageWithOverlay isActive={false} />);
+
+    expect(document.activeElement).toBe(elsewhere);
+    expect(document.activeElement).not.toBe(opener);
+
+    opener.remove();
+    elsewhere.remove();
+  });
+
+  it('still restores to the opener when the dialog closes owning focus', () => {
+    const opener = document.createElement('button');
+    opener.textContent = 'opener';
+    document.body.append(opener);
+    opener.focus();
+
+    const { rerender } = render(<PageWithOverlay isActive />);
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+
+    rerender(<PageWithOverlay isActive={false} />);
+
+    expect(document.activeElement).toBe(opener);
+
+    opener.remove();
   });
 
   it('skips disabled controls when wrapping', async () => {
