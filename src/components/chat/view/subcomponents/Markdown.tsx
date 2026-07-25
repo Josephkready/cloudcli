@@ -1,11 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useTranslation } from 'react-i18next';
+
+import SyntaxHighlighter, { getPrismTheme } from '../../../../shared/markdown/prismLanguages';
+import { useMathPlugins } from '../../../../shared/markdown/useMathPlugins';
 import { normalizeInlineCodeFences } from '../../utils/chatFormatting';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
 import { usePaletteOps } from '../../../../contexts/PaletteOpsContext';
@@ -134,7 +133,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
 
       <SyntaxHighlighter
         language={language}
-        style={isDarkMode ? oneDark : oneLight}
+        style={getPrismTheme(isDarkMode)}
         customStyle={{
           margin: 0,
           borderRadius: '0.75rem',
@@ -194,8 +193,10 @@ const markdownComponents = {
 
 export function Markdown({ children, className }: MarkdownProps) {
   const content = normalizeInlineCodeFences(String(children ?? ''));
-  const remarkPlugins = useMemo(() => [remarkGfm, remarkMath], []);
-  const rehypePlugins = useMemo(() => [rehypeKatex], []);
+  // KaTeX is lazy: `useMathPlugins` returns empty arrays until this message is
+  // found to contain math, so the common case never loads it (issue #269).
+  const { remarkMathPlugins, rehypeMathPlugins } = useMathPlugins(content);
+  const remarkPlugins = useMemo(() => [remarkGfm, ...remarkMathPlugins], [remarkMathPlugins]);
   const { openFileInEditor } = usePaletteOps();
 
   const components = useMemo(
@@ -239,7 +240,7 @@ export function Markdown({ children, className }: MarkdownProps) {
 
   return (
     <div className={className}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components as any}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypeMathPlugins} components={components as any}>
         {content}
       </ReactMarkdown>
     </div>
