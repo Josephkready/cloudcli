@@ -94,6 +94,13 @@
       "bypassPermissions": "Bypass Permissions",
       "plan": "Plan Mode"
     },
+    "modesShort": {
+      "default": "Default",
+      "auto": "Auto",
+      "acceptEdits": "Accept",
+      "bypassPermissions": "Bypass",
+      "plan": "Plan"
+    },
     "descriptions": {
       "default": "Only trusted commands (ls, cat, grep, git status, etc.) run automatically. Other commands are skipped. Can write to workspace.",
       "auto": "A model classifier decides per tool call whether to approve or deny. Hands-off, but safer than Bypass — denials still happen.",
@@ -136,7 +143,8 @@
       "willSend": "Will send when this finishes",
       "edit": "Edit queued message",
       "delete": "Delete queued message"
-    }
+    },
+    "permissionModeAria": "Permission mode: {{mode}}. Activate to change."
   },
   "providerSelection": {
     "title": "Choose Your AI Assistant",
