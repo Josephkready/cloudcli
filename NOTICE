@@ -11,3 +11,28 @@ Contributions by Siteboon AI B.V. prior to commit 004135ef were originally
 published under GPL-3.0 and are hereby relicensed to AGPL-3.0-or-later.
 Contributions by other authors prior to that commit remain under GPL-3.0
 and are incorporated into this work as permitted by GPL-3.0 Section 13.
+
+
+THIRD-PARTY BUNDLED ASSETS
+
+This distribution bundles two web fonts under public/fonts/. They are not
+covered by the AGPL; each is licensed under the SIL Open Font License,
+Version 1.1, whose full text ships beside the font files.
+
+  Encode Sans (public/fonts/encode-sans-v23-latin.woff2)
+  Copyright 2020 The Encode Project Authors
+  https://github.com/thundernixon/Encode-Sans
+  Reserved Font Name "Encode Sans"
+  License: public/fonts/encode-sans-OFL.txt
+
+  Merriweather (public/fonts/merriweather-v33-latin.woff2,
+                public/fonts/merriweather-v33-latin-italic.woff2)
+  Copyright 2020 The Merriweather Project Authors
+  https://github.com/EbenSorkin/Merriweather4
+  Reserved Font Name "Merriweather"
+  License: public/fonts/merriweather-OFL.txt
+
+Both files are the "latin" subsets published by Google Fonts, copied verbatim
+from fonts.gstatic.com and redistributed unmodified. Because each family
+declares a Reserved Font Name, any locally re-subset or re-instanced build
+would have to be renamed; keeping the upstream binaries avoids that.

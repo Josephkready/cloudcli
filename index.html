@@ -7,13 +7,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>CloudCLI UI</title>
 
-    <!-- Fonts: Encode Sans (UI) + Merriweather (chat) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Encode+Sans:wght@400;500;600;700&family=Merriweather:ital,wght@0,400;0,700;1,400;1,700&display=swap"
-      rel="stylesheet"
-    />
+    <!--
+      Fonts: Encode Sans (UI) + Merriweather (chat) are self-hosted from
+      public/fonts and declared with @font-face in src/index.css (issue #270).
+      Nothing here may point at a third-party font CDN again: a render-blocking
+      external stylesheet gated first paint on the public internet being
+      reachable, which is the wrong shape for a LAN/tailnet PWA.
+
+      Only Encode Sans is preloaded — it is the UI face, needed for first paint,
+      and the app's CSS is discovered a round trip later than this tag. It is a
+      variable font, so this one file covers weights 400/500/600/700. Merriweather
+      is the chat serif and is intentionally left out so it cannot compete with
+      first paint.
+    -->
+    <link rel="preload" href="/fonts/encode-sans-v23-latin.woff2" as="font" type="font/woff2" crossorigin />
 
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json" crossorigin="use-credentials"  />

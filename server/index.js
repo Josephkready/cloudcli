@@ -60,6 +60,7 @@ import { configureWebPush } from './services/vapid-keys.js';
 import {
     createCompressionMiddleware,
     createPrecompressedAssets,
+    setPublicAssetHeaders,
     setStaticAssetHeaders,
 } from './middleware/compression.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
@@ -218,8 +219,12 @@ app.use('/api/agent', agentRoutes);
 
 app.use('/api/voice', authenticateToken, voiceRoutes);
 
-// Serve public files (like api-docs.html)
-app.use(express.static(path.join(APP_ROOT, 'public')));
+// Serve public files (like api-docs.html, and the self-hosted fonts from
+// public/fonts). This handler sits ahead of the dist/ one, so it owns the cache
+// policy for anything that exists in both — see setPublicAssetHeaders.
+app.use(express.static(path.join(APP_ROOT, 'public'), {
+    setHeaders: setPublicAssetHeaders,
+}));
 
 // Serve the SPA's index.html through a small response transform so we can
 // inject `window.__ROUTER_BASENAME__` before any client JS executes. This is
