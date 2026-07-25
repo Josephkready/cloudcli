@@ -12,6 +12,7 @@ import type {
 } from 'react';
 import { ImageIcon, MessageSquareIcon, XIcon, Loader2, ArrowUpIcon } from 'lucide-react';
 
+import { getPermissionModeLabelKeys } from '../../utils/permissionModeLabels';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { useVoiceAvailable } from '../../hooks/useVoiceAvailable';
 import type { QueuedDraft } from '../../hooks/useChatComposerState';
@@ -170,6 +171,7 @@ export default function ChatComposer({
   sendByCtrlEnter,
 }: ChatComposerProps) {
   const { t } = useTranslation('chat');
+  const permissionModeLabelKeys = getPermissionModeLabelKeys(permissionMode);
   const commandMenuPosition = useMemo(() => {
     if (!isCommandMenuOpen) {
       return { top: 0, left: 16, bottom: 90 };
@@ -366,6 +368,9 @@ export default function ChatComposer({
           <PromptInputTools>
             <PromptInputButton
               tooltip={{ content: t('input.attachImages') }}
+              // Icon-only, and the tooltip is hover-driven — without this the
+              // button has no accessible name on touch (#239).
+              aria-label={t('input.attachImages')}
               onClick={openImagePicker}
             >
               <ImageIcon />
@@ -389,6 +394,10 @@ export default function ChatComposer({
                         ? 'border-orange-300/60 bg-orange-50 text-orange-700 hover:bg-orange-100 dark:border-orange-600/40 dark:bg-orange-900/15 dark:text-orange-300 dark:hover:bg-orange-900/25'
                         : 'border-primary/20 bg-primary/5 text-primary hover:bg-primary/10'
               }`}
+              // `title` does nothing on touch, so the pill needs a real
+              // accessible name — and it has to spell the mode out, since the
+              // visible text is abbreviated at phone widths (#239).
+              aria-label={t('input.permissionModeAria', { mode: t(permissionModeLabelKeys.full) })}
               title={t('input.clickToChangeMode')}
             >
               <div className="flex items-center gap-1.5">
@@ -405,12 +414,12 @@ export default function ChatComposer({
                             : 'bg-primary'
                   }`}
                 />
+                {/* An abbreviation stays visible at every width: hiding the
+                    label outright left phones with an unlabelled colour dot for
+                    a control that decides whether the agent asks first (#239). */}
+                <span className="whitespace-nowrap sm:hidden">{t(permissionModeLabelKeys.short)}</span>
                 <span className="hidden whitespace-nowrap sm:inline">
-                  {permissionMode === 'default' && t('codex.modes.default')}
-                  {permissionMode === 'acceptEdits' && t('codex.modes.acceptEdits')}
-                  {permissionMode === 'auto' && t('codex.modes.auto')}
-                  {permissionMode === 'bypassPermissions' && t('codex.modes.bypassPermissions')}
-                  {permissionMode === 'plan' && t('codex.modes.plan')}
+                  {t(permissionModeLabelKeys.full)}
                 </span>
               </div>
             </button>
@@ -427,6 +436,7 @@ export default function ChatComposer({
 
             <PromptInputButton
               tooltip={{ content: t('input.showAllCommands') }}
+              aria-label={t('input.showAllCommands')}
               onClick={onToggleCommandMenu}
             >
               <MessageSquareIcon />
@@ -435,6 +445,7 @@ export default function ChatComposer({
             {hasInput && (
               <PromptInputButton
                 tooltip={{ content: t('input.clearInput', { defaultValue: 'Clear input' }) }}
+                aria-label={t('input.clearInput', { defaultValue: 'Clear input' })}
                 onClick={onClearInput}
                 className="hidden sm:flex"
               >
