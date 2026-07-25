@@ -117,6 +117,44 @@ describe('useSettingsController — auto-save gating (#232)', () => {
     expect(notificationWrites()).toHaveLength(0);
   });
 
+  /*
+   * #273: the sidebar's sort order and CLI-origin filter no longer poll
+   * `claude-settings`, so this writer has to announce its write — and it has to
+   * do so before the `await` below it, or a failed notification-preferences PUT
+   * would leave the sidebar on the pre-save settings.
+   */
+  it('announces the localStorage write so same-tab readers refresh', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    authenticatedFetch.mockImplementation((url: string) => {
+      if (String(url).includes('/api/settings/notification-preferences')) {
+        return Promise.resolve({ ok: false, json: async () => ({}) } as unknown as Response);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ success: true, data: { authenticated: false } }),
+      } as unknown as Response);
+    });
+
+    const settingsChanged = vi.fn();
+    window.addEventListener('claudeSettingsChanged', settingsChanged);
+
+    render(<Harness isOpen />);
+    await waitFor(() => expect(authenticatedFetch).toHaveBeenCalled());
+
+    act(() => {
+      controller.setProjectSortOrder('name');
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(window.localStorage.getItem('claude-settings')).toContain('"projectSortOrder":"name"');
+    expect(settingsChanged).toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('error'));
+
+    window.removeEventListener('claudeSettingsChanged', settingsChanged);
+  });
+
   it('treats a reopened dialog as clean again', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { rerender } = render(<Harness isOpen />);

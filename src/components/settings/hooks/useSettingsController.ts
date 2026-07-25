@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useTheme } from '../../../contexts/ThemeContext';
 import { authenticatedFetch } from '../../../utils/api';
+import { CLAUDE_SETTINGS_KEY, notifyClaudeSettingsChanged } from '../../../utils/claudeSettings';
 import { setNotificationSoundEnabled } from '../../../utils/notificationSound';
 import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuthStatus';
 import { normalizeMainTab } from '../utils/settingsTabs';
@@ -156,7 +157,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
   const loadSettings = useCallback(async () => {
     try {
       const savedClaudeSettings = parseJson<ClaudeSettingsStorage>(
-        localStorage.getItem('claude-settings'),
+        localStorage.getItem(CLAUDE_SETTINGS_KEY),
         {},
       );
       setClaudePermissions({
@@ -235,7 +236,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
 
     try {
       const now = new Date().toISOString();
-      localStorage.setItem('claude-settings', JSON.stringify({
+      localStorage.setItem(CLAUDE_SETTINGS_KEY, JSON.stringify({
         allowedTools: claudePermissions.allowedTools,
         disallowedTools: claudePermissions.disallowedTools,
         skipPermissions: claudePermissions.skipPermissions,
@@ -243,6 +244,12 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
         hideCliOriginChats,
         lastUpdated: now,
       }));
+
+      // The sidebar's sort order and CLI-origin filter read this blob live and
+      // no longer poll it (#273), so the write has to announce itself before
+      // anything can `await` — otherwise a failing request below would leave
+      // the sidebar showing the pre-save settings.
+      notifyClaudeSettingsChanged();
 
       localStorage.setItem('codex-settings', JSON.stringify({
         permissionMode: codexPermissionMode,

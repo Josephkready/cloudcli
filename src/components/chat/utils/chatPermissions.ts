@@ -1,4 +1,5 @@
 import { safeJsonParse } from '../../../lib/utils.js';
+import { notifyClaudeSettingsChanged } from '../../../utils/claudeSettings';
 import type { ChatMessage, ClaudePermissionSuggestion, PermissionGrantResult } from '../types/types.js';
 import { CLAUDE_SETTINGS_KEY, getClaudeSettings, safeLocalStorage } from './chatStorage';
 
@@ -60,5 +61,9 @@ export function grantClaudeToolPermission(entry: string | null): PermissionGrant
   };
 
   safeLocalStorage.setItem(CLAUDE_SETTINGS_KEY, JSON.stringify(updatedSettings));
+  // Third writer of the shared blob (with the settings dialog and the sidebar's
+  // "Show CLI chats"). It only touches the tool lists, but it rewrites the whole
+  // object, so same-tab readers of the sibling keys still have to be told.
+  notifyClaudeSettingsChanged();
   return { success: true, alreadyAllowed, updatedSettings };
 }

@@ -1,6 +1,9 @@
+import { CLAUDE_SETTINGS_KEY } from '../../../utils/claudeSettings';
 import type { ClaudeSettings } from '../types/types';
 
-export const CLAUDE_SETTINGS_KEY = 'claude-settings';
+// Re-exported so chat-side importers keep their existing import path; the key
+// itself lives next to the change-notification helpers every writer must call.
+export { CLAUDE_SETTINGS_KEY };
 
 export const safeLocalStorage = {
   setItem: (key: string, value: string) => {

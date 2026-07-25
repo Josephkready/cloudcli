@@ -13,35 +13,9 @@ import { useDeviceSettings } from '../../hooks/useDeviceSettings';
 import { useSessionProtection } from '../../hooks/useSessionProtection';
 import { useProjectsState } from '../../hooks/useProjectsState';
 import { useQueuedMessageAutoSend } from '../../hooks/useQueuedMessageAutoSend';
+import { useRunningSessionsPoll } from '../../hooks/useRunningSessionsPoll';
 import { useArchiveSession } from '../../hooks/useArchiveSession';
 import { api } from '../../utils/api';
-
-type RunningSessionApiItem = {
-  sessionId?: unknown;
-  startedAt?: unknown;
-  statusText?: unknown;
-  canInterrupt?: unknown;
-  blocked?: unknown;
-};
-
-type RunningSessionsApiPayload = {
-  data?: {
-    sessions?: RunningSessionApiItem[];
-  };
-};
-
-const parseStartedAt = (value: unknown): number | undefined => {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-    return value;
-  }
-
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-};
 
 export default function AppContent() {
   return (
@@ -56,7 +30,7 @@ function AppContentInner() {
   const { sessionId } = useParams<{ sessionId?: string }>();
   const { t } = useTranslation('common');
   const { isMobile } = useDeviceSettings({ trackPWA: false });
-  const { ws, sendMessage, subscribe } = useWebSocket();
+  const { ws, sendMessage, subscribe, isConnected } = useWebSocket();
 
   // Shell and the code editor moved out of the entry chunk (#267); pull them
   // back in once the page is idle so the first click on either is still instant.
@@ -113,49 +87,13 @@ function AppContentInner() {
     markSessionProcessing,
   });
 
-  const refreshRunningSessions = useCallback(async () => {
-    try {
-      const response = await api.runningSessions();
-      if (!response.ok) {
-        return;
-      }
-
-      const payload = (await response.json()) as RunningSessionsApiPayload;
-      const sessions = Array.isArray(payload.data?.sessions) ? payload.data.sessions : [];
-
-      syncProcessingSessions(
-        sessions
-          .map((session) => {
-            if (typeof session.sessionId !== 'string' || !session.sessionId) {
-              return null;
-            }
-
-            return {
-              sessionId: session.sessionId,
-              startedAt: parseStartedAt(session.startedAt),
-              statusText: typeof session.statusText === 'string' ? session.statusText : undefined,
-              canInterrupt: typeof session.canInterrupt === 'boolean' ? session.canInterrupt : undefined,
-              blocked: typeof session.blocked === 'boolean' ? session.blocked : undefined,
-            };
-          })
-          .filter((session): session is NonNullable<typeof session> => Boolean(session)),
-      );
-    } catch (error) {
-      console.error('[AppContent] Failed to sync running sessions:', error);
-    }
-  }, [syncProcessingSessions]);
-
-  useEffect(() => {
-    void refreshRunningSessions();
-  }, [refreshRunningSessions]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      void refreshRunningSessions();
-    }, 5000);
-
-    return () => window.clearInterval(interval);
-  }, [refreshRunningSessions]);
+  // Global "which sessions are running" state. The hook explains why a poll is
+  // still needed alongside the websocket, and gates it on tab visibility (#273).
+  useRunningSessionsPoll({
+    syncProcessingSessions,
+    hasRunningSessions: processingSessions.size > 0,
+    isConnected,
+  });
 
   // Rename from the chat header — persists the new summary then refreshes so the
   // header and the sidebar rows both reflect it. Mirrors the sidebar rename path.

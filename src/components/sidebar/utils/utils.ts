@@ -1,5 +1,6 @@
 import type { TFunction } from 'i18next';
 
+import { CLAUDE_SETTINGS_KEY, notifyClaudeSettingsChanged } from '../../../utils/claudeSettings';
 import { getSessionDisplayName } from '../../../utils/sessionDisplayName';
 import type { LLMProvider, Project, ProjectSession } from '../../../types/app';
 import type { ProjectSortOrder, SettingsProject, SessionViewModel, SessionWithProvider } from '../types/types';
@@ -16,7 +17,7 @@ const normalizeProjectSortOrder = (value: unknown): ProjectSortOrder => {
 
 export const readProjectSortOrder = (): ProjectSortOrder => {
   try {
-    const rawSettings = localStorage.getItem('claude-settings');
+    const rawSettings = localStorage.getItem(CLAUDE_SETTINGS_KEY);
     if (!rawSettings) {
       return DEFAULT_PROJECT_SORT_ORDER;
     }
@@ -43,7 +44,7 @@ export const DEFAULT_HIDE_CLI_ORIGIN_CHATS = true;
  */
 export const readHideCliOriginChats = (): boolean => {
   try {
-    const rawSettings = localStorage.getItem('claude-settings');
+    const rawSettings = localStorage.getItem(CLAUDE_SETTINGS_KEY);
     if (!rawSettings) {
       return DEFAULT_HIDE_CLI_ORIGIN_CHATS;
     }
@@ -65,14 +66,13 @@ export const readHideCliOriginChats = (): boolean => {
  * Powers the sidebar's "N CLI chats hidden · Show" affordance (#216): rather
  * than introduce a second preference, "Show" merges `hideCliOriginChats` into
  * the existing blob (preserving sibling keys like permissions and sort order),
- * then fires a synthetic `storage` event so same-tab readers
- * (`useHideCliOriginChats`, which the browser never storage-notifies about its
- * own writes) refresh immediately instead of waiting for their focus poll.
+ * then notifies same-tab readers (`useHideCliOriginChats`, which the browser
+ * never storage-notifies about its own writes) so they refresh immediately.
  */
 export const writeHideCliOriginChats = (value: boolean): void => {
   try {
     let settings: Record<string, unknown> = {};
-    const rawSettings = localStorage.getItem('claude-settings');
+    const rawSettings = localStorage.getItem(CLAUDE_SETTINGS_KEY);
     if (rawSettings) {
       try {
         const parsed = JSON.parse(rawSettings) as unknown;
@@ -86,13 +86,14 @@ export const writeHideCliOriginChats = (value: boolean): void => {
 
     settings.hideCliOriginChats = value;
     settings.lastUpdated = new Date().toISOString();
-    localStorage.setItem('claude-settings', JSON.stringify(settings));
-
-    // Notify same-tab readers; other tabs get the native storage event.
-    window.dispatchEvent(new StorageEvent('storage', { key: 'claude-settings' }));
+    localStorage.setItem(CLAUDE_SETTINGS_KEY, JSON.stringify(settings));
   } catch {
-    // Storage/DOM may be unavailable (private mode, SSR); keep the UI usable.
+    // Storage may be unavailable (private mode, SSR); keep the UI usable.
+    return;
   }
+
+  // Notify same-tab readers; other tabs get the native storage event.
+  notifyClaudeSettingsChanged();
 };
 
 /**

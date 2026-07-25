@@ -71,8 +71,10 @@ test('falls back to hiding on corrupt settings JSON', () => {
 });
 
 test('writeHideCliOriginChats round-trips through readHideCliOriginChats', () => {
-  // node:test has no `window`, so the synthetic storage dispatch throws and is
-  // swallowed — the localStorage write still lands, which is what we assert.
+  // node:test has no `window`, so the same-tab change notification no-ops — the
+  // localStorage write still lands, which is what we assert. The notification
+  // itself is covered in `src/utils/claudeSettings.test.ts` and
+  // `src/hooks/useHideCliOriginChats.spec.tsx`.
   writeHideCliOriginChats(false);
   assert.equal(readHideCliOriginChats(), false);
 
