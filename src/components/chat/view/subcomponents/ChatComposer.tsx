@@ -260,7 +260,7 @@ export default function ChatComposer({
 
       {!hasQuestionPanel && <div className="relative mx-auto max-w-[54.25rem]">
         {showFileDropdown && filteredFiles.length > 0 && (
-          <div className="absolute bottom-full left-0 right-0 z-50 mb-2 max-h-48 overflow-y-auto rounded-xl border border-border/50 bg-card/95 shadow-lg backdrop-blur-md">
+          <div className="absolute bottom-full left-0 right-0 z-50 mb-2 max-h-48 overflow-y-auto rounded-xl border border-border/50 bg-card/95 shadow-lg">
             {filteredFiles.map((file, index) => (
               <div
                 key={file.path}
@@ -387,7 +387,7 @@ export default function ChatComposer({
               // coarse pointers. The painted pill stays 32px tall so the control
               // row's alignment and density are untouched, but the tap target
               // clears the 44px guidance (#275).
-              className={`touch:hit-44 inline-flex h-8 items-center rounded-lg border px-2 text-xs font-medium transition-all duration-200 sm:px-2.5 ${
+              className={`touch:hit-44 inline-flex h-8 items-center rounded-lg border px-2 text-xs font-medium transition-colors duration-fast sm:px-2.5 ${
                 permissionMode === 'default'
                   ? 'border-border/60 bg-muted/50 text-muted-foreground hover:bg-muted'
                   : permissionMode === 'acceptEdits'
@@ -461,7 +461,7 @@ export default function ChatComposer({
 
           <div className="flex items-center gap-2">
             <div
-              className={`hidden text-xs text-muted-foreground/50 transition-opacity duration-200 lg:block ${
+              className={`hidden text-xs text-muted-foreground/50 transition-opacity duration-fast lg:block ${
                 input.trim() && !canQueueDraft ? 'opacity-0' : 'opacity-100'
               }`}
             >

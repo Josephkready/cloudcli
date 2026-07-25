@@ -53,7 +53,7 @@ function OverlayToggle({
       onClick={onClick}
       aria-pressed={isActive}
       className={cn(
-        'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-normal transition-all',
+        'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-normal transition-[color,background-color,box-shadow] duration-fast',
         isActive
           ? 'bg-background text-foreground shadow-sm ring-1 ring-border'
           : 'bg-muted/50 text-muted-foreground hover:text-foreground',
@@ -189,7 +189,7 @@ export default function SidebarHeader({
                 placeholder={searchPlaceholder}
                 value={searchFilter}
                 onChange={(event) => handleSearchFilterChange(event.target.value)}
-                className="nav-search-input h-9 rounded-xl border-0 pl-9 pr-14 text-sm transition-all duration-200 placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                className="nav-search-input h-9 rounded-xl border-0 pl-9 pr-14 text-sm transition-[background-color,box-shadow] duration-fast placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0"
               />
               {searchFilter ? (
                 <button
@@ -243,14 +243,14 @@ export default function SidebarHeader({
 
           <div className="flex flex-shrink-0 gap-1.5">
             <button
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted/50 transition-all active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted/50 transition-transform duration-instant active:scale-95"
               onClick={onRefresh}
               disabled={isRefreshing}
             >
               <RefreshCw className={`h-4 w-4 text-muted-foreground ${isRefreshing ? 'animate-spin' : ''}`} />
             </button>
             <button
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/90 text-primary-foreground transition-all active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/90 text-primary-foreground transition-transform duration-instant active:scale-95"
               onClick={onCreateProject}
             >
               <FolderPlus className="h-4 w-4" />
@@ -268,7 +268,7 @@ export default function SidebarHeader({
                 placeholder={searchPlaceholder}
                 value={searchFilter}
                 onChange={(event) => handleSearchFilterChange(event.target.value)}
-                className="nav-search-input h-10 rounded-xl border-0 pl-10 pr-9 text-sm transition-all duration-200 placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                className="nav-search-input h-10 rounded-xl border-0 pl-10 pr-9 text-sm transition-[background-color,box-shadow] duration-fast placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0"
               />
               {searchFilter && (
                 <button

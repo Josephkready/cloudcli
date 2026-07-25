@@ -152,7 +152,7 @@ function ChatMessageImage({ image, projectId }: { image: ChatImage; projectId?: 
         <img
           src={src}
           alt={alt}
-          className="h-28 w-28 cursor-zoom-in object-cover transition-transform duration-200 hover:scale-105"
+          className="h-28 w-28 cursor-zoom-in object-cover transition-transform duration-fast hover:scale-105"
         />
       </button>
       {expanded && <ImageLightbox src={src} alt={alt} onClose={() => setExpanded(false)} />}

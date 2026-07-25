@@ -22,7 +22,7 @@ export default function OnboardingStepProgress({ currentStep }: OnboardingStepPr
             <div key={step.title} className="contents">
               <div className="flex flex-1 flex-col items-center">
                 <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition-all duration-200 ${
+                  className={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition-[color,background-color,border-color,box-shadow] duration-base ${
                     isCompleted
                       ? 'border-emerald-500 bg-emerald-500 text-white shadow-lg shadow-emerald-500/25'
                       : isActive
@@ -44,7 +44,7 @@ export default function OnboardingStepProgress({ currentStep }: OnboardingStepPr
               </div>
 
               {index < onboardingSteps.length - 1 && (
-                <div className={`mx-2 h-0.5 flex-1 transition-colors duration-200 ${isCompleted ? 'bg-emerald-500' : 'bg-border'}`} />
+                <div className={`mx-2 h-0.5 flex-1 transition-colors duration-base ${isCompleted ? 'bg-emerald-500' : 'bg-border'}`} />
               )}
             </div>
           );

@@ -91,7 +91,7 @@ export default function LoginForm() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className={`flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 font-medium text-primary-foreground shadow-lg shadow-primary/25 transition-all duration-200 enabled:hover:brightness-110 enabled:hover:shadow-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 focus:ring-offset-card active:scale-[0.99] ${disabledControlClasses}`}
+          className={`flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 font-medium text-primary-foreground shadow-lg shadow-primary/25 transition-[transform,box-shadow] duration-fast enabled:hover:brightness-110 enabled:hover:shadow-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 focus:ring-offset-card active:scale-[0.99] ${disabledControlClasses}`}
         >
           {isSubmitting ? (
             <>

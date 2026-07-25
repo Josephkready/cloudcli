@@ -188,7 +188,7 @@ export default function SidebarSessionItem({
       <div className="md:hidden">
         <div
           className={cn(
-            'p-2 mx-3 my-0.5 rounded-md bg-card border active:scale-[0.98] transition-all duration-150 relative',
+            'p-2 mx-3 my-0.5 rounded-md bg-card border active:scale-[0.98] transition-[transform,background-color,border-color] duration-fast relative',
             isSelected ? 'bg-primary/5 border-primary/20' : '',
             !isSelected && isProcessing
               ? 'border-border/60 bg-muted/20'
@@ -257,7 +257,7 @@ export default function SidebarSessionItem({
           href={`/session/${session.id}`}
           className={cn(
             buttonVariants({ variant: 'ghost' }),
-            'h-auto w-full justify-start rounded-md border bg-card p-2 text-left font-normal transition-all duration-150',
+            'h-auto w-full justify-start rounded-md border bg-card p-2 text-left font-normal transition-colors duration-fast',
             isSelected ? 'border-primary/20 bg-primary/5' : 'border-border/30',
             !isSelected && isProcessing
               ? 'border-border/60 bg-muted/20 hover:bg-muted/25'
@@ -291,7 +291,7 @@ export default function SidebarSessionItem({
                 {isProcessing ? (
                   <span
                     className={cn(
-                      'ml-auto flex-shrink-0 transition-opacity duration-200',
+                      'ml-auto flex-shrink-0 transition-opacity duration-fast',
                       isEditing ? 'opacity-0' : 'group-hover:opacity-0',
                     )}
                   >
@@ -304,7 +304,7 @@ export default function SidebarSessionItem({
                 ) : compactSessionAge && (
                   <span
                     className={cn(
-                      'ml-auto flex-shrink-0 text-[11px] text-muted-foreground transition-opacity duration-200',
+                      'ml-auto flex-shrink-0 text-[11px] text-muted-foreground transition-opacity duration-fast',
                       isEditing ? 'opacity-0' : 'group-hover:opacity-0',
                     )}
                   >
@@ -323,7 +323,7 @@ export default function SidebarSessionItem({
         <div
           ref={editingContainerRef}
           className={cn(
-            'absolute right-2 top-1/2 flex -translate-y-1/2 transform items-center gap-1 transition-all duration-200',
+            'absolute right-2 top-1/2 flex -translate-y-1/2 transform items-center gap-1 transition-opacity duration-fast',
             // A touch device never hovers, so without `touch:` the cluster stays
             // invisible yet clickable, on top of the timestamp (#244).
             isEditing ? 'opacity-100' : 'touch:opacity-100 opacity-0 group-hover:opacity-100',

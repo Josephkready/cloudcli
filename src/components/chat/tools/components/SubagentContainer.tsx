@@ -103,7 +103,7 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
           <Collapsible className="mt-2">
             <CollapsibleTrigger className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
               <svg
-                className="h-2.5 w-2.5 flex-shrink-0 transition-transform duration-150 data-[state=open]:rotate-90"
+                className="h-2.5 w-2.5 flex-shrink-0 transition-transform duration-base data-[state=open]:rotate-90"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"

@@ -17,7 +17,7 @@ export default function FileSelectionControls({
 }: FileSelectionControlsProps) {
   return (
     <div
-      className={`flex items-center justify-between border-b border-border/60 transition-all duration-300 ease-in-out ${
+      className={`flex items-center justify-between border-b border-border/60 transition-[max-height,opacity,transform] duration-slow ease-in-out ${
         isMobile ? 'px-3 py-1.5' : 'px-4 py-2'
       } ${isHidden ? 'max-h-0 -translate-y-2 overflow-hidden opacity-0' : 'max-h-16 translate-y-0 opacity-100'}`}
     >

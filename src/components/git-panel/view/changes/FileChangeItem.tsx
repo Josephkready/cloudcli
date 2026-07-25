@@ -55,7 +55,7 @@ export default function FileChangeItem({
             className={`cursor-pointer rounded p-0.5 hover:bg-accent ${isMobile ? 'mr-1' : 'mr-2'}`}
             title={isExpanded ? 'Collapse diff' : 'Expand diff'}
           >
-            <ChevronRight className={`h-3 w-3 transition-transform duration-200 ease-in-out ${isExpanded ? 'rotate-90' : 'rotate-0'}`} />
+            <ChevronRight className={`h-3 w-3 transition-transform duration-base ease-in-out ${isExpanded ? 'rotate-90' : 'rotate-0'}`} />
           </button>
 
           <span
@@ -95,7 +95,7 @@ export default function FileChangeItem({
       </div>
 
       <div
-        className={`duration-400 overflow-hidden bg-muted/50 transition-all ease-in-out ${isExpanded && diff ? 'max-h-[600px] translate-y-0 opacity-100' : 'max-h-0 -translate-y-1 opacity-0'
+        className={`overflow-hidden bg-muted/50 transition-[max-height,opacity,transform] duration-slow ease-in-out ${isExpanded && diff ? 'max-h-[600px] translate-y-0 opacity-100' : 'max-h-0 -translate-y-1 opacity-0'
           }`}
       >
         <div className="flex items-center justify-between border-b border-border p-2">

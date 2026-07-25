@@ -4,6 +4,10 @@ export default {
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
+    // Tests quote class names in order to assert on them — motionScale.test.ts
+    // has to name the utilities it forbids. Scanning them would emit the very
+    // CSS the guard exists to keep out of the bundle.
+    "!./src/**/*.{test,spec}.{ts,tsx}",
   ],
   theme: {
     container: {
@@ -61,6 +65,21 @@ export default {
       spacing: {
         'safe-area-inset-bottom': 'env(safe-area-inset-bottom)',
         'mobile-nav': 'var(--mobile-nav-total)',
+      },
+      // The semantic motion scale (#271). Intent lives in the class name, the
+      // value lives here — tune timing in one place instead of across ~90 call
+      // sites. Values must stay literal: Tailwind scans raw source text, so a
+      // computed `duration-${n}` would never be generated.
+      //
+      // `DEFAULT` is what a bare `transition-*` utility bakes in (Tailwind's
+      // own default is 150ms), so the ~140 `transition-colors` sites that never
+      // named a duration land on `fast` too.
+      transitionDuration: {
+        DEFAULT: '120ms',
+        instant: '75ms', // press feedback: active:scale, tap highlight
+        fast: '120ms',   // hover, focus ring, row highlight
+        base: '160ms',   // small transforms, disclosure, toggles, progress
+        slow: '220ms',   // overlays, drawers, sheets, panel collapse
       },
       keyframes: {
         shimmer: {

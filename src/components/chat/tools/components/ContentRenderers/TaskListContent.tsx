@@ -93,7 +93,7 @@ export const TaskListContent: React.FC<TaskListContentProps> = ({ content }) => 
         </span>
         <div className="h-1 flex-1 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
           <div
-            className="h-full rounded-full bg-green-500 transition-all dark:bg-green-400"
+            className="h-full rounded-full bg-green-500 transition-[width] duration-base dark:bg-green-400"
             style={{ width: `${total > 0 ? (completed / total) * 100 : 0}%` }}
           />
         </div>

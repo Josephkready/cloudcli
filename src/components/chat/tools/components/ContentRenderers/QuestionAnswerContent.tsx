@@ -114,7 +114,7 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
               </div>
 
               <svg
-                className={`mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-gray-400 transition-transform duration-200 dark:text-gray-500 ${
+                className={`mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-gray-400 transition-transform duration-base dark:text-gray-500 ${
                   isExpanded ? 'rotate-180' : ''
                 }`}
                 fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}

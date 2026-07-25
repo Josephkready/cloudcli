@@ -242,7 +242,7 @@ export default function SidebarContent({
 
   return (
     <div
-      className="flex h-full flex-col bg-background/80 backdrop-blur-sm md:w-72 md:select-none"
+      className="flex h-full flex-col bg-background/80 md:w-72 md:select-none"
       style={{}}
     >
       <SidebarHeader
@@ -317,7 +317,7 @@ export default function SidebarContent({
               {isSearching && searchProgress && (
                 <div className="mx-1 h-0.5 overflow-hidden rounded-full bg-muted">
                   <div
-                    className="h-full rounded-full bg-primary/60 transition-all duration-300"
+                    className="h-full rounded-full bg-primary/60 transition-[width] duration-base"
                     style={{ width: `${Math.round((searchProgress.scannedProjects / searchProgress.totalProjects) * 100)}%` }}
                   />
                 </div>
@@ -599,7 +599,7 @@ export default function SidebarContent({
             >
               <ChevronRight
                 className={cn(
-                  'h-3 w-3 flex-shrink-0 text-muted-foreground/70 transition-transform duration-200',
+                  'h-3 w-3 flex-shrink-0 text-muted-foreground/70 transition-transform duration-base',
                   spacesExpanded && 'rotate-90',
                 )}
               />
