@@ -584,6 +584,9 @@ test('precompressDirectory skips files a shadowRoot serves first', async () => {
         const summary = await precompressDirectory(distDir, { shadowRoot: publicDir });
 
         assert.equal(summary.compressed, 1);
+        // The skip is counted, so a misconfigured shadow root shows up as a
+        // number rather than as a quietly smaller build.
+        assert.equal(summary.shadowed, 2);
         await stat(path.join(distDir, 'assets', 'app.js.br'));
         await assert.rejects(() => stat(path.join(distDir, 'sw.js.br')));
         await assert.rejects(() => stat(path.join(distDir, 'fonts', 'licence.txt.br')));
@@ -711,6 +714,17 @@ test('the precompress CLI exits non-zero when its target is missing or not a dir
         const empty = path.join(tempDir, 'empty');
         await mkdir(empty, { recursive: true });
         assert.equal(await runPrecompressCli(empty), 0);
+
+        // A shadow root equal to the target would mark every file as shadowed
+        // by itself: nothing compresses and the build still goes green. That is
+        // the same silent success the missing-target guard exists to prevent.
+        assert.equal(await runPrecompressCli(dist, dist), 1);
+        assert.match(errors.at(-1) ?? '', /shadow root must differ/);
+
+        // A different shadow root is still accepted, so the guard is specific.
+        const shadow = path.join(tempDir, 'public');
+        await mkdir(shadow, { recursive: true });
+        assert.equal(await runPrecompressCli(dist, shadow), 0);
     } finally {
         console.error = realError;
         await rm(tempDir, { recursive: true, force: true });

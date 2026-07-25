@@ -79,6 +79,12 @@ export interface PrecompressSummary {
     scanned: number;
     /** Files that got at least one variant written. */
     compressed: number;
+    /**
+     * Files skipped because `shadowRoot` holds the same relative path. Reported
+     * so a misconfigured shadow root shows up as a number rather than as a
+     * quietly smaller build.
+     */
+    shadowed: number;
     /** Total size of the compressed originals. */
     originalBytes: number;
     /** Total size of the emitted `.br` variants. */
@@ -170,6 +176,7 @@ export async function precompressDirectory(
     const summary: PrecompressSummary = {
         scanned: files.length,
         compressed: 0,
+        shadowed: 0,
         originalBytes: 0,
         brotliBytes: 0,
         gzipBytes: 0,
@@ -185,6 +192,7 @@ export async function precompressDirectory(
             continue;
         }
         if (options.shadowRoot && await isShadowed(dir, file, options.shadowRoot)) {
+            summary.shadowed += 1;
             continue;
         }
         candidates.push(file);
@@ -268,6 +276,16 @@ export async function runPrecompressCli(
         return 1;
     }
 
+    // A shadow root equal to the target would report every file as shadowed by
+    // itself, so nothing would be compressed and the build would still go green
+    // — the same silent-success failure the target check above exists to stop.
+    // `dante-build.sh`'s `.br` gate would catch it there, but a bare
+    // `npm run build:precompress` has no such backstop.
+    if (shadowRoot === target) {
+        console.error(`precompress: shadow root must differ from the target directory: ${target}`);
+        return 1;
+    }
+
     const summary = await precompressDirectory(target, { shadowRoot });
     if (summary.compressed === 0) {
         console.log(`precompress: nothing to compress in ${target}`);
@@ -276,7 +294,8 @@ export async function runPrecompressCli(
     console.log(
         `precompress: ${summary.compressed} files, ${formatKb(summary.originalBytes)} -> `
         + `${formatKb(summary.brotliBytes)} br / ${formatKb(summary.gzipBytes)} gzip `
-        + `in ${((Date.now() - started) / 1000).toFixed(1)}s`,
+        + `in ${((Date.now() - started) / 1000).toFixed(1)}s`
+        + (summary.shadowed > 0 ? ` (${summary.shadowed} shadowed by ${shadowRoot})` : ''),
     );
     return 0;
 }

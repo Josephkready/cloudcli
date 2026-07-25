@@ -60,15 +60,26 @@ type UseRunningSessionsPollArgs = {
  *
  * Why this poll exists at all (re-checked against the websocket in #273): the
  * socket does carry run lifecycle frames — `status` and `complete` — but they
- * are written through a `WebSocketWriter` bound to the socket that started or
- * explicitly subscribed to that session, not fanned out to every client. The
- * only frame broadcast to all `connectedClients` is `session_upserted`, which
- * says a transcript changed on disk and carries no running/blocked state. So a
- * run started on another device, in another tab, or before this tab loaded is
- * invisible over the socket until this client subscribes to that session — and
- * it can only subscribe to sessions it already believes are running (the
+ * go through a `ChatSessionWriter`, whose fan-out set holds only the sockets
+ * that started or explicitly subscribed to that run (issue #204). They never
+ * reach every client.
+ *
+ * Two frame kinds *are* broadcast to all `connectedClients`, and neither
+ * carries running/blocked state:
+ *   - `session_upserted` (`sessions-watcher` and `chat-run-registry`) — a
+ *     transcript row changed on disk;
+ *   - `loading_progress` (`projects-with-sessions-fetch`) — project-scan
+ *     progress.
+ *
+ * So a run started on another device, in another tab, or before this tab loaded
+ * is invisible over the socket until this client subscribes to that session —
+ * and it can only subscribe to sessions it already believes are running (the
  * reconnect batch in `ChatInterface`, issue #204, reads exactly this output).
  * It is a genuine global discovery mechanism, not a pre-websocket leftover.
+ *
+ * That reasoning is load-bearing: it is the argument for keeping a poll at all.
+ * If you change the broadcast set, re-check it here before concluding the poll
+ * is redundant.
  *
  * What it no longer does is run unconditionally: it is gated on tab visibility
  * (a hidden tab issues no requests at all and catches up with a single fetch
