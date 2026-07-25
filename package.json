@@ -40,6 +40,8 @@
     "coverage:floor": "node scripts/check-coverage-floor.mjs",
     "coverage:floor:selftest": "node scripts/check-coverage-floor.mjs --self-test",
     "coverage:check": "npm run test:coverage && npm run coverage:floor",
+    "check:bundle": "node scripts/check-entry-chunk.mjs",
+    "check:bundle:selftest": "node scripts/check-entry-chunk.mjs --self-test",
     "lint": "eslint src/ server/ e2e/ playwright.config.ts",
     "lint:fix": "eslint src/ server/ e2e/ playwright.config.ts --fix",
     "start": "npm run build && npm run server",

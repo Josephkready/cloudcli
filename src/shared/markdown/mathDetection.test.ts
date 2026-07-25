@@ -16,6 +16,9 @@ describe('containsMath — real LaTeX', () => {
     ['bare single-letter symbol', 'For each $n$ in the sequence.'],
     ['math after a rejected currency candidate', 'It costs $5 and solves $x^2$ nicely.'],
     ['braces', 'Define $\\{1, 2, 3\\}$ as the set.'],
+    // The display pair is malformed (its body holds a stray `$`), but the inline
+    // pair left inside it is real, so the scanner must still find it.
+    ['inline math left inside a malformed display pair', '$$a$x^2$$'],
   ];
 
   for (const [name, markdown] of positives) {
@@ -38,6 +41,10 @@ describe('containsMath — prose that merely contains dollars', () => {
     ['trailing dollar', 'Everything after the $ is ignored.'],
     ['escaped dollars', 'Literal \\$x\\$ should stay literal.'],
     ['prices across lines', 'First it was $5\nthen it became $10.'],
+    // A `$$…$$` whose body carries a stray `$` is malformed rather than display
+    // math, and the `$$` delimiters it leaves behind must not then be re-read as
+    // inline openers.
+    ['stray display delimiters around price prose', '$$5 and $10 total$$'],
   ];
 
   for (const [name, markdown] of negatives) {

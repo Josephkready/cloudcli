@@ -23,6 +23,17 @@ npm run typecheck  # tsc --noEmit for both the client and server tsconfigs
 npm test           # server tests, front-end unit tests, then component tests
 ```
 
+CI also runs an **entry-chunk gate** after the suites. It builds the client and
+inspects the emitted bundle, because the three test runners only see runtime
+behaviour — which stays perfectly correct while a single stray static import
+puts all ~290 Prism grammars or KaTeX's stylesheet back on the render-blocking
+critical path (issues #268/#269):
+
+```bash
+npm run build:client && npm run check:bundle
+npm run check:bundle:selftest   # the gate's own marker-matching self-tests
+```
+
 `npm test` is `npm run test:server && npm run test:unit && npm run test:component`.
 To see coverage summaries for all three:
 
@@ -79,8 +90,12 @@ never overlap. Pick by what the test needs:
   dependency, fastest feedback. This is still the default for pure logic.
 - **A DOM, events, hooks, or effects** → `*.spec.ts(x)` with vitest. Also the
   only option for anything that transitively imports
-  `src/components/chat/view/subcomponents/Markdown.tsx`: it pulls in
-  `react-syntax-highlighter/dist/esm/styles/prism`, whose CJS/ESM interop only
+  `src/shared/markdown/prismLanguages.ts` — which includes both markdown
+  renderers, `src/components/chat/view/subcomponents/Markdown.tsx` and
+  `src/components/code-editor/view/subcomponents/markdown/MarkdownPreview.tsx`.
+  That module imports `react-syntax-highlighter`'s ESM build
+  (`dist/esm/prism-light`, `dist/esm/languages/prism/*`, and the
+  `dist/esm/styles/prism/one-{dark,light}` themes), whose CJS/ESM interop only
   Vite's transform resolves — under `tsx --test` the module fails to load at
   all. Watch mode: `npm run test:component:watch`.
 
