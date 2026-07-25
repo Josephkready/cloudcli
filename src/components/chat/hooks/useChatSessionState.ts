@@ -9,6 +9,7 @@ import type { ChatMessage } from '../types/types';
 import { createCachedDiffCalculator, type DiffCalculator } from '../utils/messageTransforms';
 import { sendSubscribeBatch } from '../utils/subscribeTargets';
 import { stabilizeMessageIdentities } from '../utils/messageIdentity';
+import { reconcileTokenBudget } from '../utils/tokenBudget';
 
 import { normalizedToChatMessages } from './useChatMessages';
 
@@ -597,7 +598,13 @@ export function useChatSessionState({
       if (slot) {
         setHasMoreMessages(slot.hasMore);
         setTotalMessages(slot.total);
-        if (slot.tokenUsage) setTokenBudget(slot.tokenUsage as Record<string, unknown>);
+        // Server-sourced like the fetch above, so it lags indexing the same way
+        // and gets the same reconciliation (#240).
+        if (slot.tokenUsage) {
+          setTokenBudget((current) =>
+            reconcileTokenBudget(current, slot.tokenUsage as Record<string, unknown>),
+          );
+        }
       }
       setIsLoadingSessionMessages(false);
     }).catch(() => {
@@ -749,10 +756,16 @@ export function useChatSessionState({
         const url = `/api/projects/${selectedProject.projectId}/sessions/${selectedSession.id}/token-usage`;
         const response = await authenticatedFetch(url);
         if (response.ok) {
-          setTokenBudget(await response.json());
-        } else {
-          setTokenBudget(null);
+          const serverBudget = (await response.json()) as Record<string, unknown> | null;
+          // A brand-new session is created *by* the run, so this fetch always
+          // lands after the run's live `token_budget` frame — and returns zeros
+          // because the transcript has not been indexed yet. Reconciling instead
+          // of assigning stops the stale value winning (#240).
+          setTokenBudget((current) => reconcileTokenBudget(current, serverBudget));
         }
+        // A failed lookup says nothing about usage, so it must not blank a
+        // budget the live run already reported. The session-change reset above
+        // is what clears a previous session's value.
       } catch (error) {
         console.error('Failed to fetch initial token usage:', error);
       }
