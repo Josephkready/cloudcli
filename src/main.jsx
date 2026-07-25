@@ -2,7 +2,9 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import './index.css'
-import 'katex/dist/katex.min.css'
+// KaTeX's stylesheet is deliberately NOT imported here: it is ~18.6 KB of the
+// render-blocking bundle for a feature most sessions never hit. It now ships in
+// the lazily-imported `shared/markdown/mathRuntime` chunk instead (issue #269).
 
 // Initialize i18n
 import './i18n/config.js'

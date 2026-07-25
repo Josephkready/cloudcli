@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import type { Components } from 'react-markdown';
 import ReactMarkdown from 'react-markdown';
-import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
+
+import { useMathPlugins } from '../../../../../shared/markdown/useMathPlugins';
+
 import MarkdownCodeBlock from './MarkdownCodeBlock';
 
 type MarkdownPreviewProps = {
@@ -40,13 +41,16 @@ const markdownPreviewComponents: Components = {
 };
 
 export default function MarkdownPreview({ content }: MarkdownPreviewProps) {
-  const remarkPlugins = useMemo(() => [remarkGfm, remarkMath], []);
-  const rehypePlugins = useMemo(() => [rehypeKatex], []);
+  // Workspace `.md` files (READMEs, design notes) are exactly where hand-written
+  // LaTeX shows up, so the preview keeps math — but on the same lazy path as
+  // chat, which makes keeping it free for the files that have none (issue #269).
+  const { remarkMathPlugins, rehypeMathPlugins } = useMathPlugins(content);
+  const remarkPlugins = useMemo(() => [remarkGfm, ...remarkMathPlugins], [remarkMathPlugins]);
 
   return (
     <ReactMarkdown
       remarkPlugins={remarkPlugins}
-      rehypePlugins={rehypePlugins}
+      rehypePlugins={rehypeMathPlugins}
       components={markdownPreviewComponents}
     >
       {content}
