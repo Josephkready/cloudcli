@@ -57,6 +57,11 @@ import { assetsRoutes } from './modules/assets/index.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
 import { initializeDatabase, projectsDb, sessionsDb } from './modules/database/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
+import {
+    createCompressionMiddleware,
+    createPrecompressedAssets,
+    setStaticAssetHeaders,
+} from './middleware/compression.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM, AUTH_DISABLED } from './constants/config.js';
 import { resolveInstallMode } from './shared/self-update.js';
@@ -150,6 +155,11 @@ const wss = createWebSocketServer(server, {
 app.locals.wss = wss;
 
 app.use(cors({ exposedHeaders: ['X-Refreshed-Token'] }));
+// Compress every response that is worth compressing (#266). Mounted ahead of
+// the routes so dynamic JSON and index.html are covered; hashed bundles under
+// dist/ are served from build-time .br/.gz siblings instead (see the
+// precompressed-assets handler below), which this middleware leaves alone.
+app.use(createCompressionMiddleware());
 app.use(express.json({
     limit: '50mb',
     type: (req) => {
@@ -248,23 +258,19 @@ app.get(['/', '/index.html'], (req, res, next) => {
     }
 });
 
+// Serve the build-time compressed sibling (`<asset>.br` / `<asset>.gz`) when the
+// client accepts it, by rewriting the request before express.static sees it.
+// Must stay directly above the static handler that does the sending.
+const DIST_DIR = path.join(APP_ROOT, 'dist');
+app.use(createPrecompressedAssets({ root: DIST_DIR }));
+
 // Static files served after API routes
 // Add cache control: HTML files should not be cached, but assets can be cached
 // `index: false` disables the built-in directory-index lookup so the handler
 // above is the single source of truth for serving index.html.
-app.use(express.static(path.join(APP_ROOT, 'dist'), {
+app.use(express.static(DIST_DIR, {
     index: false,
-    setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.html')) {
-            // Prevent HTML caching to avoid service worker issues after builds
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            res.setHeader('Pragma', 'no-cache');
-            res.setHeader('Expires', '0');
-        } else if (filePath.match(/\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico)$/)) {
-            // Cache static assets for 1 year (they have hashed names)
-            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-        }
-    }
+    setHeaders: setStaticAssetHeaders,
 }));
 
 // API Routes (protected)
