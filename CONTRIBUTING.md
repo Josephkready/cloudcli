@@ -152,3 +152,31 @@ initial read). Keep it in the `.pure.ts` file, but cover that part in a
 `.pure.spec.ts` vitest/jsdom file rather than `.pure.test.ts` — see
 `useUiPreferences.pure.ts` (`readInitialPreferences`) and its
 `useUiPreferences.pure.spec.ts` for the split.
+
+## Demand-loaded surfaces
+
+Only the sidebar and the chat view are on the boot path. Everything else — the
+shell, code editor, git panel, file tree, settings, onboarding, the project
+wizard and the command palette — is behind `React.lazy` and ships in its own
+chunk (issue #267). Before that split, xterm (~400 KB) and CodeMirror (~690 KB)
+were parsed on every cold load even in a session that only read chat.
+
+When you add or move one of these surfaces:
+
+- Wrap it in `LazySurface` (`src/components/lazy/`), which pairs `Suspense`
+  with the app's error boundary so a chunk that never arrives shows a message
+  instead of blanking the app. Build the lazy component with `lazySurface(...)`
+  rather than `lazy(...)` — it adds a retry, which matters because
+  `React.lazy` memoises a rejected factory forever.
+- Only *render* the lazy component when the surface is actually open. Mounting
+  it is what triggers the import, so an unconditionally rendered lazy component
+  that returns `null` defeats the whole thing.
+- Keep the surface out of the eager import graph. `src/test/entryStaticImports.test.ts`
+  walks the static imports from `src/main.jsx` and fails if xterm, CodeMirror,
+  JSZip or DOMPurify become reachable without a dynamic `import()`, or if one of
+  the named surfaces creeps back in. A type-only import (`import type { … }`) is
+  fine — it is erased before the bundler sees it.
+- If the chunk is big enough that fetching it at click time is felt, add its
+  loader to `WARMABLE_SURFACES` in `src/components/lazy/surfaceLoaders.ts`. It
+  is then imported during an idle callback after the load event, so the click
+  is served from the module registry rather than the network.

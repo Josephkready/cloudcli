@@ -4,7 +4,9 @@ import { useTranslation } from 'react-i18next';
 
 import Sidebar from '../sidebar/view/Sidebar';
 import MainContent from '../main-content/view/MainContent';
-import CommandPalette from '../command-palette/CommandPalette';
+import CommandPaletteHost from '../command-palette/CommandPaletteHost';
+import { WARMABLE_SURFACES } from '../lazy/surfaceLoaders';
+import { useWarmLazySurfaces } from '../lazy/useWarmLazySurfaces';
 import { useWebSocket } from '../../contexts/WebSocketContext';
 import { PaletteOpsProvider, usePaletteOpsRegister } from '../../contexts/PaletteOpsContext';
 import { useDeviceSettings } from '../../hooks/useDeviceSettings';
@@ -55,6 +57,10 @@ function AppContentInner() {
   const { t } = useTranslation('common');
   const { isMobile } = useDeviceSettings({ trackPWA: false });
   const { ws, sendMessage, subscribe } = useWebSocket();
+
+  // Shell and the code editor moved out of the entry chunk (#267); pull them
+  // back in once the page is idle so the first click on either is still instant.
+  useWarmLazySurfaces(WARMABLE_SURFACES);
 
   const {
     processingSessions,
@@ -301,7 +307,7 @@ function AppContentInner() {
         />
       </div>
 
-      <CommandPalette
+      <CommandPaletteHost
         selectedProject={selectedProject}
         onStartNewChat={handleNewSession}
         onOpenSettings={() => openSettings()}

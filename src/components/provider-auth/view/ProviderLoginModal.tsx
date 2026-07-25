@@ -1,7 +1,13 @@
 import { X } from 'lucide-react';
-import StandaloneShell from '../../standalone-shell/view/StandaloneShell';
 import { DEFAULT_PROJECT_FOR_EMPTY_SHELL, IS_PLATFORM } from '../../../constants/config';
 import type { LLMProvider } from '../../../types/app';
+import LazySurface, { lazySurface } from '../../lazy/LazySurface';
+import { loadStandaloneShell } from '../../lazy/surfaceLoaders';
+
+// The login terminal is the only reason xterm would otherwise be reachable from
+// settings and onboarding, so the import is deferred to the moment the modal
+// actually opens (issue #267).
+const StandaloneShell = lazySurface(loadStandaloneShell);
 
 type ProviderLoginModalProps = {
   isOpen: boolean;
@@ -76,7 +82,9 @@ export default function ProviderLoginModal({
         </div>
 
         <div className="flex-1 overflow-hidden">
-          <StandaloneShell project={DEFAULT_PROJECT_FOR_EMPTY_SHELL} command={command} onComplete={handleComplete} minimal={true} />
+          <LazySurface>
+            <StandaloneShell project={DEFAULT_PROJECT_FOR_EMPTY_SHELL} command={command} onComplete={handleComplete} minimal={true} />
+          </LazySurface>
         </div>
       </div>
     </div>
