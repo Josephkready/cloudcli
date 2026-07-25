@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 
+import { useOverlayLayer } from './overlayLayers';
+
 /**
  * Esc-to-close + backdrop-to-close for hand-rolled `fixed inset-0` overlays.
  *
@@ -8,20 +10,14 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
  * hand-rolled overlays whose layout (full-bleed on mobile, custom widths,
  * portalled z-indexes) does not fit `DialogContent`. Rather than copy the same
  * two handlers into each of them — and get the stacking subtly wrong — they
- * opt in here (#243).
+ * opt in here (#243). Pair it with `useFocusTrap` (#274) for the focus half.
  *
  * **Stacking.** The folder picker renders *inside* the project-creation wizard,
  * so both are mounted at once and a document-level `keydown` would otherwise
- * close both with a single Esc. Active overlays register in a module-level
- * stack and only the topmost one reacts, which matches how a user reads a
- * stack of dialogs: Esc peels off one layer.
+ * close both with a single Esc. Active overlays register in the shared stack in
+ * `overlayLayers.ts` and only the topmost one reacts, which matches how a user
+ * reads a stack of dialogs: Esc peels off one layer.
  */
-
-type OverlayId = { current: boolean };
-
-// Registration order == visual stacking order: an overlay rendered by another
-// overlay's subtree always mounts (and therefore registers) after its parent.
-const activeOverlays: OverlayId[] = [];
 
 type UseOverlayDismissOptions = {
   /**
@@ -35,25 +31,22 @@ type UseOverlayDismissOptions = {
 };
 
 export function useOverlayDismiss({ isActive, onDismiss }: UseOverlayDismissOptions) {
-  const idRef = useRef<OverlayId>({ current: true });
   // Keep the latest callback without re-registering the overlay (which would
   // reorder the stack) every time the parent re-renders.
   const onDismissRef = useRef(onDismiss);
   onDismissRef.current = onDismiss;
+  const { isTopmost } = useOverlayLayer({ concern: 'dismiss', isActive });
 
   useEffect(() => {
     if (!isActive) {
       return;
     }
 
-    const id = idRef.current;
-    activeOverlays.push(id);
-
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') {
         return;
       }
-      if (activeOverlays[activeOverlays.length - 1] !== id) {
+      if (!isTopmost()) {
         return;
       }
 
@@ -66,12 +59,8 @@ export function useOverlayDismiss({ isActive, onDismiss }: UseOverlayDismissOpti
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
-      const index = activeOverlays.indexOf(id);
-      if (index !== -1) {
-        activeOverlays.splice(index, 1);
-      }
     };
-  }, [isActive]);
+  }, [isActive, isTopmost]);
 
   const handleBackdropMouseDown = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     // Only a press that starts on the backdrop itself counts. Using mousedown
