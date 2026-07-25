@@ -2,6 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Self-hosted UI fonts (issue #270).
+ *
+ * These used to come from a render-blocking `<link rel="stylesheet">` to
+ * fonts.googleapis.com in index.html. CloudCLI is normally reached over a
+ * tailnet/LAN and installed as a PWA, so gating first paint on a third-party
+ * request meant a purely local app stalled whenever the uplink or DNS was slow
+ * — and the PWA could never be genuinely offline-capable. The two families now
+ * ship in `public/fonts/` and the app makes zero off-host requests.
+ *
+ * Both files are Google's own woff2 subsets, copied byte-for-byte from
+ * fonts.gstatic.com (Encode Sans v23, Merriweather v33) — not re-generated.
+ * Both fonts carry an OFL Reserved Font Name, so re-subsetting or re-instancing
+ * them locally would require renaming the family; copying the upstream binaries
+ * avoids that entirely. Licenses ship alongside them in `public/fonts/*-OFL.txt`.
+ *
+ * Only the `latin` subset is bundled. latin-ext/cyrillic/vietnamese glyphs fall
+ * back to the system stacks below, which is the tradeoff for keeping the payload
+ * small; add the matching subset files + a `unicode-range` face here if that
+ * ever bites.
+ *
+ * Both families are *variable* fonts upstream, so one file per style covers the
+ * whole weight axis — there is no `-400`/`-600` file to pick between. That is
+ * why the weight descriptors are ranges: the browser instantiates 400/500/600/700
+ * from the single file.
+ *
+ * The filenames carry the upstream font version (v23/v33) because they are served
+ * unhashed out of `public/` with a one-year immutable cache — refreshing a family
+ * means bumping the version in the filename so caches can't serve a stale face.
+ */
+
+/* Encode Sans — the UI face (Tailwind `font-sans`, `body`). Preloaded in index.html. */
+@font-face {
+  font-family: 'Encode Sans';
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url('/fonts/encode-sans-v23-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/*
+ * Merriweather — the chat/prose serif (Tailwind `font-serif`). Deliberately NOT
+ * preloaded: it is never needed for first paint, so letting it load lazily keeps
+ * it from competing with the UI face for bandwidth on a cold start.
+ */
+@font-face {
+  font-family: 'Merriweather';
+  font-style: normal;
+  font-weight: 300 900;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url('/fonts/merriweather-v33-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Merriweather';
+  font-style: italic;
+  font-weight: 300 900;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url('/fonts/merriweather-v33-latin-italic.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 /* Global spinner animation - defined early to ensure it loads */
 @keyframes spin {
   0% {

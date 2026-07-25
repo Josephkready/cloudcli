@@ -36,6 +36,17 @@ const SUFFIX_ENCODINGS = new Map<string, PrecompressedEncoding>(
 /** Assets that get a one-year immutable cache because their names are content-hashed. */
 const IMMUTABLE_ASSET_PATTERN = /\.(js|mjs|cjs|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|webp|avif)$/i;
 
+/**
+ * Web fonts, which are the only thing under `public/` safe to freeze in a cache.
+ *
+ * Unlike `dist/assets`, `public/` filenames are author-controlled and stable, so
+ * a blanket immutable policy there would pin `sw.js` and the logos for a year.
+ * The self-hosted font files (issue #270) are the exception: they are versioned
+ * in their filename (`encode-sans-v23-latin.woff2`), so refreshing a family
+ * changes the URL and a frozen cache entry can never go stale.
+ */
+const PUBLIC_IMMUTABLE_PATTERN = /\.(woff2?|ttf|otf|eot)$/i;
+
 /** Parse an `Accept-Encoding` header into encoding token -> quality value. */
 function parseAcceptEncoding(header: string | string[] | undefined): Map<string, number> {
     const qualities = new Map<string, number>();
@@ -222,6 +233,25 @@ export function setStaticAssetHeaders(res: Response, filePath: string): void {
         res.setHeader('Expires', '0');
     } else if (IMMUTABLE_ASSET_PATTERN.test(assetPath)) {
         // Cache static assets for 1 year (they have hashed names)
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
+}
+
+/**
+ * `setHeaders` hook for the `public/` static handler.
+ *
+ * That handler is mounted *before* the dist/ one, so it — not
+ * `setStaticAssetHeaders` — is what actually answers `/fonts/*.woff2` even
+ * though vite also copies the fonts into `dist/`. Without this the self-hosted
+ * fonts (issue #270) would revalidate on every cold load, which is most of the
+ * latency self-hosting was supposed to remove.
+ *
+ * Deliberately narrower than `setStaticAssetHeaders`: only fonts are frozen.
+ * `public/` also holds `sw.js`, `manifest.json` and the logos, and freezing the
+ * service worker for a year would strand clients on a dead build.
+ */
+export function setPublicAssetHeaders(res: Response, filePath: string): void {
+    if (PUBLIC_IMMUTABLE_PATTERN.test(filePath)) {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     }
 }

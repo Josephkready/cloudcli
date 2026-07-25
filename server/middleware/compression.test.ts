@@ -18,6 +18,7 @@ import {
     createCompressionMiddleware,
     createPrecompressedAssets,
     pickPrecompressedEncoding,
+    setPublicAssetHeaders,
     setStaticAssetHeaders,
 } from './compression.js';
 
@@ -312,6 +313,37 @@ test('setStaticAssetHeaders keeps HTML uncacheable and leaves unknown types alon
     setStaticAssetHeaders(res as never, '/dist/notes.md');
     assert.equal(headers.get('cache-control'), undefined);
     assert.equal(headers.get('content-encoding'), undefined);
+});
+
+test('setPublicAssetHeaders freezes fonts and nothing else under public/', () => {
+    const headers = new Map<string, string>();
+    const res = {
+        setHeader: (name: string, value: string) => {
+            headers.set(name.toLowerCase(), value);
+        },
+    };
+
+    // The self-hosted fonts (issue #270) are version-stamped in their filename,
+    // so a year-long immutable cache can never serve a stale face. The public/
+    // static handler runs ahead of the dist/ one, so this hook — not
+    // setStaticAssetHeaders — is what actually answers /fonts/*.woff2.
+    setPublicAssetHeaders(res as never, '/app/public/fonts/encode-sans-v23-latin.woff2');
+    assert.equal(headers.get('cache-control'), 'public, max-age=31536000, immutable');
+
+    // Everything else in public/ keeps revalidating. sw.js is the one that
+    // matters: freezing the service worker would strand clients on a dead build.
+    for (const filePath of [
+        '/app/public/sw.js',
+        '/app/public/manifest.json',
+        '/app/public/logo.svg',
+        '/app/public/icons/icon-192x192.png',
+        '/app/public/api-docs.html',
+        '/app/public/fonts/encode-sans-OFL.txt',
+    ]) {
+        headers.clear();
+        setPublicAssetHeaders(res as never, filePath);
+        assert.equal(headers.get('cache-control'), undefined, `${filePath} should not be frozen`);
+    }
 });
 
 test('precompressDirectory emits smaller siblings only where they pay off', async () => {
