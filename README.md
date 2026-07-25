@@ -25,7 +25,7 @@ Requires Node.js v22+.
 ```bash
 npm ci             # install dependencies
 npm run dev        # server + client with hot reload
-npm run build      # production build (vite + tsc)
+npm run build      # production build (vite + asset precompression + tsc)
 npm run typecheck  # tsc --noEmit (client + server)
 npm test           # server, front-end unit, and component test suites
 npm run lint       # eslint src/ server/
@@ -37,7 +37,7 @@ Plugins (custom web-UI tabs, drop-installed by writing files): see [`docs/plugin
 
 ## Deployment
 
-Production runs on `dante` and is reconciled by `ansible-pull` against `origin/main`. The build (`scripts/dante-build.sh`: `npm ci` + `vite build` + `tsc`/`tsc-alias`, atomic swap) and the `systemd` unit that runs `node dist-server/server/index.js` are owned by the deploy repo — **ship changes by merging to `origin/main`, not by SSH+rsync.** See the mind design doc `cloudcli-dante-deploy` and the `dante-sync` / `dante-live` skills for the full workflow.
+Production runs on `dante` and is reconciled by `ansible-pull` against `origin/main`. The build (`scripts/dante-build.sh`: `npm ci` + `vite build` + asset precompression + `tsc`/`tsc-alias`, atomic swap) and the `systemd` unit that runs `node dist-server/server/index.js` are owned by the deploy repo — **ship changes by merging to `origin/main`, not by SSH+rsync.** See the mind design doc `cloudcli-dante-deploy` and the `dante-sync` / `dante-live` skills for the full workflow.
 
 ## License
 

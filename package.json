@@ -21,7 +21,7 @@
     "client": "vite",
     "build": "npm run build:client && npm run build:server",
     "build:client": "vite build && npm run build:precompress",
-    "build:precompress": "tsx --tsconfig server/tsconfig.json server/shared/precompress-assets.ts dist",
+    "build:precompress": "tsx --tsconfig server/tsconfig.json server/shared/precompress-assets.ts dist public",
     "prebuild:server": "node -e \"require('node:fs').rmSync('dist-server', { recursive: true, force: true })\"",
     "build:server": "tsc -p server/tsconfig.json && tsc-alias -p server/tsconfig.json",
     "preview": "vite preview",

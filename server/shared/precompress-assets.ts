@@ -15,9 +15,12 @@
 //     `compression()` fallback handles it.
 //   - already-compressed binaries (woff2, png, ...) — compressing them again
 //     costs bytes rather than saving them.
+//   - anything vite copied in from `public/` (sw.js, manifest.json, the font
+//     licences) — the `public/` static handler is mounted first, so the dist
+//     copies are never on the wire. See the `shadowRoot` option.
 //
-// Run directly to compress a directory:
-//   tsx --tsconfig server/tsconfig.json server/shared/precompress-assets.ts dist
+// Run directly to compress a directory (second arg = the shadowing root):
+//   tsx --tsconfig server/tsconfig.json server/shared/precompress-assets.ts dist public
 
 import { createReadStream } from 'node:fs';
 import { readdir, stat, writeFile } from 'node:fs/promises';
@@ -89,6 +92,16 @@ export interface PrecompressOptions {
     minBytes?: number;
     /** Brotli quality, 0-11. */
     brotliQuality?: number;
+    /**
+     * A directory whose files are served *ahead* of `dir` at request time.
+     *
+     * vite copies `public/` into `dist/`, so `sw.js`, `manifest.json` and the
+     * font licences exist in both trees — and `mountStaticAssets` mounts the
+     * `public/` handler first, which means the `dist/` copies are never the ones
+     * on the wire. Compressing them is pure build cost for variants nothing can
+     * ever request, so a file with a same-relative-path twin here is skipped.
+     */
+    shadowRoot?: string;
 }
 
 async function collectFiles(dir: string): Promise<string[]> {
@@ -129,6 +142,15 @@ async function readFileBuffer(filePath: string): Promise<Buffer> {
     return Buffer.concat(chunks);
 }
 
+/** True when a file with the same relative path exists under `shadowRoot`. */
+async function isShadowed(dir: string, file: string, shadowRoot: string): Promise<boolean> {
+    try {
+        return (await stat(path.join(shadowRoot, path.relative(dir, file)))).isFile();
+    } catch {
+        return false;
+    }
+}
+
 /**
  * Compress every eligible file under `dir` in place, writing `<file>.br` and
  * `<file>.gz` siblings. A variant is only kept when it is actually smaller than
@@ -160,6 +182,9 @@ export async function precompressDirectory(
         }
         const stats = await stat(file);
         if (stats.size < minBytes) {
+            continue;
+        }
+        if (options.shadowRoot && await isShadowed(dir, file, options.shadowRoot)) {
             continue;
         }
         candidates.push(file);
@@ -211,26 +236,59 @@ function formatKb(bytes: number): string {
     return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-/** CLI entry point used by `npm run build:client`. */
-async function main(): Promise<void> {
-    const target = path.resolve(process.argv[2] || 'dist');
+/**
+ * CLI entry point used by `npm run build:client` and scripts/dante-build.sh.
+ * Returns the exit code instead of exiting, so the failure paths are testable.
+ *
+ * Second argument is the optional `shadowRoot` (in this repo: `public`) — the
+ * directory whose copies of these files are the ones actually served.
+ */
+export async function runPrecompressCli(
+    targetArg?: string,
+    shadowRootArg?: string,
+): Promise<number> {
+    const target = path.resolve(targetArg || 'dist');
+    const shadowRoot = shadowRootArg ? path.resolve(shadowRootArg) : undefined;
     const started = Date.now();
-    const summary = await precompressDirectory(target);
+
+    // `collectFiles` swallows ENOENT so a directory that vanishes mid-walk does
+    // not abort the build. That same tolerance would make a typo'd path or a
+    // changed vite `outDir` indistinguishable from "nothing here was worth
+    // compressing" — a green build quietly shipping uncompressed bundles. The
+    // target itself is the one thing the caller definitely meant, so check it.
+    let targetStats;
+    try {
+        targetStats = await stat(target);
+    } catch {
+        console.error(`precompress: target directory does not exist: ${target}`);
+        return 1;
+    }
+    if (!targetStats.isDirectory()) {
+        console.error(`precompress: target is not a directory: ${target}`);
+        return 1;
+    }
+
+    const summary = await precompressDirectory(target, { shadowRoot });
     if (summary.compressed === 0) {
         console.log(`precompress: nothing to compress in ${target}`);
-        return;
+        return 0;
     }
     console.log(
         `precompress: ${summary.compressed} files, ${formatKb(summary.originalBytes)} -> `
         + `${formatKb(summary.brotliBytes)} br / ${formatKb(summary.gzipBytes)} gzip `
         + `in ${((Date.now() - started) / 1000).toFixed(1)}s`,
     );
+    return 0;
 }
 
 const invokedPath = process.argv[1];
 if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
-    main().catch((error) => {
-        console.error('precompress: failed', error);
-        process.exitCode = 1;
-    });
+    runPrecompressCli(process.argv[2], process.argv[3])
+        .then((code) => {
+            process.exitCode = code;
+        })
+        .catch((error) => {
+            console.error('precompress: failed', error);
+            process.exitCode = 1;
+        });
 }

@@ -13,12 +13,17 @@
 //
 // Layer 2 sets `Content-Encoding` before layer 1 inspects the response, so a
 // precompressed hit is never double-compressed.
+//
+// Layer 2's mount position is load-bearing and easy to break silently, so it is
+// not mounted by hand: `mountStaticAssets()` at the bottom of this file owns the
+// order of every static handler, and both server/index.js and the tests use it.
 
 import fs from 'node:fs';
 import path from 'node:path';
 
 import compression from 'compression';
-import type { NextFunction, Request, RequestHandler, Response } from 'express';
+import express from 'express';
+import type { Express, NextFunction, Request, RequestHandler, Response } from 'express';
 import mime from 'mime-types';
 
 import {
@@ -254,4 +259,40 @@ export function setPublicAssetHeaders(res: Response, filePath: string): void {
     if (PUBLIC_IMMUTABLE_PATTERN.test(filePath)) {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     }
+}
+
+/**
+ * Mount the whole static-asset stack, in the one order that works:
+ *
+ *   1. `public/` — must come first. vite copies `public/` into `dist/`, so every
+ *      file here exists twice and whichever handler is mounted first decides the
+ *      cache policy. `setPublicAssetHeaders` freezes only the version-stamped
+ *      fonts; `setStaticAssetHeaders` would freeze `sw.js` for a year and strand
+ *      clients on a dead build.
+ *   2. the precompressed-variant rewriter, which only points `req.url` at an
+ *      `<asset>.br` sibling...
+ *   3. ...and immediately after it the `express.static` that does the sending.
+ *      Anything mounted between them, or the two swapped, silently answers from
+ *      the identity file and every variant on disk goes unused.
+ *
+ * This exists as one function because all three are a single ordering decision.
+ * Both server/index.js and the middleware test call it, so the shipped order is
+ * the tested order.
+ *
+ * `index: false` on the dist handler disables the built-in directory-index
+ * lookup, leaving the router-basename transform in server/index.js as the only
+ * thing that serves index.html.
+ */
+export function mountStaticAssets(
+    app: Express,
+    { publicDir, distDir }: { publicDir: string; distDir: string },
+): void {
+    app.use(express.static(publicDir, {
+        setHeaders: setPublicAssetHeaders,
+    }));
+    app.use(createPrecompressedAssets({ root: distDir }));
+    app.use(express.static(distDir, {
+        index: false,
+        setHeaders: setStaticAssetHeaders,
+    }));
 }
