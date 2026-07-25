@@ -15,6 +15,7 @@ export function useShellRuntime({
   minimal,
   autoConnect,
   isRestarting,
+  isActive,
   onProcessComplete,
   onOutputRef,
 }: UseShellRuntimeOptions): UseShellRuntimeResult {
@@ -63,6 +64,7 @@ export function useShellRuntime({
     selectedProject,
     minimal,
     isRestarting,
+    isActive,
     closeSocket,
   });
 

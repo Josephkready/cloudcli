@@ -70,6 +70,7 @@ export default function Shell({
     minimal,
     autoConnect,
     isRestarting,
+    isActive,
     onProcessComplete,
     onOutputRef,
   });
