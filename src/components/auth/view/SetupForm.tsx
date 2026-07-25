@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Loader2, Lock, ShieldCheck, User } from 'lucide-react';
+import { disabledControlClasses } from '../../../shared/view/ui/disabledState';
 import { useAuth } from '../context/AuthContext';
 import AuthErrorAlert from './AuthErrorAlert';
 import AuthInputField from './AuthInputField';
@@ -136,7 +137,7 @@ export default function SetupForm() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 font-medium text-primary-foreground shadow-lg shadow-primary/25 transition-all duration-200 hover:brightness-110 hover:shadow-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 focus:ring-offset-card active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+          className={`flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 font-medium text-primary-foreground shadow-lg shadow-primary/25 transition-all duration-200 enabled:hover:brightness-110 enabled:hover:shadow-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 focus:ring-offset-card active:scale-[0.99] ${disabledControlClasses}`}
         >
           {isSubmitting ? (
             <>

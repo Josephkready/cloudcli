@@ -1,6 +1,7 @@
 import { Code2, Download, Eye, Maximize2, Minimize2, Save, Settings as SettingsIcon, X } from 'lucide-react';
 
 import type { CodeEditorFile } from '../../types/types';
+import { disabledControlClasses } from '../../../../shared/view/ui/disabledState';
 
 type CodeEditorHeaderProps = {
   file: CodeEditorFile;
@@ -140,7 +141,7 @@ export default function CodeEditorHeader({
           type="button"
           onClick={onSave}
           disabled={saving}
-          className={`flex items-center justify-center rounded-md p-1.5 transition-colors disabled:opacity-50 ${
+          className={`flex items-center justify-center rounded-md p-1.5 transition-colors ${disabledControlClasses} ${
             saveSuccess
               ? 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400'
               : isDirty

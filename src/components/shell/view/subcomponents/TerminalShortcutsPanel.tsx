@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import type { Terminal } from '@xterm/xterm';
 import { sendSocketMessage } from '../../utils/socket';
+import { disabledControlClasses } from '../../../../shared/view/ui/disabledState';
 
 type Shortcut =
   | { type: 'key'; id: string; label: string; sequence: string }
@@ -46,11 +47,11 @@ type TerminalShortcutsPanelProps = {
 const preventFocusSteal = (e: React.PointerEvent) => e.preventDefault();
 
 const KEY_BTN =
-  'shrink-0 rounded-md border border-gray-600 bg-gray-700 px-2.5 py-1.5 text-xs font-medium text-gray-100 transition-colors select-none active:bg-blue-600 active:text-white active:border-blue-600 disabled:cursor-not-allowed disabled:opacity-40';
+  `shrink-0 rounded-md border border-gray-600 bg-gray-700 px-2.5 py-1.5 text-xs font-medium text-gray-100 transition-colors select-none active:bg-blue-600 active:text-white active:border-blue-600 ${disabledControlClasses}`;
 const KEY_BTN_ACTIVE =
-  'shrink-0 rounded-md border border-blue-500 bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white transition-colors select-none disabled:cursor-not-allowed disabled:opacity-40';
+  `shrink-0 rounded-md border border-blue-500 bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white transition-colors select-none ${disabledControlClasses}`;
 const ICON_BTN =
-  'shrink-0 rounded-md border border-gray-600 bg-gray-700 p-1.5 text-gray-100 transition-colors select-none active:bg-blue-600 active:text-white active:border-blue-600 disabled:cursor-not-allowed disabled:opacity-40';
+  `shrink-0 rounded-md border border-gray-600 bg-gray-700 p-1.5 text-gray-100 transition-colors select-none active:bg-blue-600 active:text-white active:border-blue-600 ${disabledControlClasses}`;
 
 export default function TerminalShortcutsPanel({
   wsRef,

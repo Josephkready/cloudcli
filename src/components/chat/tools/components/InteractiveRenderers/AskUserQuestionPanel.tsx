@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { PermissionPanelProps } from '../../configs/permissionPanelRegistry';
 import type { Question } from '../../../types/types';
+import { disabledControlClasses } from '../../../../../shared/view/ui/disabledState';
 
 export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   request,
@@ -361,7 +362,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                 type="button"
                 onClick={handleSubmit}
                 disabled={!hasCurrentSelection && !Object.keys(buildAnswers()).length}
-                className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-sm transition-all duration-200 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none dark:from-blue-500 dark:to-blue-600"
+                className={`inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-sm transition-all duration-200 hover:shadow-md dark:from-blue-500 dark:to-blue-600 ${disabledControlClasses}`}
               >
                 Submit
                 <span className="ml-0.5 font-mono text-[9px] opacity-70">Enter</span>

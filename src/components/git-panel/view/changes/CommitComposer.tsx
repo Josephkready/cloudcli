@@ -1,6 +1,7 @@
 import { Check, ChevronDown, GitCommit, RefreshCw, Sparkles } from 'lucide-react';
 import { useState } from 'react';
 import type { ConfirmationRequest } from '../../types/types';
+import { disabledControlClasses } from '../../../../shared/view/ui/disabledState';
 
 // Persists commit messages across unmount/remount, keyed by project path
 const commitMessageCache = new Map<string, string>();
@@ -137,7 +138,7 @@ export default function CommitComposer({
               <button
                 onClick={() => void handleGenerateMessage()}
                 disabled={selectedFileCount === 0 || isGeneratingMessage}
-                className="p-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                className={`p-1.5 text-muted-foreground transition-colors hover:text-foreground ${disabledControlClasses}`}
                 title="Generate commit message"
               >
                 {isGeneratingMessage ? (
@@ -156,7 +157,7 @@ export default function CommitComposer({
             <button
               onClick={requestCommitConfirmation}
               disabled={!commitMessage.trim() || selectedFileCount === 0 || isCommitting}
-              className="flex items-center space-x-1 rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              className={`flex items-center space-x-1 rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors hover:bg-primary/90 ${disabledControlClasses}`}
             >
               <Check className="h-3 w-3" />
               <span>{isCommitting ? 'Committing...' : 'Commit'}</span>
