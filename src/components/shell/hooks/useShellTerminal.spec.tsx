@@ -1,5 +1,5 @@
-import { useCallback, useRef } from 'react';
-import type { MutableRefObject } from 'react';
+import { Component, useCallback, useRef } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FitAddon } from '@xterm/addon-fit';
@@ -44,8 +44,12 @@ const xterm = vi.hoisted(() => {
   // Construction order, so "the WebGL upgrade happens after the terminal is on
   // screen" can be asserted rather than assumed.
   const events: string[] = [];
+  const clipboardArgs: unknown[][] = [];
+  // Seam for the "build throws" test — spying on a real xterm method is not an
+  // option when the module is stubbed.
+  const hooks = { onOpen: () => {} };
 
-  return { terminals, fits, webgls, events };
+  return { terminals, fits, webgls, events, clipboardArgs, hooks };
 });
 
 vi.mock('@xterm/xterm', () => ({
@@ -54,6 +58,7 @@ vi.mock('@xterm/xterm', () => ({
     cols = 80;
     rows = 24;
     openedIn: HTMLElement | null = null;
+    element: HTMLElement | null = null;
     addons: unknown[] = [];
     dispose = vi.fn();
     refresh = vi.fn();
@@ -75,7 +80,11 @@ vi.mock('@xterm/xterm', () => ({
     }
 
     open(container: HTMLElement) {
+      xterm.hooks.onOpen();
       this.openedIn = container;
+      // The real xterm puts `.xterm` inside the container, and `FitAddon`
+      // measures that parent — the sizing guard reads the same chain.
+      this.element = { parentElement: container } as unknown as HTMLElement;
       xterm.events.push('open');
     }
   },
@@ -91,7 +100,13 @@ vi.mock('@xterm/addon-fit', () => ({
   },
 }));
 
-vi.mock('@xterm/addon-clipboard', () => ({ ClipboardAddon: class {} }));
+vi.mock('@xterm/addon-clipboard', () => ({
+  ClipboardAddon: class {
+    constructor(...args: unknown[]) {
+      xterm.clipboardArgs.push(args);
+    }
+  },
+}));
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class {} }));
 
 vi.mock('@xterm/addon-webgl', () => ({
@@ -126,9 +141,30 @@ type HarnessProps = {
   isActive?: boolean;
   closeSocket?: () => void;
   project?: Project | null;
+  socket?: WebSocket | null;
 };
 
-function Harness({ isActive = true, closeSocket, project = PROJECT }: HarnessProps) {
+/**
+ * jsdom has no layout, so every element measures zero — which is exactly what a
+ * `display: none` element reports in a real browser. Tests therefore have to
+ * say explicitly whether the container is on screen.
+ */
+function setContainerSize(element: HTMLElement, width: number, height: number) {
+  Object.defineProperty(element, 'clientWidth', { value: width, configurable: true });
+  Object.defineProperty(element, 'clientHeight', { value: height, configurable: true });
+}
+
+function fakeSocket() {
+  return { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket & { send: ReturnType<typeof vi.fn> };
+}
+
+function resizeFrames(socket: { send: ReturnType<typeof vi.fn> }) {
+  return socket.send.mock.calls
+    .map(([payload]) => JSON.parse(String(payload)))
+    .filter((message) => message.type === 'resize');
+}
+
+function Harness({ isActive = true, closeSocket, project = PROJECT, socket = null }: HarnessProps) {
   // `useShellRuntime` hands the hook a `useCallback`-stable `closeSocket`; a new
   // identity per render would tear the terminal down and rebuild it, which is
   // exactly what these tests are checking does not happen.
@@ -141,7 +177,8 @@ function Harness({ isActive = true, closeSocket, project = PROJECT }: HarnessPro
   const terminalContainerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null) as MutableRefObject<Terminal | null>;
   const fitAddonRef = useRef<FitAddon | null>(null) as MutableRefObject<FitAddon | null>;
-  const wsRef = useRef<WebSocket | null>(null) as MutableRefObject<WebSocket | null>;
+  const wsRef = useRef<WebSocket | null>(socket) as MutableRefObject<WebSocket | null>;
+  wsRef.current = socket;
 
   const { isInitialized } = useShellTerminal({
     terminalContainerRef,
@@ -183,6 +220,7 @@ beforeEach(() => {
   xterm.fits.length = 0;
   xterm.webgls.length = 0;
   xterm.events.length = 0;
+  xterm.clipboardArgs.length = 0;
 });
 
 afterEach(() => {
@@ -265,6 +303,46 @@ describe('useShellTerminal — deferred construction (#272)', () => {
     expect(xterm.webgls).toHaveLength(0);
   });
 
+  it('passes the OSC 52 provider as the clipboard addon\'s second argument', () => {
+    render(<Harness />);
+    flushBuild();
+
+    // The addon's published typing says `(provider?)` but the shipped runtime
+    // takes `(base64?, provider?)` — a silent swap here would break the
+    // device-flow "press c to copy" prompt and nothing else would notice.
+    expect(xterm.clipboardArgs).toHaveLength(1);
+    const [base64, provider] = xterm.clipboardArgs[0] as [unknown, { writeText?: unknown }];
+    expect(base64).toBeUndefined();
+    expect(typeof provider?.writeText).toBe('function');
+  });
+
+  it('schedules the WebGL upgrade through requestIdleCallback when the browser has one', () => {
+    const idleCallbacks: (() => void)[] = [];
+    const cancelIdle = vi.fn();
+    vi.stubGlobal('requestIdleCallback', (callback: () => void) => {
+      idleCallbacks.push(callback);
+      return 7;
+    });
+    vi.stubGlobal('cancelIdleCallback', cancelIdle);
+
+    const { unmount } = render(<Harness />);
+    flushBuild();
+
+    // Chrome/Firefox take this branch — jsdom has no rIC, so without the stub
+    // only the Safari fallback would ever be exercised.
+    expect(idleCallbacks).toHaveLength(1);
+    expect(xterm.webgls).toHaveLength(0);
+
+    act(() => {
+      idleCallbacks[0]();
+    });
+    expect(xterm.webgls).toHaveLength(1);
+
+    unmount();
+    expect(cancelIdle).toHaveBeenCalledWith(7);
+    vi.unstubAllGlobals();
+  });
+
   it('never constructs a terminal when the surface goes away before the yield', () => {
     const { unmount } = render(<Harness />);
 
@@ -292,19 +370,50 @@ describe('useShellTerminal — mounted-but-hidden surface (#272)', () => {
     expect(xterm.terminals[0].dispose).not.toHaveBeenCalled();
   });
 
-  it('re-fits on the way back in, because a hidden container measures as zero', () => {
-    const { rerender } = render(<Harness isActive />);
+  it('re-fits and tells the pty the new size when the grid changed while hidden', () => {
+    const socket = fakeSocket();
+    const { rerender } = render(<Harness isActive socket={socket} />);
+    setContainerSize(screen.getByTestId('terminal-container'), 1120, 768);
     flushBuild();
 
     const fitAddon = xterm.fits[0];
-    const fitsAfterMount = fitAddon.fit.mock.calls.length;
+    const terminal = xterm.terminals[0];
+    // The window was resized while the surface was away, so the fit on the way
+    // back in lands on a different grid.
+    fitAddon.fit.mockImplementation(() => {
+      terminal.cols = 107;
+      terminal.rows = 40;
+    });
+    socket.send.mockClear();
 
-    rerender(<Harness isActive={false} />);
+    rerender(<Harness isActive={false} socket={socket} />);
     flushBuild();
-    rerender(<Harness isActive />);
+    rerender(<Harness isActive socket={socket} />);
     flushBuild();
 
-    expect(fitAddon.fit.mock.calls.length).toBeGreaterThan(fitsAfterMount);
+    expect(fitAddon.fit).toHaveBeenCalled();
+    expect(resizeFrames(socket)).toContainEqual({ type: 'resize', cols: 107, rows: 40 });
+  });
+
+  it('repaints instead of resizing when the grid is unchanged on reveal', () => {
+    const socket = fakeSocket();
+    const { rerender } = render(<Harness isActive socket={socket} />);
+    setContainerSize(screen.getByTestId('terminal-container'), 1120, 768);
+    flushBuild();
+    // Past the initial fit, which legitimately reports the first size.
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    socket.send.mockClear();
+
+    rerender(<Harness isActive={false} socket={socket} />);
+    flushBuild();
+    rerender(<Harness isActive socket={socket} />);
+    flushBuild();
+
+    // A hidden canvas can come back stale, so the reveal always repaints.
+    expect(xterm.terminals[0].refresh).toHaveBeenCalled();
+    expect(resizeFrames(socket)).toHaveLength(0);
   });
 
   it('does not fit while the surface stays hidden', () => {
@@ -321,9 +430,117 @@ describe('useShellTerminal — mounted-but-hidden surface (#272)', () => {
       vi.advanceTimersByTime(500);
     });
 
-    // Fitting a `display: none` container measures zero and would resize the
-    // pty to nonsense.
     expect(fitAddon.fit).not.toHaveBeenCalled();
+  });
+});
+
+describe('useShellTerminal — resizing a hidden terminal (#272 follow-up)', () => {
+  /*
+   * The surface now stays mounted, so its `ResizeObserver` keeps firing after
+   * the tab is hidden — and a `display: none` container does not measure as
+   * "no size" to `FitAddon`: it reads the *computed* `height: 100%` as 100px
+   * and resizes the terminal to about 10x6. That resize was forwarded to the
+   * pty, i.e. a SIGWINCH telling whatever is running that the window is now ten
+   * columns wide. Verified in a real browser before the guard landed.
+   */
+  function renderWithObserver(socket: ReturnType<typeof fakeSocket>) {
+    const callbacks: (() => void)[] = [];
+    const previous = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(callback: () => void) {
+        callbacks.push(callback);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    const view = render(<Harness isActive socket={socket} />);
+    const container = screen.getByTestId('terminal-container');
+    setContainerSize(container, 1120, 768);
+    flushBuild();
+
+    const fireResize = () => {
+      act(() => {
+        callbacks.forEach((callback) => callback());
+        vi.advanceTimersByTime(200);
+      });
+    };
+
+    return { view, container, fireResize, restore: () => { globalThis.ResizeObserver = previous; } };
+  }
+
+  it('never resizes the pty from a container that measures zero', () => {
+    const socket = fakeSocket();
+    const { container, fireResize, restore } = renderWithObserver(socket);
+    const fitAddon = xterm.fits[0];
+
+    socket.send.mockClear();
+    fitAddon.fit.mockClear();
+    // The tab was switched away: the container is inside a `display: none`
+    // subtree now.
+    setContainerSize(container, 0, 0);
+    fireResize();
+
+    expect(fitAddon.fit).not.toHaveBeenCalled();
+    expect(resizeFrames(socket)).toHaveLength(0);
+    restore();
+  });
+
+  it('still resizes the pty when the visible container changes size', () => {
+    const socket = fakeSocket();
+    const { container, fireResize, restore } = renderWithObserver(socket);
+    const terminal = xterm.terminals[0];
+
+    socket.send.mockClear();
+    xterm.fits[0].fit.mockImplementation(() => {
+      terminal.cols = 107;
+      terminal.rows = 40;
+    });
+    setContainerSize(container, 856, 640);
+    fireResize();
+
+    expect(resizeFrames(socket)).toContainEqual({ type: 'resize', cols: 107, rows: 40 });
+    restore();
+  });
+});
+
+describe('useShellTerminal — a build that throws (#272 follow-up)', () => {
+  class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+    state = { failed: false };
+
+    static getDerivedStateFromError() {
+      return { failed: true };
+    }
+
+    render() {
+      return this.state.failed ? <span data-testid="boundary">terminal failed</span> : this.props.children;
+    }
+  }
+
+  it('surfaces the failure to the error boundary instead of hanging on the loading overlay', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const openSpy = vi
+      .spyOn(xterm.hooks, 'onOpen')
+      .mockImplementation(() => {
+        throw new Error('renderer exploded');
+      });
+
+    render(
+      <Boundary>
+        <Harness />
+      </Boundary>,
+    );
+    flushBuild();
+
+    // Construction happens in a scheduled callback now, and React only sees
+    // throws from render/effects — without re-throwing, the surface would sit
+    // on "Initializing…" forever with nothing to click.
+    expect(screen.getByTestId('boundary')).toBeInTheDocument();
+    expect(consoleError).toHaveBeenCalled();
+
+    openSpy.mockRestore();
+    consoleError.mockRestore();
   });
 });
 

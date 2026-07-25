@@ -18,6 +18,7 @@ import {
   type MobileTerminalSelectionManager,
 } from '../utils/mobileTerminalSelection';
 import { sendSocketMessage } from '../utils/socket';
+import { fitTerminalIfMeasurable } from '../utils/terminalSizing';
 import { ensureXtermFocusStyles } from '../utils/terminalStyles';
 
 // CLIs running inside the pty (e.g. `claude auth login`'s "press c to copy"
@@ -115,10 +116,20 @@ export function useShellTerminal({
   closeSocket,
 }: UseShellTerminalOptions): UseShellTerminalResult {
   const [isInitialized, setIsInitialized] = useState(false);
+  const [buildError, setBuildError] = useState<unknown>(null);
   const resizeTimeoutRef = useRef<number | null>(null);
   const mobileSelectionRef = useRef<MobileTerminalSelectionManager | null>(null);
   const selectedProjectKey = selectedProject?.fullPath || selectedProject?.path || '';
   const hasSelectedProject = Boolean(selectedProject);
+
+  // The terminal is built in a scheduled callback (#272), and React error
+  // boundaries only see throws from render and effects — an exception in there
+  // would otherwise leave the surface on its "Initializing…" overlay forever
+  // with nothing to click. Re-throwing during render puts the failure back in
+  // front of the boundary that used to catch it.
+  if (buildError) {
+    throw buildError;
+  }
 
   useEffect(() => {
     ensureXtermFocusStyles();
@@ -196,6 +207,7 @@ export function useShellTerminal({
           // Disposing the addon on loss drops xterm back to its DOM renderer
           // instead of leaving a permanently blank terminal.
           webglAddon.onContextLoss(() => {
+            console.warn('[Shell] WebGL context lost, falling back to the DOM renderer');
             webglAddon.dispose();
           });
           nextTerminal.loadAddon(webglAddon);
@@ -297,20 +309,30 @@ export function useShellTerminal({
         return true;
       });
 
-      const initialFitTimeoutId = window.setTimeout(() => {
-        const currentFitAddon = fitAddonRef.current;
+      // Both the initial fit and the resize observer can fire while the surface
+      // is hidden behind another tab, which is only possible since #272 made it
+      // stay mounted — and fitting a hidden container resizes the pty to
+      // nonsense. See `terminalSizing.ts`.
+      const fitAndReportSize = () => {
         const currentTerminal = terminalRef.current;
-        if (!currentFitAddon || !currentTerminal) {
+        const { fitted } = fitTerminalIfMeasurable(
+          currentTerminal,
+          fitAddonRef.current,
+          terminalContainer,
+        );
+
+        if (!fitted || !currentTerminal) {
           return;
         }
 
-        currentFitAddon.fit();
         sendSocketMessage(wsRef.current, {
           type: 'resize',
           cols: currentTerminal.cols,
           rows: currentTerminal.rows,
         });
-      }, TERMINAL_INIT_DELAY_MS);
+      };
+
+      const initialFitTimeoutId = window.setTimeout(fitAndReportSize, TERMINAL_INIT_DELAY_MS);
 
       setIsInitialized(true);
 
@@ -326,20 +348,7 @@ export function useShellTerminal({
           window.clearTimeout(resizeTimeoutRef.current);
         }
 
-        resizeTimeoutRef.current = window.setTimeout(() => {
-          const currentFitAddon = fitAddonRef.current;
-          const currentTerminal = terminalRef.current;
-          if (!currentFitAddon || !currentTerminal) {
-            return;
-          }
-
-          currentFitAddon.fit();
-          sendSocketMessage(wsRef.current, {
-            type: 'resize',
-            cols: currentTerminal.cols,
-            rows: currentTerminal.rows,
-          });
-        }, TERMINAL_RESIZE_DELAY_MS);
+        resizeTimeoutRef.current = window.setTimeout(fitAndReportSize, TERMINAL_RESIZE_DELAY_MS);
       });
 
       resizeObserver.observe(terminalContainer);
@@ -386,7 +395,17 @@ export function useShellTerminal({
       }
 
       clearBuildHandles();
-      teardown = buildTerminal();
+      try {
+        teardown = buildTerminal();
+      } catch (error) {
+        console.error('[Shell] terminal failed to initialize', error);
+        // Leave nothing half-built behind: `terminalRef` is set before the rest
+        // of the construction, and a stale value there would block every later
+        // attempt to build one.
+        terminalRef.current = null;
+        fitAddonRef.current = null;
+        setBuildError(error);
+      }
     };
 
     // rAF runs before paint, so the build has to happen in the task *after* the
@@ -419,26 +438,22 @@ export function useShellTerminal({
   ]);
 
   // The surface stays mounted but hidden when another tab is showing (issue
-  // #272), and a `display: none` container measures as zero — `FitAddon` bails
-  // out, and the renderer can be left holding a stale canvas. So re-measure and
-  // repaint on the way back in, not only at mount.
+  // #272), so nothing measures it while it is away and the renderer can be left
+  // holding a stale canvas. Re-measure and repaint on the way back in, not only
+  // at mount.
   useEffect(() => {
     if (!isActive || !isInitialized) {
       return undefined;
     }
 
     const frameId = window.requestAnimationFrame(() => {
-      const currentFitAddon = fitAddonRef.current;
       const currentTerminal = terminalRef.current;
-      if (!currentFitAddon || !currentTerminal) {
+      const { fitted, changed } = fitTerminalIfMeasurable(currentTerminal, fitAddonRef.current);
+      if (!fitted || !currentTerminal) {
         return;
       }
 
-      const previousCols = currentTerminal.cols;
-      const previousRows = currentTerminal.rows;
-      currentFitAddon.fit();
-
-      if (currentTerminal.cols !== previousCols || currentTerminal.rows !== previousRows) {
+      if (changed) {
         sendSocketMessage(wsRef.current, {
           type: 'resize',
           cols: currentTerminal.cols,
