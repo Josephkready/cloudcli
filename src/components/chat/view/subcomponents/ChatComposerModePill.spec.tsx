@@ -194,15 +194,73 @@ describe('ChatComposer — control-row touch targets (#275)', () => {
     }
   });
 
-  it('widens only the controls that have room, and never the icon-only ones', () => {
-    renderComposer('default');
+  /*
+   * The axis choice per control is the load-bearing decision, not the presence
+   * of some hit-area class: `hit-44` floors both axes and `hit-h-44` floors
+   * height only. Widening a 32px icon button in the `gap-1` row would push its
+   * overlay 2px over the neighbour's visible edge and steal that neighbour's
+   * taps, so getting the axis wrong reintroduces the bug #275 fixed.
+   *
+   * Asserting a few named controls left most of the row unpinned — flipping the
+   * token chip to `hit-h-44` (or a spacious control to the narrow token) passed.
+   * This compares the whole row as a set, so a wrong token *and* a new control
+   * added without a deliberate choice both fail.
+   */
+  const EXPECTED_HIT_AREAS: Record<string, string> = {
+    'attach images': 'touch:hit-h-44',
+    'show all commands': 'touch:hit-h-44',
+  };
 
-    // The pill is wide enough for a 44x44 overlay after #239, so it floors both
-    // axes. The icon buttons are 32px in a `gap-1` row, where a wider overlay
-    // would cover the neighbour's visible edge, so they floor height only.
+  const labelOf = (control: Element) =>
+    (control.getAttribute('aria-label') ?? control.textContent ?? '').trim().toLowerCase();
+
+  it('assigns every control in the row an axis, and only widens ones with room', () => {
+    const { container } = renderComposer('default', {
+      availableEffortOptions: [{ value: 'high' }],
+      tokenBudget: { used: 1234 },
+      hasInput: true,
+    });
+
+    const footer = container.querySelector('[data-slot="prompt-input-footer"]');
+    const controls = Array.from(footer?.querySelectorAll('button') ?? []);
+    expect(controls.length).toBeGreaterThanOrEqual(6);
+
+    const actual = Object.fromEntries(
+      controls.map((control) => [labelOf(control), hitAreaClassOf(control)]),
+    );
+
+    // Every control resolves to one of the two utilities — no control silently
+    // opts out, and no third token appears without this test being updated.
+    for (const [label, utility] of Object.entries(actual)) {
+      expect(['touch:hit-44', 'touch:hit-h-44'], `"${label}" has an unexpected hit-area utility`)
+        .toContain(utility);
+    }
+
+    // The icon-only 32px buttons must floor height ONLY. This is the direction
+    // that causes tap-stealing, so it is pinned by name.
+    for (const [label, expected] of Object.entries(EXPECTED_HIT_AREAS)) {
+      expect(actual[label], `"${label}" is a 32px icon button in a gap-1 row`).toBe(expected);
+    }
+
+    // The permission pill has room after #239, so it floors both axes.
     expect(hitAreaClassOf(modePill())).toBe('touch:hit-44');
-    expect(hitAreaClassOf(screen.getByRole('button', { name: /attach images/i }))).toBe('touch:hit-h-44');
-    expect(hitAreaClassOf(screen.getByRole('button', { name: /show all commands/i }))).toBe('touch:hit-h-44');
+
+    // Both utilities are genuinely in use, so neither branch of the rule is
+    // dead and this test cannot pass by everything collapsing to one token.
+    const used = new Set(Object.values(actual));
+    expect(used.has('touch:hit-44')).toBe(true);
+    expect(used.has('touch:hit-h-44')).toBe(true);
+  });
+
+  /*
+   * The overlay is positioned against the control, so the control must
+   * establish a containing block. Without the `position: relative` anchor the
+   * `::after` resolves against the nearest positioned ancestor and the hit area
+   * lands somewhere else entirely — silently, since the class is still present.
+   */
+  it('anchors the hit-area overlay on the control itself', () => {
+    const anchorRule = /\.touch\\:hit-44,\s*\.touch\\:hit-h-44\s*\{[^}]*position:\s*relative/;
+    expect(CSS).toMatch(anchorRule);
   });
 
   it('leaves the painted height alone so the row keeps its alignment', () => {
