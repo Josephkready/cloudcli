@@ -109,7 +109,7 @@ export default function EffortDropdown({
         }}
         // `touch:hit-44` only extends the tap target, not the painted trigger,
         // so the composer row keeps its 32px rhythm on every viewport (#275).
-        className="touch:hit-44 flex h-8 items-center gap-1.5 rounded-lg border border-border/60 bg-muted/40 px-2 text-xs font-medium text-foreground transition-all duration-200 hover:bg-muted"
+        className="touch:hit-44 flex h-8 items-center gap-1.5 rounded-lg border border-border/60 bg-muted/40 px-2 text-xs font-medium text-foreground transition-colors duration-fast hover:bg-muted"
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-label="Select reasoning effort"

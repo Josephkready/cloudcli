@@ -91,7 +91,7 @@ export default function CommitComposer({
 
   return (
     <div
-      className={`transition-all duration-300 ease-in-out ${
+      className={`transition-[max-height,opacity,transform] duration-slow ease-in-out ${
         isHidden ? 'max-h-0 -translate-y-2 overflow-hidden opacity-0' : 'max-h-96 translate-y-0 opacity-100'
       }`}
     >

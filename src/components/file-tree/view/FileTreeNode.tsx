@@ -44,7 +44,7 @@ function TreeItemIcon({ item, isOpen, renderFileIcon }: TreeItemIconProps) {
       <span className="flex flex-shrink-0 items-center gap-0.5">
         <ChevronRight
           className={cn(
-            'w-3.5 h-3.5 text-muted-foreground/70 transition-transform duration-150',
+            'w-3.5 h-3.5 text-muted-foreground/70 transition-transform duration-base',
             isOpen && 'rotate-90',
           )}
         />
@@ -98,12 +98,12 @@ export default function FileTreeNode({
   const rowClassName = cn(
     viewMode === 'detailed'
       ? cn(
-          'group py-[3px] pr-2 hover:bg-accent/60 cursor-pointer items-center rounded-sm transition-colors duration-100',
+          'group py-[3px] pr-2 hover:bg-accent/60 cursor-pointer items-center rounded-sm transition-colors duration-instant',
           FILE_TREE_DETAILED_GRID_CLASS,
         )
       : viewMode === 'compact'
-      ? 'group flex items-center justify-between py-[3px] pr-2 hover:bg-accent/60 cursor-pointer rounded-sm transition-colors duration-100'
-      : 'group flex items-center gap-1.5 py-[3px] pr-2 cursor-pointer rounded-sm hover:bg-accent/60 transition-colors duration-100',
+      ? 'group flex items-center justify-between py-[3px] pr-2 hover:bg-accent/60 cursor-pointer rounded-sm transition-colors duration-instant'
+      : 'group flex items-center gap-1.5 py-[3px] pr-2 cursor-pointer rounded-sm hover:bg-accent/60 transition-colors duration-instant',
     isDirectory && isOpen && 'border-l-2 border-primary/30',
     (isDirectory && !isOpen) || !isDirectory ? 'border-l-2 border-transparent' : '',
   );

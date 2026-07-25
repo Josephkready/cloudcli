@@ -33,9 +33,13 @@ export default function QuickSettingsHandle({
   const borderClass = isDragging
     ? 'border-blue-500 dark:border-blue-400'
     : 'border-gray-200 dark:border-gray-700';
+  // While dragging, the handle follows the pointer, so only its colours may
+  // animate. Otherwise it slides with the panel: `right` is a layout property,
+  // but it is what positions this handle, so the list names it explicitly
+  // rather than letting a blanket transition watch every property (#271).
   const transitionClass = isDragging
-    ? ''
-    : 'transition-all duration-150 ease-out';
+    ? 'transition-colors duration-fast'
+    : 'transition-[right,color,background-color,border-color] duration-base ease-out';
   const cursorClass = isDragging ? 'cursor-grabbing' : 'cursor-pointer';
   const ariaLabel = isDragging
     ? t('quickSettings.dragHandle.dragging')
@@ -52,7 +56,7 @@ export default function QuickSettingsHandle({
       onClick={onClick}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
-      className={`fixed ${placementClass} z-50 ${transitionClass} border bg-white dark:bg-gray-800 ${borderClass} rounded-l-md p-2 shadow-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 ${cursorClass} touch-none`}
+      className={`fixed ${placementClass} z-50 ${transitionClass} border bg-white dark:bg-gray-800 ${borderClass} rounded-l-md p-2 shadow-lg hover:bg-gray-100 dark:hover:bg-gray-700 ${cursorClass} touch-none`}
       style={{
         ...style,
         touchAction: 'none',

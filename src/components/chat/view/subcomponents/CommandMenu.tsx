@@ -271,7 +271,7 @@ export default function CommandMenu({
                 ref={isSelected ? selectedItemRef : null}
                 role="option"
                 aria-selected={isSelected}
-                className={`command-item group relative mb-1 flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 transition-all ${
+                className={`command-item group relative mb-1 flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 transition-[color,background-color,border-color,box-shadow] duration-fast ${
                   isSelected
                     ? 'border-primary/30 bg-primary/10 shadow-sm'
                     : 'border-transparent bg-transparent hover:border-border hover:bg-accent'

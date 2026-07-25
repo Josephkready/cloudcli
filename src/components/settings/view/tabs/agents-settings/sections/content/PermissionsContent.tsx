@@ -264,7 +264,7 @@ function CodexPermissions({ permissionMode, onPermissionModeChange }: Omit<Codex
         <p className="text-sm text-muted-foreground">{t('permissions.codex.description')}</p>
 
         <div
-          className={`cursor-pointer rounded-lg border p-4 transition-all ${permissionMode === 'default'
+          className={`cursor-pointer rounded-lg border p-4 transition-colors duration-fast ${permissionMode === 'default'
             ? 'border-border bg-accent'
             : 'border-border bg-card/50 active:border-border active:bg-accent/50'
             }`}
@@ -288,7 +288,7 @@ function CodexPermissions({ permissionMode, onPermissionModeChange }: Omit<Codex
         </div>
 
         <div
-          className={`cursor-pointer rounded-lg border p-4 transition-all ${permissionMode === 'acceptEdits'
+          className={`cursor-pointer rounded-lg border p-4 transition-colors duration-fast ${permissionMode === 'acceptEdits'
             ? 'border-green-400 bg-green-50 dark:border-green-600 dark:bg-green-900/20'
             : 'border-border bg-card/50 active:border-border active:bg-accent/50'
             }`}
@@ -312,7 +312,7 @@ function CodexPermissions({ permissionMode, onPermissionModeChange }: Omit<Codex
         </div>
 
         <div
-          className={`cursor-pointer rounded-lg border p-4 transition-all ${permissionMode === 'bypassPermissions'
+          className={`cursor-pointer rounded-lg border p-4 transition-colors duration-fast ${permissionMode === 'bypassPermissions'
             ? 'border-orange-400 bg-orange-50 dark:border-orange-600 dark:bg-orange-900/20'
             : 'border-border bg-card/50 active:border-border active:bg-accent/50'
             }`}

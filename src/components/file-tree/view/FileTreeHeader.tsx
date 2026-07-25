@@ -96,7 +96,7 @@ export default function FileTreeHeader({
                 {isUploading && typeof uploadProgress === 'number' && (
                   <span className="absolute bottom-0.5 left-1/2 h-0.5 w-4 -translate-x-1/2 overflow-hidden rounded-full bg-primary/20">
                     <span
-                      className="block h-full rounded-full bg-primary transition-[width] duration-150"
+                      className="block h-full rounded-full bg-primary transition-[width] duration-base"
                       style={{ width: `${uploadProgress}%` }}
                     />
                   </span>
