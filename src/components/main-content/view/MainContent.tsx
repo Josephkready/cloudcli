@@ -1,20 +1,28 @@
 import React from 'react';
 
 import ChatInterface from '../../chat/view/ChatInterface';
-import FileTree from '../../file-tree/view/FileTree';
-import StandaloneShell from '../../standalone-shell/view/StandaloneShell';
-import GitPanel from '../../git-panel/view/GitPanel';
-import PluginTabContent from '../../plugins/view/PluginTabContent';
 import type { MainContentProps } from '../types/types';
 import { usePaletteOpsRegister } from '../../../contexts/PaletteOpsContext';
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { useFileOpenResolver } from '../../../hooks/useFileOpenResolver';
 import { useEditorSidebar } from '../../code-editor/hooks/useEditorSidebar';
-import EditorSidebar from '../../code-editor/view/EditorSidebar';
+import LazySurface, { lazySurface } from '../../lazy/LazySurface';
+import SurfaceSkeleton from '../../lazy/SurfaceSkeleton';
+import { loadEditorSidebar, loadStandaloneShell } from '../../lazy/surfaceLoaders';
 
 import MainContentHeader from './subcomponents/MainContentHeader';
 import MainContentStateView from './subcomponents/MainContentStateView';
 import ErrorBoundary from './ErrorBoundary';
+
+// Chat is the tab the app opens on, so it stays in the entry chunk. Every other
+// tab — and the editor side panel — is demand-loaded (issue #267): shipping
+// xterm (~390 KB) and CodeMirror (~660 KB) to a session that only ever reads
+// chat was the single largest main-thread task on a cold mobile load.
+const FileTree = lazySurface(() => import('../../file-tree/view/FileTree'));
+const StandaloneShell = lazySurface(loadStandaloneShell);
+const GitPanel = lazySurface(() => import('../../git-panel/view/GitPanel'));
+const PluginTabContent = lazySurface(() => import('../../plugins/view/PluginTabContent'));
+const EditorSidebar = lazySurface(loadEditorSidebar);
 
 function MainContent({
   selectedProject,
@@ -126,51 +134,82 @@ function MainContent({
 
           {activeTab === 'files' && (
             <div className="h-full overflow-hidden">
-              <FileTree selectedProject={selectedProject} onFileOpen={handleFileOpen} />
+              <LazySurface>
+                <FileTree selectedProject={selectedProject} onFileOpen={handleFileOpen} />
+              </LazySurface>
             </div>
           )}
 
           {activeTab === 'shell' && (
             <div className="h-full w-full overflow-hidden">
-              <StandaloneShell
-                project={selectedProject}
-                session={selectedSession}
-                showHeader={false}
-                isActive={activeTab === 'shell'}
-              />
+              <LazySurface>
+                <StandaloneShell
+                  project={selectedProject}
+                  session={selectedSession}
+                  showHeader={false}
+                  isActive={activeTab === 'shell'}
+                />
+              </LazySurface>
             </div>
           )}
 
           {activeTab === 'git' && (
             <div className="h-full overflow-hidden">
-              <GitPanel selectedProject={selectedProject} isMobile={isMobile} onFileOpen={handleFileOpen} />
+              <LazySurface>
+                <GitPanel selectedProject={selectedProject} isMobile={isMobile} onFileOpen={handleFileOpen} />
+              </LazySurface>
             </div>
           )}
 
           {activeTab.startsWith('plugin:') && (
             <div className="h-full overflow-hidden">
-              <PluginTabContent
-                pluginName={activeTab.replace('plugin:', '')}
-                selectedProject={selectedProject}
-                selectedSession={selectedSession}
-              />
+              <LazySurface>
+                <PluginTabContent
+                  pluginName={activeTab.replace('plugin:', '')}
+                  selectedProject={selectedProject}
+                  selectedSession={selectedSession}
+                />
+              </LazySurface>
             </div>
           )}
         </div>
 
-        <EditorSidebar
-          editingFile={editingFile}
-          isMobile={isMobile}
-          editorExpanded={editorExpanded}
-          editorWidth={editorWidth}
-          hasManualWidth={hasManualWidth}
-          resizeHandleRef={resizeHandleRef}
-          onResizeStart={handleResizeStart}
-          onCloseEditor={handleCloseEditor}
-          onToggleEditorExpand={handleToggleEditorExpand}
-          projectPath={selectedProject.path}
-          fillSpace={activeTab === 'files'}
-        />
+        {/*
+          Gated on `editingFile` rather than rendered unconditionally: the
+          component already returns null without a file, but mounting a lazy
+          component is what triggers its import, so the guard is what keeps
+          CodeMirror off the boot path.
+        */}
+        {editingFile && (
+          <LazySurface
+            fallback={
+              isMobile ? (
+                <SurfaceSkeleton overlay label="Loading editor…" />
+              ) : (
+                <div
+                  className="h-full flex-shrink-0 border-l border-border"
+                  style={editorExpanded ? { flex: 1 } : { width: `${editorWidth}px` }}
+                >
+                  <SurfaceSkeleton label="Loading editor…" />
+                </div>
+              )
+            }
+          >
+            <EditorSidebar
+              editingFile={editingFile}
+              isMobile={isMobile}
+              editorExpanded={editorExpanded}
+              editorWidth={editorWidth}
+              hasManualWidth={hasManualWidth}
+              resizeHandleRef={resizeHandleRef}
+              onResizeStart={handleResizeStart}
+              onCloseEditor={handleCloseEditor}
+              onToggleEditorExpand={handleToggleEditorExpand}
+              projectPath={selectedProject.path}
+              fillSpace={activeTab === 'files'}
+            />
+          </LazySurface>
+        )}
       </div>
     </div>
   );

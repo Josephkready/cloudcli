@@ -3,11 +3,18 @@ import ReactDOM from 'react-dom';
 import { AlertTriangle, EyeOff, Trash2 } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { Button } from '../../../../shared/view/ui';
-import Settings from '../../../settings/view/Settings';
 import type { Project } from '../../../../types/app';
 import { normalizeProjectForSettings } from '../../utils/utils';
 import type { DeleteProjectConfirmation, SessionDeleteConfirmation, SettingsProject } from '../../types/types';
-import ProjectCreationWizard from '../../../project-creation-wizard';
+import LazySurface, { lazySurface } from '../../../lazy/LazySurface';
+import SurfaceSkeleton from '../../../lazy/SurfaceSkeleton';
+
+// Both are modal-only surfaces — the settings tree alone is eight tabs deep and
+// pulls the MCP + skills screens with it — so neither belongs in the entry
+// chunk (issue #267). They are already rendered behind an `is open` flag, which
+// is what keeps the import from firing on boot.
+const Settings = lazySurface(() => import('../../../settings/view/Settings'));
+const ProjectCreationWizard = lazySurface(() => import('../../../project-creation-wizard'));
 
 type SidebarModalsProps = {
   projects: Project[];
@@ -33,7 +40,7 @@ type TypedSettingsProps = {
   initialTab: string;
 };
 
-const SettingsComponent = Settings as (props: TypedSettingsProps) => JSX.Element;
+const SettingsComponent = Settings as unknown as (props: TypedSettingsProps) => JSX.Element;
 
 function TypedSettings(props: TypedSettingsProps) {
   return <SettingsComponent {...props} />;
@@ -65,21 +72,25 @@ export default function SidebarModals({
     <>
       {showNewProject &&
         ReactDOM.createPortal(
-          <ProjectCreationWizard
-            onClose={onCloseNewProject}
-            onProjectCreated={onProjectCreated}
-          />,
+          <LazySurface fallback={<SurfaceSkeleton overlay label="Loading project wizard…" />}>
+            <ProjectCreationWizard
+              onClose={onCloseNewProject}
+              onProjectCreated={onProjectCreated}
+            />
+          </LazySurface>,
           document.body,
         )}
 
       {showSettings &&
         ReactDOM.createPortal(
-          <TypedSettings
-            isOpen={showSettings}
-            onClose={onCloseSettings}
-            projects={settingsProjects}
-            initialTab={settingsInitialTab}
-          />,
+          <LazySurface fallback={<SurfaceSkeleton overlay label="Loading settings…" />}>
+            <TypedSettings
+              isOpen={showSettings}
+              onClose={onCloseSettings}
+              projects={settingsProjects}
+              initialTab={settingsInitialTab}
+            />
+          </LazySurface>,
           document.body,
         )}
 

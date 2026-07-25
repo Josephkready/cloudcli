@@ -48,11 +48,18 @@ const PAGE_LABELS: Record<Page, string> = {
   branches: 'Branches',
 };
 
-type CommandPaletteProps = {
+export type CommandPaletteProps = {
   selectedProject: Project | null;
   onStartNewChat: (project: Project) => void;
   onOpenSettings: (tab?: string) => void;
   onShowTab?: (tab: AppTab) => void;
+  /**
+   * Owned by `CommandPaletteHost`, not by this component: the palette is
+   * demand-loaded, so the shortcut that opens it has to be listened for from a
+   * module that is already in the entry chunk (issue #267).
+   */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 };
 
 const NAV_TABS: Array<{ id: AppTab; label: string; keywords: string }> = [
@@ -67,8 +74,9 @@ export default function CommandPalette({
   onStartNewChat,
   onOpenSettings,
   onShowTab,
+  open,
+  onOpenChange,
 }: CommandPaletteProps) {
-  const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
   const [pages, setPages] = React.useState<Page[]>([]);
   const { toggleDarkMode } = useTheme();
@@ -76,17 +84,6 @@ export default function CommandPalette({
   const ops = usePaletteOps();
 
   const page = pages.at(-1);
-
-  React.useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isCmdK = (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k';
-      if (!isCmdK) return;
-      e.preventDefault();
-      setOpen((prev) => !prev);
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, []);
 
   React.useEffect(() => {
     if (!open) {
@@ -134,9 +131,9 @@ export default function CommandPalette({
   }, [sessions, messageMatches, showSessions]);
 
   const run = React.useCallback((fn: () => void) => {
-    setOpen(false);
+    onOpenChange(false);
     fn();
-  }, []);
+  }, [onOpenChange]);
 
   const pushPage = React.useCallback((next: Page) => {
     setSearch('');
@@ -163,7 +160,7 @@ export default function CommandPalette({
   const branchesShown = page === 'branches' ? branches : branches.slice(0, browseLimit);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl overflow-hidden p-0">
         <DialogTitle>Command palette</DialogTitle>
         <Command label="Command palette" onKeyDown={handleKeyDown}>

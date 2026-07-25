@@ -7,6 +7,8 @@ import {
 type ErrorFallbackProps = FallbackProps & {
   showDetails: boolean;
   componentStack: string | null;
+  description: string;
+  retryLabel: string;
 };
 
 type ErrorBoundaryProps = {
@@ -14,7 +16,14 @@ type ErrorBoundaryProps = {
   showDetails?: boolean;
   onRetry?: () => void;
   resetKeys?: unknown[];
+  /** What failed, in the fallback's own words. Defaults to the chat wording. */
+  description?: string;
+  /** Label for the recovery button. */
+  retryLabel?: string;
 };
+
+const DEFAULT_DESCRIPTION = 'An error occurred while loading the chat interface.';
+const DEFAULT_RETRY_LABEL = 'Try Again';
 
 function formatError(error: unknown): string {
   if (error instanceof Error) {
@@ -29,6 +38,8 @@ function ErrorFallback({
   resetErrorBoundary,
   showDetails,
   componentStack,
+  description,
+  retryLabel,
 }: ErrorFallbackProps) {
   return (
     <div className="flex flex-col items-center justify-center p-8 text-center">
@@ -46,7 +57,7 @@ function ErrorFallback({
           <h3 className="ml-3 text-sm font-medium text-red-800">Something went wrong</h3>
         </div>
         <div className="text-sm text-red-700">
-          <p className="mb-2">An error occurred while loading the chat interface.</p>
+          <p className="mb-2">{description}</p>
           {showDetails && (
             <details className="mt-4">
               <summary className="cursor-pointer font-mono text-xs">Error Details</summary>
@@ -62,7 +73,7 @@ function ErrorFallback({
             onClick={resetErrorBoundary}
             className="rounded bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
           >
-            Try Again
+            {retryLabel}
           </button>
         </div>
       </div>
@@ -75,6 +86,8 @@ function ErrorBoundary({
   showDetails = false,
   onRetry = undefined,
   resetKeys = undefined,
+  description = DEFAULT_DESCRIPTION,
+  retryLabel = DEFAULT_RETRY_LABEL,
 }: ErrorBoundaryProps) {
   const [componentStack, setComponentStack] = useState<string | null>(null);
 
@@ -96,9 +109,11 @@ function ErrorBoundary({
         resetErrorBoundary={resetErrorBoundary}
         showDetails={showDetails}
         componentStack={componentStack}
+        description={description}
+        retryLabel={retryLabel}
       />
     ),
-    [showDetails, componentStack]
+    [showDetails, componentStack, description, retryLabel]
   );
 
   return (

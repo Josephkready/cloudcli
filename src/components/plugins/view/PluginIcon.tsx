@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import DOMPurify from 'dompurify';
 
 import { authenticatedFetch } from '../../../utils/api';
 
@@ -34,7 +33,15 @@ const FORBIDDEN_SVG_ATTRS = [
   'style',
 ];
 
-function sanitizeSvg(svgText: string): string | null {
+/**
+ * DOMPurify is ~22 KB minified and exists solely for plugin icons, which most
+ * installs never have. Importing it here — inside the fetch path, after we know
+ * there is an icon to sanitise — keeps it out of the entry chunk even though
+ * this component renders in the always-visible tab strip (issue #267).
+ */
+async function sanitizeSvg(svgText: string): Promise<string | null> {
+  const { default: DOMPurify } = await import('dompurify');
+
   const sanitized = DOMPurify.sanitize(svgText, {
     USE_PROFILES: { svg: true, svgFilters: true },
     FORBID_TAGS: FORBIDDEN_SVG_TAGS,
@@ -67,9 +74,9 @@ export default function PluginIcon({ pluginName, iconFile, className }: Props) {
         if (!r.ok) return;
         return r.text();
       })
-      .then((text) => {
+      .then(async (text) => {
         if (!text) return;
-        const sanitized = sanitizeSvg(text);
+        const sanitized = await sanitizeSvg(text);
         if (sanitized) {
           svgCache.set(url, sanitized);
           setSvg(sanitized);
