@@ -7,6 +7,7 @@ import type {
   LLMProvider,
   ProviderModelsDefinition,
 } from "../../../../types/app";
+import { recordFeatureUse } from "../../../../utils/featureUsage";
 import SessionProviderLogo from "../../../llm-logo-provider/SessionProviderLogo";
 import {
   Dialog,
@@ -136,6 +137,9 @@ export default function ProviderSelectionEmptyState({
 
   const handleModelSelect = useCallback(
     (providerId: LLMProvider, modelValue: string) => {
+      // The pre-session picker; the in-session `/model` path is counted in
+      // useChatProviderState.selectProviderModel.
+      recordFeatureUse('chat.model_change');
       setProvider(providerId);
       localStorage.setItem("selected-provider", providerId);
       setModelForProvider(providerId, modelValue);

@@ -2,9 +2,11 @@ import { MessageSquare, Terminal, Folder, GitBranch, type LucideIcon } from 'luc
 import type { Dispatch, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import type { FeatureKey } from '../../../../../shared/featureKeys';
 import { Tooltip, PillBar, Pill } from '../../../../shared/view/ui';
 import type { AppTab } from '../../../../types/app';
 import { usePlugins } from '../../../../contexts/PluginsContext';
+import { recordFeatureUse } from '../../../../utils/featureUsage';
 import PluginIcon from '../../../plugins/view/PluginIcon';
 
 type MainContentTabSwitcherProps = {
@@ -35,6 +37,19 @@ const BASE_TABS: BuiltInTab[] = [
   { kind: 'builtin', id: 'files', labelKey: 'tabs.files', icon: Folder },
   { kind: 'builtin', id: 'git',   labelKey: 'tabs.git',   icon: GitBranch },
 ];
+
+/**
+ * Usage keys for the built-in tabs (issue #248). Anything not listed here is a
+ * drop-installed plugin tab, which counts under the single `tab.plugin` key —
+ * the question is whether the plugin subsystem earns its keep, not which plugin
+ * is popular.
+ */
+const TAB_USAGE_KEYS: Partial<Record<AppTab, FeatureKey>> = {
+  chat: 'tab.chat',
+  shell: 'tab.shell',
+  files: 'tab.files',
+  git: 'tab.git',
+};
 
 export default function MainContentTabSwitcher({
   activeTab,
@@ -67,7 +82,10 @@ export default function MainContentTabSwitcher({
           <Tooltip key={tab.id} content={displayLabel} position="bottom">
             <Pill
               isActive={isActive}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                recordFeatureUse(TAB_USAGE_KEYS[tab.id] ?? 'tab.plugin');
+                setActiveTab(tab.id);
+              }}
               className="px-2.5 py-[5px]"
             >
               {tab.kind === 'builtin' ? (

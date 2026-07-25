@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next';
 
 import { Button } from '../../../../shared/view/ui';
 import { cn } from '../../../../lib/utils';
+import { recordFeatureUse } from '../../../../utils/featureUsage';
 import type { Project, ProjectSession, LLMProvider } from '../../../../types/app';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import type { SessionWithProvider } from '../../types/types';
@@ -99,9 +100,13 @@ export default function SidebarProjectItem({
   const sessionCountLabel = `${sessionCountDisplay} session${totalSessionCount === 1 ? '' : 's'}`;
 
   const toggleProject = () => onToggleProject(project.projectId);
-  const toggleStarProject = () => onToggleStarProject(project.projectId);
+  const toggleStarProject = () => {
+    recordFeatureUse('project.star');
+    onToggleStarProject(project.projectId);
+  };
 
   const saveProjectName = () => {
+    recordFeatureUse('project.rename');
     onSaveProjectName(project.projectId);
   };
 

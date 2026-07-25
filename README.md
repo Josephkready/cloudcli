@@ -35,6 +35,33 @@ The server serves the built client and the API on port `3001` by default. See `.
 
 Plugins (custom web-UI tabs, drop-installed by writing files): see [`docs/plugins.md`](docs/plugins.md).
 
+## Local feature-usage counters
+
+Alongside the auth/session data in `~/.cloudcli/auth.db` (`DATABASE_PATH`), the
+app keeps a `feature_usage` table: one aggregate row per feature — a count plus
+the first/last time it was touched. It exists so the next round of leaning out
+the fork can be driven by evidence about what actually gets used rather than by
+guesswork (issue #248).
+
+It is **aggregate counters, not an event log**: no per-event rows, no arguments,
+no content, no third-party analytics, and nothing ever leaves the machine. The
+key list in [`shared/featureKeys.ts`](shared/featureKeys.ts) is a closed literal
+union, so it doubles as the feature inventory and a removed feature's key fails
+typecheck.
+
+```bash
+node dist-server/server/cli.js usage           # every key, least-used first
+node dist-server/server/cli.js usage --json    # machine-readable
+node dist-server/server/cli.js usage --clear   # reset the counters
+npm run usage                                  # same readout, from a dev checkout
+```
+
+Set `FEATURE_USAGE_ENABLED=false` in `.env` to stop recording.
+
+Reading the output takes judgement: zero usage is a *candidate* for removal, not
+a verdict. Give it a long window (90+ days — rare is not dead), and rule out
+"unused because it's broken or undiscoverable" before trusting a zero.
+
 ## Deployment
 
 Production runs on `dante` and is reconciled by `ansible-pull` against `origin/main`. The build (`scripts/dante-build.sh`: `npm ci` + `vite build` + asset precompression + `tsc`/`tsc-alias`, atomic swap) and the `systemd` unit that runs `node dist-server/server/index.js` are owned by the deploy repo — **ship changes by merging to `origin/main`, not by SSH+rsync.** See the mind design doc `cloudcli-dante-deploy` and the `dante-sync` / `dante-live` skills for the full workflow.

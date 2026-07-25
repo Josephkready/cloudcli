@@ -16,6 +16,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '../../../lib/utils';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import {
   Badge,
   Button,
@@ -337,6 +338,7 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
       return;
     }
 
+    recordFeatureUse('skills.install');
     setIsSubmitting(true);
     setSubmitError(null);
 

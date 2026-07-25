@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next';
 
 import { Badge, CursorContextMenu, Tooltip, buttonVariants } from '../../../../shared/view/ui';
 import { cn } from '../../../../lib/utils';
+import { recordFeatureUse } from '../../../../utils/featureUsage';
 import type { Project, ProjectSession, LLMProvider } from '../../../../types/app';
 import type { SessionWithProvider } from '../../types/types';
 import { createSessionViewModel } from '../../utils/utils';
@@ -117,6 +118,7 @@ export default function SidebarSessionItem({
   };
 
   const saveEditedSession = () => {
+    recordFeatureUse('session.rename');
     onSaveEditingSession(project.projectId, session.id, editingSessionName, session.__provider);
   };
 
@@ -124,7 +126,10 @@ export default function SidebarSessionItem({
     onDeleteSession(project.projectId, session.id, sessionView.sessionName, session.__provider);
   };
 
+  // The one funnel for archiving: hover cluster, mobile row action and the
+  // right-click menu all call this.
   const requestArchiveSession = () => {
+    recordFeatureUse('session.archive');
     onArchiveSession(session.id);
   };
 

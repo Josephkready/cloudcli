@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Dispatch, KeyboardEvent, RefObject, SetStateAction } from 'react';
 import { api } from '../../../utils/api';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import { escapeRegExp } from '../utils/chatFormatting';
 import type { Project } from '../../../types/app';
 
@@ -177,6 +178,7 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
 
   const selectFile = useCallback(
     (file: MentionableFile) => {
+      recordFeatureUse('chat.file_mention');
       const textBeforeAt = input.slice(0, atSymbolPosition);
       const textAfterAtQuery = input.slice(atSymbolPosition);
       const spaceIndex = textAfterAtQuery.indexOf(' ');

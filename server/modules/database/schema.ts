@@ -148,6 +148,27 @@ CREATE TABLE IF NOT EXISTS active_runs (
 );
 `;
 
+/**
+ * Aggregate local feature-usage counters (issue #248).
+ *
+ * Deliberately *not* an event log: one row per feature key, holding only how
+ * many times it was touched and when it was first/last touched. No per-event
+ * rows, no arguments, no content — so the table stays a few dozen rows forever
+ * and never becomes a behavioural record of the user's work.
+ *
+ * The key set is the closed literal union in `shared/featureKeys.ts`, which
+ * doubles as the feature inventory: the readout zero-fills every known key, so
+ * an untouched feature shows up as a `0` rather than as a missing row.
+ */
+export const FEATURE_USAGE_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS feature_usage (
+    feature_key TEXT PRIMARY KEY,
+    use_count INTEGER NOT NULL DEFAULT 0,
+    first_used_at DATETIME,
+    last_used_at DATETIME
+);
+`;
+
 export const APP_CONFIG_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS app_config (
     key TEXT PRIMARY KEY,
@@ -199,4 +220,6 @@ CREATE INDEX IF NOT EXISTS idx_active_runs_session ON active_runs(session_id);
 CREATE INDEX IF NOT EXISTS idx_active_runs_status ON active_runs(status);
 
 ${APP_CONFIG_TABLE_SCHEMA_SQL}
+
+${FEATURE_USAGE_TABLE_SCHEMA_SQL}
 `;

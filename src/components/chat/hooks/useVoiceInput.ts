@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { transcribeVoice } from '../../../lib/voiceApi';
 import { readVoiceError } from '../../../lib/voiceError';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 
 // Mobile-safe recording: iOS Safari 18.4+ supports webm/opus; older iOS needs mp4.
 const MIME_CANDIDATES = [
@@ -143,7 +144,9 @@ export function useVoiceInput(
 
   const toggle = useCallback(() => {
     if (state === 'recording') stop();
-    else if (state === 'idle') start();
+    // Counted on the start edge only, so one dictation is one use rather than
+    // two (start + stop).
+    else if (state === 'idle') { recordFeatureUse('chat.voice_input'); start(); }
   }, [state, start, stop]);
 
   return { state, toggle, stop };

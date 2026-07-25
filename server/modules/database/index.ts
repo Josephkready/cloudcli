@@ -5,6 +5,8 @@ export type { ActiveRunRow, ActiveRunStatus, PersistRunInput } from '@/modules/d
 export { apiKeysDb } from '@/modules/database/repositories/api-keys.js';
 export { appConfigDb } from '@/modules/database/repositories/app-config.js';
 export { credentialsDb } from '@/modules/database/repositories/credentials.js';
+export { featureUsageDb, isFeatureUsageEnabled } from '@/modules/database/repositories/feature-usage.db.js';
+export type { FeatureUsageEntry } from '@/modules/database/repositories/feature-usage.db.js';
 export { githubTokensDb } from '@/modules/database/repositories/github-tokens.js';
 export { notificationPreferencesDb } from '@/modules/database/repositories/notification-preferences.js';
 export { projectsDb } from '@/modules/database/repositories/projects.db.js';

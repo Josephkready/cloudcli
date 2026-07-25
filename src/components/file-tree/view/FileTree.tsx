@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Check, X, Loader2, Folder, Upload } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import { ICON_SIZE_CLASS, getFileIconData } from '../constants/fileIcons';
 import { useExpandedDirectories } from '../hooks/useExpandedDirectories';
 import { useFileTreeData } from '../hooks/useFileTreeData';
@@ -112,6 +113,7 @@ export default function FileTree({ selectedProject, onFileOpen }: FileTreeProps)
         return;
       }
 
+      recordFeatureUse('files.open_editor');
       onFileOpen?.(item.path);
     },
     [onFileOpen, selectedProject, toggleDirectory],

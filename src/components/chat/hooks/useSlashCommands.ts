@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, KeyboardEvent, RefObject, SetStateAction } from 'react';
 
 import { authenticatedFetch } from '../../../utils/api';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import { safeLocalStorage } from '../utils/chatStorage';
 import type { LLMProvider, Project } from '../../../types/app';
 
@@ -233,6 +234,10 @@ export function useSlashCommands({
 
   const executeNonSkillCommand = useCallback(
     (command: SlashCommand) => {
+      // The one funnel for running a command out of the menu (click and
+      // keyboard both land here); the typed `/foo` + Enter path is counted in
+      // useChatComposerState's handleSubmit.
+      recordFeatureUse('chat.slash_command');
       const executionResult = onExecuteCommand(command);
       if (isPromiseLike(executionResult)) {
         executionResult.then(

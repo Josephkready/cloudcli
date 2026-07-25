@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { authenticatedFetch } from '../../../utils/api';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import type { PendingPermissionRequest, PermissionMode } from '../types/types';
 import type {
   ProjectSession,
@@ -134,6 +135,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   }, []);
 
   const setStoredProviderEffort = useCallback((targetProvider: LLMProvider, effort: string) => {
+    recordFeatureUse('chat.effort_change');
     setProviderEfforts((previous) => (
       previous[targetProvider] === effort
         ? previous
@@ -414,6 +416,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   }, [selectedSession?.id]);
 
   const cyclePermissionMode = useCallback(() => {
+    recordFeatureUse('chat.permission_mode_change');
     const modes = getPermissionModesForProvider(provider);
 
     const currentIndex = modes.indexOf(permissionMode);
@@ -445,6 +448,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     model: string,
     sessionId?: string | null,
   ) => {
+    recordFeatureUse('chat.model_change');
     const normalizedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
     if (!normalizedSessionId) {
       setStoredProviderModel(targetProvider, model);

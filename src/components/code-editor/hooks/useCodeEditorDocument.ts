@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../../utils/api';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import type { CodeEditorFile } from '../types/types';
 import { isBinaryFile } from '../utils/binaryFile';
 import { getPreviewKind } from '../utils/previewableFile';
@@ -108,6 +109,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
       return true;
     }
 
+    recordFeatureUse('files.save');
     setSaving(true);
     setSaveError(null);
 

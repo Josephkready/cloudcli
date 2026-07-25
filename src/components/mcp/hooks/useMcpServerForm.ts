@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import { DEFAULT_MCP_FORM, MCP_SUPPORTED_SCOPES, MCP_SUPPORTED_TRANSPORTS } from '../constants';
 import type { McpFormState, McpProject, McpProvider, McpScope, McpTransport, ProviderMcpServer } from '../types';
 import {
@@ -217,6 +218,8 @@ export function useMcpServerForm({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    // The same form edits an existing server; only an add counts as an add.
+    if (!editingServer) recordFeatureUse('mcp.server_add');
     setIsSubmitting(true);
 
     try {

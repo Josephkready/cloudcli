@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Button, Input } from '../../../shared/view/ui';
 import { cn } from '../../../lib/utils';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import { MAX_FILE_UPLOAD_SIZE_LABEL } from '../constants/constants';
 import type { FileTreeViewMode } from '../types/types';
 
@@ -197,7 +198,12 @@ export default function FileTreeHeader({
           type="text"
           placeholder={t('fileTree.searchPlaceholder')}
           value={searchQuery}
-          onChange={(event) => onSearchQueryChange(event.target.value)}
+          onChange={(event) => {
+            // Counted once per search session (empty -> non-empty) rather than
+            // per keystroke, so the counter measures searches, not typing.
+            if (event.target.value && !searchQuery) recordFeatureUse('files.search');
+            onSearchQueryChange(event.target.value);
+          }}
           className="h-8 pl-8 pr-8 text-sm"
         />
         {searchQuery && (

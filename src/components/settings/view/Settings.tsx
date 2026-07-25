@@ -14,6 +14,7 @@ import DataSettingsTab from '../view/tabs/DataSettingsTab';
 import AboutTab from '../view/tabs/AboutTab';
 import { useSettingsController } from '../hooks/useSettingsController';
 import { useWebPush } from '../../../hooks/useWebPush';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import type { SettingsProps } from '../types/types';
 
 function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: SettingsProps) {
@@ -54,6 +55,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
   } = useWebPush();
 
   const handleEnablePush = async () => {
+    recordFeatureUse('notifications.push');
     await pushSubscribe();
     // Server sets webPush: true in preferences on subscribe; sync local state
     setNotificationPreferences({
@@ -100,7 +102,15 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
 
         {/* Body: sidebar + content */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
-          <SettingsSidebar activeTab={activeTab} onChange={setActiveTab} />
+          <SettingsSidebar
+            activeTab={activeTab}
+            onChange={(tab) => {
+              // One key per settings tab, so an untouched tab reads as a zero
+              // in the usage readout instead of vanishing into an aggregate.
+              recordFeatureUse(`settings.tab.${tab}`);
+              setActiveTab(tab);
+            }}
+          />
 
           {/* Content */}
           <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">

@@ -1,4 +1,5 @@
 import { FileText, GitBranch, History } from 'lucide-react';
+import { recordFeatureUse } from '../../../utils/featureUsage';
 import type { GitPanelView } from '../types/types';
 
 type GitViewTabsProps = {
@@ -24,7 +25,12 @@ export default function GitViewTabs({ activeView, isHidden, changeCount, onChang
       {TABS.map(({ id, label, Icon }) => (
         <button
           key={id}
-          onClick={() => onChange(id)}
+          onClick={() => {
+            // Only the Commits tab has an inventory key; Changes is the default
+            // view and Branches is already covered by the branch keys.
+            if (id === 'history') recordFeatureUse('git.history_view');
+            onChange(id);
+          }}
           className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
             activeView === id
               ? 'border-b-2 border-primary text-primary'

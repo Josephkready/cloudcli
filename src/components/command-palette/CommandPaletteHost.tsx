@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { recordFeatureUse } from '../../utils/featureUsage';
 import LazySurface, { lazySurface } from '../lazy/LazySurface';
 
 import type { CommandPaletteProps } from './CommandPalette';
@@ -22,6 +23,11 @@ export type CommandPaletteHostProps = Omit<CommandPaletteProps, 'open' | 'onOpen
 export default function CommandPaletteHost(props: CommandPaletteHostProps) {
   const [open, setOpen] = useState(false);
   const [everOpened, setEverOpened] = useState(false);
+  // The keydown listener is registered once and would otherwise close over a
+  // stale `open`; the mirror lets it tell opening from closing so usage counts
+  // one open per open rather than one per Cmd+K press.
+  const openRef = useRef(false);
+  openRef.current = open;
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -29,6 +35,7 @@ export default function CommandPaletteHost(props: CommandPaletteHostProps) {
         (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k';
       if (!isCmdK) return;
       event.preventDefault();
+      if (!openRef.current) recordFeatureUse('palette.open');
       setEverOpened(true);
       setOpen((previous) => !previous);
     };
