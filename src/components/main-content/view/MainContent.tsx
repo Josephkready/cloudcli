@@ -6,6 +6,7 @@ import { usePaletteOpsRegister } from '../../../contexts/PaletteOpsContext';
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { useFileOpenResolver } from '../../../hooks/useFileOpenResolver';
 import { useEditorSidebar } from '../../code-editor/hooks/useEditorSidebar';
+import { useStickyMount } from '../hooks/useStickyMount';
 import LazySurface, { lazySurface } from '../../lazy/LazySurface';
 import SurfaceSkeleton from '../../lazy/SurfaceSkeleton';
 import { loadEditorSidebar, loadStandaloneShell } from '../../lazy/surfaceLoaders';
@@ -69,6 +70,12 @@ function MainContent({
   // Resolves bare/partial file references (e.g. links inside chat messages) to
   // real project files before opening them in the in-app editor.
   const resolvedFileOpen = useFileOpenResolver(selectedProject, handleFileOpen);
+
+  const isShellTab = activeTab === 'shell';
+  const isShellMounted = useStickyMount(
+    isShellTab,
+    selectedProject?.fullPath || selectedProject?.path || null,
+  );
 
   usePaletteOpsRegister({
     openFile: (filePath: string) => {
@@ -140,14 +147,23 @@ function MainContent({
             </div>
           )}
 
-          {activeTab === 'shell' && (
-            <div className="h-full w-full overflow-hidden">
+          {/*
+            Hidden rather than unmounted once opened (issue #272): rebuilding
+            xterm, its addons, a WebGL context and the pty websocket on every
+            return made repeat opens as expensive as the first. The mount is
+            scoped to the selected project, so at most one terminal is ever
+            alive and it never outlives the project it belongs to. `autoConnect`
+            follows the tab so a hidden shell never spawns a pty on its own.
+          */}
+          {isShellMounted && (
+            <div className={`h-full w-full overflow-hidden ${isShellTab ? 'block' : 'hidden'}`}>
               <LazySurface>
                 <StandaloneShell
                   project={selectedProject}
                   session={selectedSession}
                   showHeader={false}
-                  isActive={activeTab === 'shell'}
+                  isActive={isShellTab}
+                  autoConnect={isShellTab}
                 />
               </LazySurface>
             </div>

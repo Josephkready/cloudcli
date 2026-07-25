@@ -44,6 +44,8 @@ export type UseShellRuntimeOptions = {
   minimal: boolean;
   autoConnect: boolean;
   isRestarting: boolean;
+  /** False while the shell is mounted but hidden behind another tab. */
+  isActive: boolean;
   onProcessComplete?: ((exitCode: number) => void) | null;
   onOutputRef?: MutableRefObject<(() => void) | null>;
 };
