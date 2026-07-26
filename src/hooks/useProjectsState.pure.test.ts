@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import type { Project, ProjectSession } from '../types/app';
+import { filterCliOriginSessions } from '../components/sidebar/utils/utils';
 
 import {
   countLoadedProjectSessions,
@@ -342,6 +343,17 @@ describe('upsertSessionIntoProject', () => {
     }));
     assert.equal(next.sessions?.[0].__provider, 'codex');
     assert.equal(next.sessions?.[0].id, 's1');
+  });
+
+  it('retains CLI origin on a new realtime row so the hide filter excludes it', () => {
+    const existing = project({ sessions: [], sessionMeta: { hasMore: false, total: 0 } });
+    const next = upsertSessionIntoProject(existing, upsertEvent({
+      sessionId: 'native-cli-session',
+      session: session('native-cli-session', { origin: 'cli' }),
+    }));
+
+    assert.equal(next.sessions?.[0].origin, 'cli');
+    assert.deepEqual(filterCliOriginSessions(next.sessions ?? [], true), []);
   });
 
   it('keeps hasMore true when the project still has unloaded pages', () => {

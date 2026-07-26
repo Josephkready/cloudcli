@@ -84,7 +84,10 @@ run pass — investigate the regression instead. The LCOV parser has self-tests
 | Front-end component | `src/**/*.spec.{ts,tsx}` | vitest + jsdom + RTL | `npm run test:component` |
 
 The `.test` / `.spec` suffix is what routes a file to a runner, so the globs
-never overlap. Pick by what the test needs:
+never overlap. Tailwind also excludes both suffixes from its `content` scan:
+source-policy guards quote forbidden utility classes in their assertions, and
+those test-only strings must not generate production CSS. Pick by what the test
+needs:
 
 - **No DOM needed** → `*.test.ts(x)` with `node:test`. Zero framework
   dependency, fastest feedback. This is still the default for pure logic.

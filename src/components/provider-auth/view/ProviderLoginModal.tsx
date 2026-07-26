@@ -3,6 +3,8 @@ import { DEFAULT_PROJECT_FOR_EMPTY_SHELL, IS_PLATFORM } from '../../../constants
 import type { LLMProvider } from '../../../types/app';
 import LazySurface, { lazySurface } from '../../lazy/LazySurface';
 import { loadStandaloneShell } from '../../lazy/surfaceLoaders';
+import { useFocusTrap } from '../../../shared/view/ui/useFocusTrap';
+import { useOverlayDismiss } from '../../../shared/view/ui/useOverlayDismiss';
 
 // The login terminal is the only reason xterm would otherwise be reachable from
 // settings and onboarding, so the import is deferred to the moment the modal
@@ -55,6 +57,9 @@ export default function ProviderLoginModal({
   customCommand,
   isAuthenticated = false,
 }: ProviderLoginModalProps) {
+  const { backdropProps } = useOverlayDismiss({ isActive: isOpen, onDismiss: onClose });
+  const { containerRef } = useFocusTrap<HTMLDivElement>({ isActive: isOpen });
+
   if (!isOpen) {
     return null;
   }
@@ -68,10 +73,19 @@ export default function ProviderLoginModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-50 max-md:items-stretch max-md:justify-stretch">
-      <div className="flex h-3/4 w-full max-w-4xl flex-col rounded-lg bg-white shadow-xl dark:bg-gray-800 max-md:m-0 max-md:h-full max-md:max-w-none max-md:rounded-none md:m-4 md:h-3/4 md:max-w-4xl md:rounded-lg">
+    <div
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black bg-opacity-50 max-md:items-stretch max-md:justify-stretch"
+      {...backdropProps}
+    >
+      <div
+        ref={containerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="provider-login-title"
+        className="flex h-3/4 w-full max-w-4xl flex-col rounded-lg bg-white shadow-xl dark:bg-gray-800 max-md:m-0 max-md:h-full max-md:max-w-none max-md:rounded-none md:m-4 md:h-3/4 md:max-w-4xl md:rounded-lg"
+      >
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
+          <h3 id="provider-login-title" className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
           <button
             onClick={onClose}
             className="text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300"
