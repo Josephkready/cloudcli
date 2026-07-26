@@ -161,7 +161,7 @@ function arbitraryTransitionLists(file: string): string[][] {
 
 type InlineTransition = {
   line: number;
-  declaration: 'transition' | 'transitionDuration';
+  declaration: 'transition' | 'transitionDuration' | 'transitionProperty';
   value: string;
 };
 
@@ -170,14 +170,22 @@ type InlineTransition = {
  * intentionally excludes CSS text embedded in template literals while still
  * covering `style={{ transition: '…' }}` and reusable `CSSProperties` objects.
  */
+function parseInlineTransitions(source: string): InlineTransition[] {
+  const declarations: InlineTransition[] = [];
+  const pattern = /\b(transition|transitionDuration|transitionProperty)\s*:\s*(['"`])([\s\S]*?)\2/g;
+  for (const match of source.matchAll(pattern)) {
+    declarations.push({
+      line: source.slice(0, match.index).split('\n').length,
+      declaration: match[1] as InlineTransition['declaration'],
+      value: match[3],
+    });
+  }
+  return declarations;
+}
+
 function inlineTransitions(file: string): InlineTransition[] {
-  return codeLines(file).flatMap(({ line, number }) =>
-    [...line.matchAll(/\b(transition|transitionDuration)\s*:\s*(['"`])([^'"`]+)\2/g)]
-      .map(([, declaration, , value]) => ({
-        line: number,
-        declaration: declaration as InlineTransition['declaration'],
-        value,
-      })),
+  return parseInlineTransitions(
+    codeLines(file).map(({ line }) => line).join('\n'),
   );
 }
 
@@ -186,6 +194,11 @@ function transitionProperties(value: string): string[] {
     const property = part.trim().split(/\s+/)[0]?.toLowerCase();
     return property ? [property] : [];
   });
+}
+
+function durationsInMs(value: string): number[] {
+  return [...value.matchAll(/\b(\d+(?:\.\d+)?)(ms|s)\b/g)]
+    .map(([, amount, unit]) => Number(amount) * (unit === 's' ? 1_000 : 1));
 }
 
 describe('the semantic motion scale (#271)', () => {
@@ -217,14 +230,20 @@ describe('the semantic motion scale (#271)', () => {
   });
 
   test('nothing uses transition-all', () => {
-    const offenders = SOURCE_FILES.flatMap((file) =>
+    const classOffenders = SOURCE_FILES.flatMap((file) =>
       codeLines(file)
         .filter(({ line }) => line.includes('transition-all'))
         .map(({ number }) => `${relative(file)}:${number}`),
     );
+    const inlineOffenders = SOURCE_FILES.flatMap((file) =>
+      inlineTransitions(file)
+        .filter(({ declaration, value }) =>
+          declaration !== 'transitionDuration' && transitionProperties(value).includes('all'))
+        .map(({ line }) => `${relative(file)}:${line}`),
+    );
 
     assert.deepEqual(
-      offenders,
+      [...classOffenders, ...inlineOffenders],
       [],
       'transition-all watches every animatable property, including layout ones. '
         + 'Name the properties: transition-colors, transition-transform, transition-opacity, '
@@ -235,6 +254,26 @@ describe('the semantic motion scale (#271)', () => {
   test('index.css never falls back to transition: all either', () => {
     assert.doesNotMatch(CSS, /transition:\s*all\b/, 'index.css sets `transition: all`');
     assert.doesNotMatch(CSS, /transition-property:\s*all\b/, 'index.css sets `transition-property: all`');
+  });
+
+  test('inline transition parser covers multiline shorthand and longhands', () => {
+    const parsed = parseInlineTransitions(`
+      const style = {
+        transition:
+          'width 300ms ease',
+        transitionProperty: "height",
+        transitionDuration: \`0.4s\`,
+      };
+    `);
+
+    assert.deepEqual(
+      parsed.map(({ declaration, value }) => [declaration, value.trim()]),
+      [
+        ['transition', 'width 300ms ease'],
+        ['transitionProperty', 'height'],
+        ['transitionDuration', '0.4s'],
+      ],
+    );
   });
 
   test('every duration class comes from the scale', () => {
@@ -258,10 +297,12 @@ describe('the semantic motion scale (#271)', () => {
   test('inline style transitions use the semantic duration scale', () => {
     const allowedDurations = new Set(transitionDurationTokens().values());
     const offenders = SOURCE_FILES.flatMap((file) =>
-      inlineTransitions(file).flatMap(({ line, value }) =>
-        [...value.matchAll(/(\d+(?:\.\d+)?)ms\b/g)]
-          .filter(([, duration]) => !allowedDurations.has(Number(duration)))
-          .map(([, duration]) => `${relative(file)}:${line}: ${duration}ms`),
+      inlineTransitions(file).flatMap(({ line, declaration, value }) =>
+        declaration === 'transitionProperty'
+          ? []
+          : durationsInMs(value)
+            .filter((duration) => !allowedDurations.has(duration))
+            .map((duration) => `${relative(file)}:${line}: ${duration}ms`),
       ),
     );
 
@@ -290,7 +331,7 @@ describe('the semantic motion scale (#271)', () => {
       }
 
       for (const { line, declaration, value } of inlineTransitions(file)) {
-        if (declaration !== 'transition') continue;
+        if (declaration === 'transitionDuration') continue;
         const layout = transitionProperties(value).filter((property) => LAYOUT_PROPERTIES.includes(property));
         if (layout.length === 0) continue;
 
@@ -318,14 +359,23 @@ describe('the semantic motion scale (#271)', () => {
     const slow = transitionDurationTokens().get('slow');
     assert.ok(slow, 'semantic motion scale has no slow/overlay duration');
 
+    const entries = [...animations.matchAll(/['"]?([\w-]+)['"]?\s*:\s*(['"])(.*?)\2/g)]
+      .map(([, name, , value]) => ({ name, value }));
+    assert.ok(entries.length > 0, 'tailwind animation block has no parseable entries');
+    assert.ok(entries.some(({ name }) => name === 'dialog-overlay-show'), 'dialog overlay animation is not pinned');
+    assert.ok(entries.some(({ name }) => name === 'dialog-content-show'), 'dialog content animation is not pinned');
+
     const offenders: string[] = [];
-    for (const [, name, value] of animations.matchAll(/['"]?([\w-]+)['"]?\s*:\s*'([^']+)'/g)) {
-      if (/\binfinite\b/.test(value)) continue;
-      const duration = value.match(/\b(\d+(?:\.\d+)?)(ms|s)\b/);
-      assert.ok(duration, `${name} has no parseable animation duration: ${value}`);
-      const durationMs = Number(duration[1]) * (duration[2] === 's' ? 1_000 : 1);
-      if (durationMs > slow) {
-        offenders.push(`${name}: ${durationMs}ms`);
+    for (const { name, value } of entries) {
+      for (const animation of value.split(',')) {
+        if (/\binfinite\b/.test(animation)) continue;
+        const durations = durationsInMs(animation);
+        assert.ok(durations.length > 0, `${name} has no parseable animation duration: ${animation}`);
+        for (const durationMs of durations) {
+          if (durationMs > slow) {
+            offenders.push(`${name}: ${durationMs}ms`);
+          }
+        }
       }
     }
 
