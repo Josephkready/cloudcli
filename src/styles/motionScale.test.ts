@@ -201,6 +201,24 @@ function durationsInMs(value: string): number[] {
     .map(([, amount, unit]) => Number(amount) * (unit === 's' ? 1_000 : 1));
 }
 
+function splitTopLevelCommas(value: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === '(') depth += 1;
+    if (value[index] === ')') depth = Math.max(0, depth - 1);
+    if (value[index] === ',' && depth === 0) {
+      parts.push(value.slice(start, index));
+      start = index + 1;
+    }
+  }
+
+  parts.push(value.slice(start));
+  return parts;
+}
+
 describe('the semantic motion scale (#271)', () => {
   test('src/ has files to scan', () => {
     // Guards the guard: a broken walk would make every assertion below vacuous.
@@ -272,6 +290,18 @@ describe('the semantic motion scale (#271)', () => {
         ['transition', 'width 300ms ease'],
         ['transitionProperty', 'height'],
         ['transitionDuration', '0.4s'],
+      ],
+    );
+  });
+
+  test('animation lists split only at top-level commas', () => {
+    assert.deepEqual(
+      splitTopLevelCommas(
+        'fade 160ms cubic-bezier(0.4, 0, 0.2, 1), slide 200ms ease',
+      ).map((part) => part.trim()),
+      [
+        'fade 160ms cubic-bezier(0.4, 0, 0.2, 1)',
+        'slide 200ms ease',
       ],
     );
   });
@@ -367,7 +397,7 @@ describe('the semantic motion scale (#271)', () => {
 
     const offenders: string[] = [];
     for (const { name, value } of entries) {
-      for (const animation of value.split(',')) {
+      for (const animation of splitTopLevelCommas(value)) {
         if (/\binfinite\b/.test(animation)) continue;
         const durations = durationsInMs(animation);
         assert.ok(durations.length > 0, `${name} has no parseable animation duration: ${animation}`);
