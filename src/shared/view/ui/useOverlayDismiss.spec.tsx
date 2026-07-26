@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -52,6 +52,16 @@ describe('useOverlayDismiss (#243)', () => {
 
     await user.click(screen.getByTestId('a-backdrop'));
 
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('prevents the backdrop press from stealing restored focus', () => {
+    const onDismiss = vi.fn();
+    render(<Overlay label="a" isActive onDismiss={onDismiss} />);
+
+    const allowedDefault = fireEvent.mouseDown(screen.getByTestId('a-backdrop'));
+
+    expect(allowedDefault).toBe(false);
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 

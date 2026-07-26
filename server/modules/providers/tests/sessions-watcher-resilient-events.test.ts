@@ -1,7 +1,35 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
-import { buildResilientSessionEvents } from '@/modules/providers/services/sessions-watcher.service.js';
+import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import {
+  buildResilientSessionEvents,
+  buildSessionUpsertedEvent,
+} from '@/modules/providers/services/sessions-watcher.service.js';
+
+async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
+  const previousDatabasePath = process.env.DATABASE_PATH;
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'sessions-watcher-events-'));
+
+  closeConnection();
+  process.env.DATABASE_PATH = path.join(tempDirectory, 'auth.db');
+  await initializeDatabase();
+
+  try {
+    await runTest();
+  } finally {
+    closeConnection();
+    if (previousDatabasePath === undefined) {
+      delete process.env.DATABASE_PATH;
+    } else {
+      process.env.DATABASE_PATH = previousDatabasePath;
+    }
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+}
 
 // Regression tests for the per-session isolation fix (#104). One session's
 // event build throwing must never drop the rest of a batch: by the time
@@ -73,4 +101,19 @@ test('an empty batch produces no events and does not invoke the builder', async 
 
   assert.deepEqual(events, []);
   assert.equal(calls, 0);
+});
+
+test('disk-watcher upserts classify a newly discovered terminal session as cli-origin', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createSession('native-cli-session', 'claude', '/workspace/cli-origin');
+
+    const serialized = await buildSessionUpsertedEvent('native-cli-session');
+    assert.ok(serialized, 'indexed session should produce an upsert');
+
+    const event = JSON.parse(serialized) as {
+      session: { id: string; origin?: string };
+    };
+    assert.equal(event.session.id, 'native-cli-session');
+    assert.equal(event.session.origin, 'cli');
+  });
 });

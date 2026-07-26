@@ -3,6 +3,7 @@ import path from 'node:path';
 import { activeRunsDb, projectsDb, sessionsDb } from '@/modules/database/index.js';
 import type { PersistRunInput } from '@/modules/database/index.js';
 import { generateDisplayName } from '@/modules/projects/index.js';
+import { deriveSessionOrigin } from '@/modules/providers/index.js';
 import { ChatSessionWriter } from '@/modules/websocket/services/chat-session-writer.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
 import type {
@@ -246,6 +247,7 @@ async function broadcastCanonicalSessionUpsert(appSessionId: string): Promise<vo
       // the client's session row (the sidebar derives Done from these).
       last_completed_at: row.last_completed_at,
       last_viewed_at: row.last_viewed_at,
+      origin: deriveSessionOrigin(row.session_id, row.provider_session_id),
     },
     project: project
       ? {

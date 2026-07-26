@@ -96,6 +96,11 @@ test('session_created is swallowed and persisted as the provider-id mapping', as
     assert.equal(sessionUpserts.length, 1);
     assert.equal(sessionUpserts[0]?.sessionId, 'app-run-2');
     assert.equal(sessionUpserts[0]?.providerSessionId, 'codex-native-7');
+    assert.equal(
+      (sessionUpserts[0]?.session as { origin?: string })?.origin,
+      'cloudcli',
+      'canonical live upsert retains the app-created origin',
+    );
     // ...but the canonical mapping is recorded and persisted in the database.
     assert.equal(run.providerSessionId, 'codex-native-7');
     assert.equal(sessionsDb.getSessionById('app-run-2')?.provider_session_id, 'codex-native-7');

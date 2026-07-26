@@ -5,6 +5,7 @@ import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import {
   resolveSessionLiveStatus,
   sessionSynchronizerService,
+  deriveSessionOrigin,
   type SessionLiveStatus,
 } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
@@ -164,7 +165,7 @@ function mapSessionRowToSummary(row: SessionRepositoryRow): SessionSummary {
     // rows predating it (migrations.ts), so sessions created through cloudcli
     // before that migration read as 'cli'. The badge copy is deliberately hedged
     // ("not driven by cloudcli") rather than asserting a terminal origin.
-    origin: row.provider_session_id === row.session_id ? 'cli' : 'cloudcli',
+    origin: deriveSessionOrigin(row.session_id, row.provider_session_id),
     // Placeholder; the live variant (buildSessionSummariesWithLiveStatus) fills
     // this in from the transcript on disk. Archived/history reads keep 'idle'.
     liveStatus: 'idle',

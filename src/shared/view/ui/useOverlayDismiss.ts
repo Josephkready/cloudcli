@@ -69,6 +69,11 @@ export function useOverlayDismiss({ isActive, onDismiss }: UseOverlayDismissOpti
     if (event.target !== event.currentTarget) {
       return;
     }
+    // Keep the press from moving focus to <body> after React unmounts the
+    // dialog. The focus-trap cleanup restores the opener during this handler;
+    // without preventing the native mousedown default, the browser immediately
+    // overwrites that restoration as the click finishes (#279).
+    event.preventDefault();
     onDismissRef.current();
   }, []);
 

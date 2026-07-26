@@ -6,6 +6,7 @@ import chokidar, { type FSWatcher } from 'chokidar';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { resolveSessionLiveStatus } from '@/modules/providers/services/session-live-status.service.js';
+import { deriveSessionOrigin } from '@/modules/providers/services/session-origin.js';
 import {
   createSessionUpsertDebouncer,
   type SessionUpsertBatch,
@@ -57,7 +58,7 @@ function isWatcherTargetFile(_provider: LLMProvider, filePath: string): boolean 
  * project-list refetch when a transcript file changes on disk. Returns `null`
  * when the id cannot be resolved to an indexed session row.
  */
-async function buildSessionUpsertedEvent(updatedProviderSessionId: string): Promise<string | null> {
+export async function buildSessionUpsertedEvent(updatedProviderSessionId: string): Promise<string | null> {
   const row = sessionsDb.getSessionByProviderSessionId(updatedProviderSessionId)
     ?? sessionsDb.getSessionById(updatedProviderSessionId);
   if (!row || row.isArchived) {
@@ -96,6 +97,7 @@ async function buildSessionUpsertedEvent(updatedProviderSessionId: string): Prom
       // renders not-Done until the next full /api/projects refresh.
       last_completed_at: row.last_completed_at,
       last_viewed_at: row.last_viewed_at,
+      origin: deriveSessionOrigin(row.session_id, row.provider_session_id),
       liveStatus,
     },
     project: project
