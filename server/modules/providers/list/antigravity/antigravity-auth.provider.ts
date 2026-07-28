@@ -7,23 +7,26 @@ import { buildProviderCliEnv, resolveProviderCliExecutable } from '@/shared/util
 
 const execFileAsync = promisify(execFile);
 
-async function runAgy(args: string[], timeout: number): Promise<boolean> {
+type AgyCommandStatus = 'ok' | 'timeout' | 'failed';
+
+async function runAgy(args: string[], timeout: number): Promise<AgyCommandStatus> {
   try {
     await execFileAsync(resolveProviderCliExecutable('ANTIGRAVITY_CLI_PATH', 'agy'), args, {
       encoding: 'utf8',
       env: buildProviderCliEnv(),
       timeout,
     });
-    return true;
-  } catch {
-    return false;
+    return 'ok';
+  } catch (error) {
+    const commandError = error as NodeJS.ErrnoException & { killed?: boolean };
+    return commandError.killed || commandError.code === 'ETIMEDOUT' ? 'timeout' : 'failed';
   }
 }
 
 export class AntigravityProviderAuth implements IProviderAuth {
   async getStatus(): Promise<ProviderAuthStatus> {
-    const installed = await runAgy(['--version'], 5_000);
-    if (!installed) {
+    const installStatus = await runAgy(['--version'], 5_000);
+    if (installStatus !== 'ok') {
       return {
         installed: false,
         provider: 'antigravity',
@@ -34,14 +37,18 @@ export class AntigravityProviderAuth implements IProviderAuth {
       };
     }
 
-    const authenticated = await runAgy(['models'], 20_000);
+    const authenticationStatus = await runAgy(['models'], 20_000);
+    const authenticated = authenticationStatus === 'ok';
+    const authenticationError = authenticationStatus === 'timeout'
+      ? 'Timed out while checking Antigravity authentication'
+      : 'Antigravity could not list models; run agy in a terminal to authenticate or inspect its diagnostics';
     return {
       installed: true,
       provider: 'antigravity',
       authenticated,
       email: authenticated ? 'Google account' : null,
       method: authenticated ? 'agy' : null,
-      error: authenticated ? undefined : 'Run agy in a terminal to authenticate',
+      error: authenticated ? undefined : authenticationError,
     };
   }
 }

@@ -5,7 +5,11 @@ import path from 'node:path';
 import pty, { type IPty } from 'node-pty';
 import { WebSocket, type RawData } from 'ws';
 
-import { parseIncomingJsonObject } from '@/shared/utils.js';
+import {
+  buildProviderCliEnv,
+  parseIncomingJsonObject,
+  resolveProviderCliExecutable,
+} from '@/shared/utils.js';
 
 type ShellIncomingMessage = {
   type?: string;
@@ -64,6 +68,16 @@ function readBoolean(value: unknown, fallback = false): boolean {
  */
 function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function quoteShellExecutable(executable: string): string {
+  if (/^[a-zA-Z0-9_./:\\-]+$/.test(executable)) {
+    return executable;
+  }
+  if (os.platform() === 'win32') {
+    return `'${executable.replaceAll("'", "''")}'`;
+  }
+  return `'${executable.replaceAll("'", "'\\''")}'`;
 }
 
 /**
@@ -140,9 +154,12 @@ export function buildShellCommand(
   }
 
   if (provider === 'antigravity') {
+    const executable = quoteShellExecutable(
+      resolveProviderCliExecutable('ANTIGRAVITY_CLI_PATH', 'agy')
+    );
     return resumeSessionId
-      ? `agy --conversation "${resumeSessionId}"`
-      : 'agy';
+      ? `${executable} --conversation "${resumeSessionId}"`
+      : executable;
   }
 
   const command = initialCommand || 'claude';
@@ -323,7 +340,8 @@ export function handleShellConnection(
           os.platform() === 'win32' ? ['-Command', shellCommand] : ['-c', shellCommand];
         const termCols = readNumber(data.cols, 80);
         const termRows = readNumber(data.rows, 24);
-        const prioritizedPath = prioritizeUserNpmGlobalBin(process.env);
+        const providerCliEnv = buildProviderCliEnv();
+        const prioritizedPath = prioritizeUserNpmGlobalBin(providerCliEnv);
 
         shellProcess = pty.spawn(shell, shellArgs, {
           name: 'xterm-256color',
@@ -331,7 +349,7 @@ export function handleShellConnection(
           rows: termRows,
           cwd: resolvedProjectPath,
           env: {
-            ...process.env,
+            ...providerCliEnv,
             [prioritizedPath.key]: prioritizedPath.value,
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',

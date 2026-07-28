@@ -7,8 +7,9 @@ without guessing which files need to move.
 
 ## Current Provider Shape
 
-Every provider wrapper exposes five facets:
+Every provider wrapper exposes six facets:
 
+- `models`
 - `auth`
 - `mcp`
 - `skills`
@@ -17,6 +18,7 @@ Every provider wrapper exposes five facets:
 
 These correspond to the shared interfaces in `server/shared/interfaces.ts`:
 
+- `IProviderModels`
 - `IProviderAuth`
 - `IProviderMcp`
 - `IProviderSkills`
@@ -25,6 +27,7 @@ These correspond to the shared interfaces in `server/shared/interfaces.ts`:
 
 The services that consume them are:
 
+- `providerModelsService`
 - `providerAuthService`
 - `providerMcpService`
 - `providerSkillsService`
@@ -47,6 +50,7 @@ Each provider lives under its own folder in `server/modules/providers/list/`:
 ```text
 server/modules/providers/list/<provider>/
   <provider>.provider.ts
+  <provider>-models.provider.ts
   <provider>-auth.provider.ts
   <provider>-mcp.provider.ts
   <provider>-skills.provider.ts
@@ -60,6 +64,7 @@ The existing provider folders are `claude`, `codex`, and `antigravity`.
 
 | Facet | Responsibility | Base / Service |
 | --- | --- | --- |
+| `models` | Resolve supported models and session-scoped model selection | `IProviderModels` -> `providerModelsService` |
 | `auth` | Report install/auth state for the provider runtime | `IProviderAuth` -> `providerAuthService` |
 | `mcp` | Read, list, write, and remove provider-native MCP config | `McpProvider` -> `providerMcpService` |
 | `skills` | Discover provider-native skill markdown files | `SkillsProvider` -> `providerSkillsService` |
@@ -91,17 +96,23 @@ The existing provider folders are `claude`, `codex`, and `antigravity`.
 
 - Add `server/modules/providers/list/<provider>/<provider>.provider.ts`.
 - Extend `AbstractProvider`.
-- Expose readonly `auth`, `mcp`, `skills`, `sessions`, and `sessionSynchronizer`.
+- Expose readonly `models`, `auth`, `mcp`, `skills`, `sessions`, and `sessionSynchronizer`.
 - Call `super('<provider>')`.
 
-3. Implement auth.
+3. Implement models.
+
+- Return the provider's supported model catalog through `IProviderModels`.
+- Resolve the current active model and persist session-scoped overrides.
+- Prefer provider-native discovery when available, with a stable fallback catalog.
+
+4. Implement auth.
 
 - Return a full `ProviderAuthStatus`.
 - Treat normal `not installed` / `not authenticated` states as data, not exceptions.
 - Keep provider-specific credential discovery inside the auth provider.
 - If the provider has no auth step, return a stable unauthenticated or not-installed status instead of omitting the facet.
 
-4. Implement MCP.
+5. Implement MCP.
 
 - Extend `McpProvider`.
 - Pass the supported scopes and transports to `super(...)`.
@@ -121,7 +132,7 @@ Current MCP formats in this repo are:
 | Codex | `.codex/config.toml` | `user`, `project` | `stdio`, `http` |
 | Antigravity | `~/.gemini/config/mcp_config.json` or `<workspace>/.agents/mcp_config.json` | `user`, `project` | `stdio`, `http` |
 
-5. Implement skills.
+6. Implement skills.
 
 - Extend `SkillsProvider`.
 - Implement `getSkillSources(workspacePath)`.
@@ -147,7 +158,7 @@ Command forms currently used by the providers are:
 - Codex skills: `$skill-name`
 - Antigravity skills: `/skill-name`
 
-6. Implement sessions.
+7. Implement sessions.
 
 - Implement `normalizeMessage(raw, sessionId)` and `fetchHistory(sessionId, options)`.
 - Use `createNormalizedMessage(...)` and `generateMessageId(...)` for emitted messages.
@@ -160,7 +171,7 @@ Command forms currently used by the providers are:
 - Sanitize any filesystem-derived ids before using them in file or database paths.
 - Do not assume a provider's history format matches another provider's format.
 
-7. Implement session synchronization.
+8. Implement session synchronization.
 
 - Implement `synchronize(since?: Date)` to scan provider artifacts and upsert
   sessions into `sessionsDb`.
@@ -183,13 +194,13 @@ Current session sync roots are:
 | Codex | `~/.codex/sessions/**/*.jsonl` | Uses `~/.codex/session_index.jsonl` for title lookup and the last `task_complete` message for a fallback title. |
 | Antigravity | `~/.gemini/antigravity-cli/brain/**/transcript.jsonl` | Uses `history.jsonl` for workspace/title metadata and the transcript as the message source. |
 
-8. Register the provider.
+9. Register the provider.
 
 - Add the new provider class to `server/modules/providers/provider.registry.ts`.
 - Update `server/modules/providers/provider.routes.ts` provider parsing.
 - If the provider introduces a new service or lifecycle hook, export it from the module entrypoint that consumes providers.
 
-9. Wire runtime and UI surfaces outside the providers module when needed.
+10. Wire runtime and UI surfaces outside the providers module when needed.
 
 If the provider can run live chat sessions, update the runtime entrypoints too:
 
@@ -208,6 +219,7 @@ If the provider is visible in the UI, update:
 
 ```ts
 import { AbstractProvider } from '@/modules/providers/shared/base/abstract.provider.js';
+import { <Provider>ProviderModels } from './<provider>-models.provider.js';
 import { <Provider>ProviderAuth } from './<provider>-auth.provider.js';
 import { <Provider>McpProvider } from './<provider>-mcp.provider.js';
 import { <Provider>SkillsProvider } from './<provider>-skills.provider.js';
@@ -216,12 +228,14 @@ import { <Provider>SessionSynchronizer } from './<provider>-session-synchronizer
 import type {
   IProviderAuth,
   IProviderMcp,
+  IProviderModels,
   IProviderSessionSynchronizer,
   IProviderSessions,
   IProviderSkills,
 } from '@/shared/interfaces.js';
 
 export class <Provider>Provider extends AbstractProvider {
+  readonly models: IProviderModels = new <Provider>ProviderModels();
   readonly auth: IProviderAuth = new <Provider>ProviderAuth();
   readonly mcp: IProviderMcp = new <Provider>McpProvider();
   readonly skills: IProviderSkills = new <Provider>SkillsProvider();
@@ -286,6 +300,7 @@ Add a new provider "<provider>" using the current provider module architecture.
 Requirements:
 1) Create:
    - server/modules/providers/list/<provider>/<provider>.provider.ts
+   - server/modules/providers/list/<provider>/<provider>-models.provider.ts
    - server/modules/providers/list/<provider>/<provider>-auth.provider.ts
    - server/modules/providers/list/<provider>/<provider>-mcp.provider.ts
    - server/modules/providers/list/<provider>/<provider>-skills.provider.ts
@@ -298,11 +313,12 @@ Requirements:
    - src/types/app.ts LLMProvider
 3) Mirror the nearest existing provider implementation for file naming, style,
    and error handling.
-4) Implement skills support with SkillsProvider and the current skill roots.
-5) Implement session synchronization if the provider stores transcript files.
-6) Ensure sessions use unique ids, safe path handling, and correct pagination.
-7) Keep `sessions` and `sessionSynchronizer` separate.
-8) Run:
+4) Implement model discovery and session-scoped model selection.
+5) Implement skills support with SkillsProvider and the current skill roots.
+6) Implement session synchronization if the provider stores transcript files.
+7) Ensure sessions use unique ids, safe path handling, and correct pagination.
+8) Keep `sessions` and `sessionSynchronizer` separate.
+9) Run:
    - npx eslint <touched files>
    - npx tsc --noEmit -p server/tsconfig.json
 ```
@@ -320,7 +336,9 @@ Useful tests in this repo:
 
 - `server/modules/providers/tests/mcp.test.ts`
 - `server/modules/providers/tests/skills.test.ts`
-- `server/modules/providers/tests/opencode-sessions.test.ts`
+- `server/modules/providers/tests/antigravity-sessions.test.ts`
+- `server/modules/providers/list/antigravity/antigravity-models.provider.test.ts`
+- `server/modules/providers/list/antigravity/antigravity-auth.provider.test.ts`
 
 If you touch sessions or session synchronization, add or update focused tests
 alongside the implementation.
@@ -339,4 +357,3 @@ alongside the implementation.
 - Forgetting that Claude plugin skills are discovered differently from normal
   user/project skill folders.
 - Assuming one provider's MCP config file format works for the others.
-

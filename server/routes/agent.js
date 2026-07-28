@@ -533,10 +533,13 @@ class SSEStreamWriter {
  *
  *                        Claude models: 'default', 'sonnet', 'opus', 'haiku', 'sonnet[1m]', 'opus[1m]', 'fable'
  *                        Codex models: 'gpt-5.4' (default), 'gpt-5.5', 'gpt-5.4-mini'
+ *                        Antigravity models are discovered from `agy models`; omit this field to
+ *                        use the current Antigravity default/fallback catalog.
  *
  * @param {string} effort - (Optional) Reasoning effort for providers/models that support it.
  *                          Claude supports: 'low', 'medium', 'high', 'xhigh', 'max' depending on model.
  *                          Codex supports: 'low', 'medium', 'high', 'xhigh'.
+ *                          Antigravity does not expose a reasoning-effort option.
  *                          'default' or omission lets the provider decide.
  *
  * @param {boolean} cleanup - (Optional) Auto-cleanup project directory after completion.

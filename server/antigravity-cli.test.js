@@ -27,6 +27,18 @@ const id = process.env.AGY_FAKE_CONVERSATION_ID || 'agy-native-session';
 console.log(JSON.stringify({ event: 'init', conversation_id: id, init: { model: 'gemini-test-model' } }));
 if (process.env.AGY_FAKE_MODE === 'hang') {
   setInterval(() => {}, 1000);
+} else if (process.env.AGY_FAKE_MODE === 'result-only') {
+  console.log(JSON.stringify({ event: 'result', result: {
+    conversation_id: id, status: 'SUCCESS', response: 'Only response'
+  }}));
+} else if (process.env.AGY_FAKE_MODE === 'error-result') {
+  console.log(JSON.stringify({ event: 'result', result: {
+    conversation_id: id, status: 'ERROR',
+    error: 'Agy request failed Authorization: Bearer top-secret'
+  }}));
+} else if (process.env.AGY_FAKE_MODE === 'stderr-error') {
+  console.error('Agy stderr failure');
+  process.exitCode = 1;
 } else {
   setTimeout(() => {
     console.log(JSON.stringify({ event: 'step_update', step_update: {
@@ -155,6 +167,76 @@ test('spawnAntigravity resumes with --conversation and does not announce a new s
     const conversationIndex = capture.args.indexOf('--conversation');
     assert.equal(capture.args[conversationIndex + 1], 'agy-existing');
     assert.equal(writer.messages.some((message) => message.kind === 'session_created'), false);
+  });
+});
+
+test('spawnAntigravity emits a response-only result exactly once', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    process.env.AGY_FAKE_MODE = 'result-only';
+    const writer = createWriter();
+
+    await spawnAntigravity('Respond once', {
+      cwd: tempRoot,
+      model: 'gemini-test-model',
+    }, writer);
+
+    assert.deepEqual(
+      writer.messages.filter((message) => message.kind === 'stream_delta').map((message) => message.content),
+      ['Only response'],
+    );
+    assert.equal(writer.messages.filter((message) => message.kind === 'complete').length, 1);
+  });
+});
+
+test('spawnAntigravity reports a failed result once and rejects', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    process.env.AGY_FAKE_MODE = 'error-result';
+    const writer = createWriter();
+
+    await assert.rejects(
+      spawnAntigravity('Fail', { cwd: tempRoot, model: 'gemini-test-model' }, writer),
+      /Agy request failed/,
+    );
+
+    assert.deepEqual(
+      writer.messages.filter((message) => message.kind === 'error').map((message) => message.content),
+      ['Agy request failed Authorization: Bearer [REDACTED]'],
+    );
+    const completions = writer.messages.filter((message) => message.kind === 'complete');
+    assert.equal(completions.length, 1);
+    assert.equal(completions[0].success, false);
+  });
+});
+
+test('spawnAntigravity reports stderr from a nonzero exit once', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    process.env.AGY_FAKE_MODE = 'stderr-error';
+    const writer = createWriter();
+
+    await assert.rejects(
+      spawnAntigravity('Fail', { cwd: tempRoot, model: 'gemini-test-model' }, writer),
+      /Agy stderr failure/,
+    );
+
+    assert.equal(writer.messages.filter((message) => message.kind === 'error').length, 1);
+    assert.equal(writer.messages.filter((message) => message.kind === 'complete').length, 1);
+  });
+});
+
+test('spawnAntigravity handles a missing executable with one terminal failure', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    process.env.ANTIGRAVITY_CLI_PATH = path.join(tempRoot, 'missing-agy');
+    const writer = createWriter();
+
+    await assert.rejects(
+      spawnAntigravity('Fail', { cwd: tempRoot, model: 'gemini-test-model' }, writer),
+      /ENOENT/,
+    );
+
+    assert.equal(writer.messages.filter((message) => message.kind === 'error').length, 1);
+    const completions = writer.messages.filter((message) => message.kind === 'complete');
+    assert.equal(completions.length, 1);
+    assert.equal(completions[0].success, false);
   });
 });
 

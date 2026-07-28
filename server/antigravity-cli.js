@@ -12,6 +12,22 @@ import {
 } from './shared/utils.js';
 
 const activeAntigravityProcesses = new Map();
+const MAX_PROVIDER_ERROR_LENGTH = 2_000;
+
+export function sanitizeAntigravityError(value) {
+  const message = readString(value) || 'Antigravity CLI failed';
+  return message
+    .replace(/(authorization\s*:\s*bearer\s+)\S+/gi, '$1[REDACTED]')
+    .replace(
+      /([?&](?:access_token|api[_-]?key|key|password|secret|token)=)[^&\s]+/gi,
+      '$1[REDACTED]',
+    )
+    .replace(
+      /\b((?:access[_-]?token|api[_-]?key|password|secret|token)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi,
+      '$1[REDACTED]',
+    )
+    .slice(0, MAX_PROVIDER_ERROR_LENGTH);
+}
 
 export function resolveAntigravityPermissionArgs(permissionMode) {
   switch (permissionMode) {
@@ -58,9 +74,9 @@ function getResultError(event) {
   if (event?.event !== 'result' || event?.result?.status === 'SUCCESS') {
     return null;
   }
-  return readString(event?.result?.error)
+  return sanitizeAntigravityError(readString(event?.result?.error)
     || readString(event?.result?.message)
-    || `Antigravity run ended with status ${event?.result?.status || 'UNKNOWN'}`;
+    || `Antigravity run ended with status ${event?.result?.status || 'UNKNOWN'}`);
 }
 
 function announceConversation(writer, conversationId, isResume) {
@@ -229,7 +245,9 @@ export async function spawnAntigravity(command, options = {}, writer) {
     });
 
     child.stderr.on('data', (chunk) => {
-      stderrBuffer += chunk.toString();
+      if (stderrBuffer.length < MAX_PROVIDER_ERROR_LENGTH * 2) {
+        stderrBuffer += chunk.toString();
+      }
     });
 
     child.on('error', async (error) => {
@@ -237,10 +255,13 @@ export async function spawnAntigravity(command, options = {}, writer) {
       if (settled) {
         return;
       }
+      // A failed spawn can emit `close` while the installation check is
+      // pending. Claim the terminal path synchronously so only this handler
+      // reports the failure.
       settled = true;
       const installed = await providerAuthService.isProviderInstalled('antigravity');
       const content = installed
-        ? error.message
+        ? sanitizeAntigravityError(error.message)
         : 'Antigravity CLI is not installed. Install it from https://antigravity.google/cli/install.sh';
       writer.send(createNormalizedMessage({
         kind: 'error',
@@ -254,7 +275,7 @@ export async function spawnAntigravity(command, options = {}, writer) {
         provider: 'antigravity',
         sessionId: conversationId,
         sessionName: sessionSummary,
-        error,
+        error: new Error(content),
       });
       reject(error);
     });
@@ -270,7 +291,7 @@ export async function spawnAntigravity(command, options = {}, writer) {
       }
 
       const aborted = child.aborted === true || signal === 'SIGTERM';
-      const stderr = stderrBuffer.trim();
+      const stderr = sanitizeAntigravityError(stderrBuffer);
       const exitCode = aborted ? 1 : (code ?? 1);
       if (!aborted && stderr && exitCode !== 0 && !resultError) {
         resultError = stderr;
@@ -282,7 +303,7 @@ export async function spawnAntigravity(command, options = {}, writer) {
         }));
       }
 
-      sendComplete(exitCode, aborted);
+      sendComplete(resultError ? 1 : exitCode, aborted);
       if (aborted) {
         notifyRunStopped({
           userId: writer?.userId || null,

@@ -134,8 +134,12 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
           break;
         }
       }
-    } catch {
-      return null;
+    } catch (error) {
+      console.warn('[Antigravity] Failed to read transcript', {
+        sessionId,
+        error: error instanceof Error ? error.message : 'Unknown read error',
+      });
+      throw error;
     }
 
     if (!projectPath) {

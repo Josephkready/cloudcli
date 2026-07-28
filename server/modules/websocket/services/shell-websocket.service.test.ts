@@ -36,10 +36,17 @@ test('buildShellCommand resumes claude by the provider id', { skip: os.platform(
 
 test('buildShellCommand resumes Antigravity by the provider conversation id', () => {
   const d = deps(() => PROVIDER_ID);
-  assert.equal(
-    buildShellCommand(message({ provider: 'antigravity' }), d),
-    `agy --conversation "${PROVIDER_ID}"`,
-  );
+  const previousExecutable = process.env.ANTIGRAVITY_CLI_PATH;
+  process.env.ANTIGRAVITY_CLI_PATH = '/opt/Google Antigravity/agy';
+  try {
+    assert.equal(
+      buildShellCommand(message({ provider: 'antigravity' }), d),
+      `'/opt/Google Antigravity/agy' --conversation "${PROVIDER_ID}"`,
+    );
+  } finally {
+    if (previousExecutable === undefined) delete process.env.ANTIGRAVITY_CLI_PATH;
+    else process.env.ANTIGRAVITY_CLI_PATH = previousExecutable;
+  }
 });
 
 test('a throwing resolver falls back to the app id — the #69 failure mode', () => {
