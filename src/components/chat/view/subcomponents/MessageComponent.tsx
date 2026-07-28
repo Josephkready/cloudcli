@@ -164,9 +164,11 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                   ? t('messageTypes.error')
                   : message.type === 'tool'
                     ? t('messageTypes.tool')
-                    : (provider === 'codex'
-                        ? t('messageTypes.codex')
-                        : t('messageTypes.claude'))}
+                    : provider === 'codex'
+                      ? t('messageTypes.codex')
+                      : provider === 'antigravity'
+                        ? t('messageTypes.antigravity')
+                        : t('messageTypes.claude')}
               </div>
             </div>
           )}
@@ -396,4 +398,3 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
 });
 
 export default MessageComponent;
-

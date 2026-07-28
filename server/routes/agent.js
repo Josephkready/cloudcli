@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { userDb, apiKeysDb, githubTokensDb, projectsDb } from '../modules/database/index.js';
 import { queryClaudeSDK } from '../claude-sdk.js';
 import { queryCodex } from '../openai-codex.js';
+import { spawnAntigravity } from '../antigravity-cli.js';
 import { Octokit } from '@octokit/rest';
 import { providerModelsService } from '../modules/providers/services/provider-models.service.js';
 import { IS_PLATFORM } from '../constants/config.js';
@@ -520,7 +521,7 @@ class SSEStreamWriter {
  *                          - Source for auto-generated branch names (if createBranch=true and no branchName)
  *                          - Fallback for PR title if no commits are made
  *
- * @param {string} provider - (Optional) AI provider to use. Options: 'claude' | 'codex'
+ * @param {string} provider - (Optional) AI provider to use. Options: 'claude' | 'codex' | 'antigravity'
  *                           Default: 'claude'
  *
  * @param {boolean} stream - (Optional) Enable Server-Sent Events (SSE) streaming for real-time updates.
@@ -639,7 +640,7 @@ class SSEStreamWriter {
  * Input Validations (400 Bad Request):
  *   - Either githubUrl OR projectPath must be provided (not neither)
  *   - message must be non-empty string
- *   - provider must be 'claude' or 'codex'
+ *   - provider must be 'claude', 'codex', or 'antigravity'
  *   - createBranch/createPR requires githubUrl OR projectPath (not neither)
  *   - branchName must pass Git naming rules (if provided)
  *
@@ -773,12 +774,12 @@ router.post('/', validateExternalApiKey, async (req, res) => {
   // import-frozen pattern of IS_PLATFORM/AUTH_DISABLED) so a test can toggle it
   // per request after this module is already loaded.
   const mockProviderEnabled = process.env.AGENT_MOCK_PROVIDER === 'true';
-  const allowedProviders = ['claude', 'codex'];
+  const allowedProviders = ['claude', 'codex', 'antigravity'];
   if (mockProviderEnabled) {
     allowedProviders.push('mock');
   }
   if (!allowedProviders.includes(provider)) {
-    return res.status(400).json({ error: 'provider must be "claude" or "codex"' });
+    return res.status(400).json({ error: 'provider must be "claude", "codex", or "antigravity"' });
   }
 
   // Validate GitHub branch/PR creation requirements
@@ -856,8 +857,6 @@ router.post('/', validateExternalApiKey, async (req, res) => {
       });
     }
 
-    const codexModels = (await providerModelsService.getProviderModels('codex')).models;
-
     // Start the appropriate session
     if (provider === 'claude') {
       console.log('🤖 Starting Claude SDK session');
@@ -873,6 +872,7 @@ router.post('/', validateExternalApiKey, async (req, res) => {
 
     } else if (provider === 'codex') {
       console.log('🤖 Starting Codex SDK session');
+      const codexModels = (await providerModelsService.getProviderModels('codex')).models;
 
       await queryCodex(message.trim(), {
         projectPath: finalProjectPath,
@@ -880,6 +880,17 @@ router.post('/', validateExternalApiKey, async (req, res) => {
         sessionId: sessionId || null,
         model: model || codexModels.DEFAULT,
         effort,
+        permissionMode: 'bypassPermissions'
+      }, writer);
+    } else if (provider === 'antigravity') {
+      console.log('🚀 Starting Antigravity CLI session');
+      const antigravityModels = (await providerModelsService.getProviderModels('antigravity')).models;
+
+      await spawnAntigravity(message.trim(), {
+        projectPath: finalProjectPath,
+        cwd: finalProjectPath,
+        sessionId: sessionId || null,
+        model: model || antigravityModels.DEFAULT,
         permissionMode: 'bypassPermissions'
       }, writer);
     } else if (provider === 'mock') {

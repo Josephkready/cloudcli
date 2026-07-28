@@ -26,6 +26,10 @@ const PROVIDER_WATCH_PATHS: Array<{ provider: LLMProvider; rootPath: string }> =
     provider: 'codex',
     rootPath: path.join(os.homedir(), '.codex', 'sessions'),
   },
+  {
+    provider: 'antigravity',
+    rootPath: path.join(os.homedir(), '.gemini', 'antigravity-cli', 'brain'),
+  },
 ];
 
 const WATCHER_IGNORED_PATTERNS = [
@@ -46,7 +50,10 @@ const watchers: FSWatcher[] = [];
 /**
  * Filters watcher events to provider-specific session artifact file types.
  */
-function isWatcherTargetFile(_provider: LLMProvider, filePath: string): boolean {
+function isWatcherTargetFile(provider: LLMProvider, filePath: string): boolean {
+  if (provider === 'antigravity') {
+    return path.basename(filePath) === 'transcript.jsonl';
+  }
   return filePath.endsWith('.jsonl');
 }
 

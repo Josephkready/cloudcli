@@ -381,7 +381,7 @@ test('providerSkillsService lists codex repository, user, and system skills', { 
  * This test covers managed global skill creation for providers that own a
  * writable user skill directory.
  */
-test('providerSkillsService adds global skills for claude and codex', { concurrency: false }, async () => {
+test('providerSkillsService adds global skills for claude, codex, and antigravity', { concurrency: false }, async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-create-'));
   const restoreHomeDir = patchHomeDir(tempRoot);
 
@@ -448,6 +448,24 @@ test('providerSkillsService adds global skills for claude and codex', { concurre
     assert.equal(fallbackNamedSkill.command, '$fallback-skill');
     assert.equal(
       fallbackNamedSkill.sourcePath.endsWith(path.join('.agents', 'skills', 'fallback-skill', 'SKILL.md')),
+      true,
+    );
+
+    const createdAntigravitySkills = await providerSkillsService.addProviderSkills('antigravity', {
+      entries: [
+        {
+          directoryName: 'antigravity-global-dir',
+          content: '---\nname: antigravity-global\ndescription: Antigravity global skill\n---\n\nAntigravity body.\n',
+        },
+      ],
+    });
+    const createdAntigravitySkill = createdAntigravitySkills[0];
+    assert.ok(createdAntigravitySkill);
+    assert.equal(createdAntigravitySkill.command, '/antigravity-global');
+    assert.equal(
+      createdAntigravitySkill.sourcePath.endsWith(
+        path.join('.gemini', 'antigravity-cli', 'skills', 'antigravity-global-dir', 'SKILL.md'),
+      ),
       true,
     );
 

@@ -60,6 +60,7 @@ type ModelOption = {
 };
 
 const PROVIDER_LABELS: Record<string, string> = {
+  antigravity: 'Antigravity',
   claude: 'Claude',
   codex: 'Codex',
 };

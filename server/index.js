@@ -36,6 +36,10 @@ import {
     abortCodexSession,
 } from './openai-codex.js';
 import {
+    spawnAntigravity,
+    abortAntigravitySession,
+} from './antigravity-cli.js';
+import {
     stripAnsiSequences,
     normalizeDetectedUrl,
     extractUrlsFromText,
@@ -98,7 +102,7 @@ const server = http.createServer(app);
 // provider runtimes at the deterministic in-process mock (routes/mock-agent-provider.js)
 // so a Playwright/e2e browser session can drive a full chat turn — send ->
 // streamed frames -> terminal `complete` — with no real CLI/SDK, network, or
-// auth. The session's provider column stays 'claude'/'codex', so the frontend
+// auth. The session's provider column stays provider-native, so the frontend
 // flow is unchanged; only the runtime that streams frames is swapped. Read live
 // (not import-frozen) so it is a pure env toggle, mirroring the POST /api/agent
 // gate in routes/agent.js.
@@ -111,13 +115,22 @@ const makeMockSpawnFn = (provider) => (message, options, writer) => {
     return runMockAgentProvider(message, { ...options, provider }, writer);
 };
 const chatSpawnFns = AGENT_MOCK_PROVIDER
-    ? { claude: makeMockSpawnFn('claude'), codex: makeMockSpawnFn('codex') }
-    : { claude: queryClaudeSDK, codex: queryCodex };
+    ? {
+        claude: makeMockSpawnFn('claude'),
+        codex: makeMockSpawnFn('codex'),
+        antigravity: makeMockSpawnFn('antigravity'),
+    }
+    : {
+        claude: queryClaudeSDK,
+        codex: queryCodex,
+        antigravity: spawnAntigravity,
+    };
 // Provider abort fns, addressed by the provider-native session id. Shared by the
 // chat.abort handler and the stale-run reaper's abort hook (below).
 const chatAbortFns = {
     claude: abortClaudeSDKSession,
     codex: abortCodexSession,
+    antigravity: abortAntigravitySession,
 };
 // The activation warning is emitted in the "Ready" banner below (next to the
 // AUTH_DISABLED warning), where an operator scanning startup output will see it.

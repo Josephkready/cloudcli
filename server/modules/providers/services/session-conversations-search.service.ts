@@ -1,4 +1,4 @@
-import fsSync, { promises as fs } from 'node:fs';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 
@@ -6,9 +6,10 @@ import { spawn } from 'cross-spawn';
 import { rgPath } from '@vscode/ripgrep';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { stripAntigravityTranscriptTags } from '@/modules/providers/list/antigravity/antigravity-session-synchronizer.provider.js';
 
 type AnyRecord = Record<string, any>;
-type SearchableProvider = 'claude' | 'codex';
+type SearchableProvider = 'claude' | 'codex' | 'antigravity';
 
 type SearchSnippetHighlight = {
   start: number;
@@ -82,7 +83,7 @@ type ProjectBucket = {
   sessions: SearchableSessionRow[];
 };
 
-const SUPPORTED_PROVIDERS = new Set<SearchableProvider>(['claude', 'codex']);
+const SUPPORTED_PROVIDERS = new Set<SearchableProvider>(['claude', 'codex', 'antigravity']);
 const MAX_MATCHES_PER_SESSION = 2;
 const RIPGREP_FILE_CHUNK_SIZE = 40;
 const RIPGREP_CHUNK_CONCURRENCY = 6;
@@ -1050,6 +1051,80 @@ async function parseCodexSessionMatches(
   };
 }
 
+async function parseAntigravitySessionMatches(
+  session: SearchableSessionRow,
+  runtime: SearchRuntime,
+): Promise<SessionConversationResult | null> {
+  const matches: SessionConversationMatch[] = [];
+  let latestUserMessageText: string | null = null;
+
+  try {
+    const fileStream = fsSync.createReadStream(session.jsonl_path);
+    const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (runtime.totalMatches >= runtime.limit || runtime.isAborted()) {
+        break;
+      }
+      if (!line.trim()) {
+        continue;
+      }
+
+      let entry: AnyRecord;
+      try {
+        entry = JSON.parse(line) as AnyRecord;
+      } catch {
+        continue;
+      }
+
+      const source = typeof entry.source === 'string' ? entry.source : '';
+      const type = typeof entry.type === 'string' ? entry.type : '';
+      const rawContent = typeof entry.content === 'string' ? entry.content : '';
+      let text: string | null = null;
+      let role: 'user' | 'assistant' | null = null;
+
+      if (source === 'USER_EXPLICIT' && type === 'USER_INPUT') {
+        text = stripAntigravityTranscriptTags(rawContent);
+        role = 'user';
+        latestUserMessageText = text;
+      } else if (source === 'MODEL' && type === 'PLANNER_RESPONSE') {
+        text = rawContent.trim();
+        role = 'assistant';
+      }
+
+      if (!text || !role || !runtime.matchesQuery(text)) {
+        continue;
+      }
+
+      const { snippet, highlights } = runtime.buildSnippet(text);
+      addSessionMatch(runtime, matches, {
+        role,
+        snippet,
+        highlights,
+        timestamp: typeof entry.created_at === 'string' ? entry.created_at : null,
+        provider: 'antigravity',
+      });
+    }
+  } catch {
+    return null;
+  }
+
+  if (matches.length === 0) {
+    return null;
+  }
+
+  return {
+    sessionId: session.session_id,
+    provider: 'antigravity',
+    sessionSummary: toSummaryText(
+      session.custom_name,
+      latestUserMessageText,
+      'Antigravity Session',
+    ),
+    matches,
+  };
+}
+
 async function parseSessionMatches(
   session: SearchableSessionRow,
   runtime: SearchRuntime,
@@ -1059,6 +1134,9 @@ async function parseSessionMatches(
   }
   if (session.provider === 'codex') {
     return parseCodexSessionMatches(session, runtime);
+  }
+  if (session.provider === 'antigravity') {
+    return parseAntigravitySessionMatches(session, runtime);
   }
   return null;
 }

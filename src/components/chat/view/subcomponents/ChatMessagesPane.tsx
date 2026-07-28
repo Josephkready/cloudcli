@@ -36,6 +36,8 @@ interface ChatMessagesPaneProps {
   setClaudeModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
+  antigravityModel: string;
+  setAntigravityModel: (model: string) => void;
   providerModelCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>>;
   providerModelsLoading: boolean;
   isLoadingMoreMessages: boolean;
@@ -76,6 +78,8 @@ function ChatMessagesPane({
   setClaudeModel,
   codexModel,
   setCodexModel,
+  antigravityModel,
+  setAntigravityModel,
   providerModelCatalog,
   providerModelsLoading,
   isLoadingMoreMessages,
@@ -167,6 +171,8 @@ function ChatMessagesPane({
           setClaudeModel={setClaudeModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
+          antigravityModel={antigravityModel}
+          setAntigravityModel={setAntigravityModel}
           providerModelCatalog={providerModelCatalog}
           providerModelsLoading={providerModelsLoading}
         />

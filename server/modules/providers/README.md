@@ -35,8 +35,7 @@ Current provider ids in this repo are:
 
 - `claude`
 - `codex`
-- `cursor`
-- `opencode`
+- `antigravity`
 
 Those ids are mirrored in backend unions and frontend provider constants. If
 adding a new provider, update every place that hardcodes this list.
@@ -55,7 +54,7 @@ server/modules/providers/list/<provider>/
   <provider>-session-synchronizer.provider.ts
 ```
 
-The existing provider folders are `claude`, `codex`, `cursor`, and `opencode`.
+The existing provider folders are `claude`, `codex`, and `antigravity`.
 
 ## What Each Facet Does
 
@@ -120,8 +119,7 @@ Current MCP formats in this repo are:
 | --- | --- | --- | --- |
 | Claude | `.mcp.json` in user / local / project locations | `user`, `local`, `project` | `stdio`, `http`, `sse` |
 | Codex | `.codex/config.toml` | `user`, `project` | `stdio`, `http` |
-| Cursor | `.cursor/mcp.json` | `user`, `project` | `stdio`, `http` |
-| OpenCode | `~/.config/opencode/opencode.json` or `<workspace>/opencode.json` (`.jsonc` is read when present) | `user`, `project` | `stdio`, `http` |
+| Antigravity | `~/.gemini/config/mcp_config.json` or `<workspace>/.agents/mcp_config.json` | `user`, `project` | `stdio`, `http` |
 
 5. Implement skills.
 
@@ -140,16 +138,14 @@ Current skill discovery roots are:
 | --- | --- | --- | --- | --- |
 | Claude | `~/.claude/skills` | `<workspace>/.claude/skills` | `/` | Also discovers Claude plugin skills from enabled plugin installs. Command skills live under `commands/`; markdown skills live under `skills/` and are scanned recursively. |
 | Codex | `~/.agents/skills`, `~/.codex/skills/.system`, `/etc/codex/skills` | `<workspace>/.agents/skills`, `path.dirname(workspacePath)/.agents/skills`, topmost git root `.agents/skills` | `$` | Overlapping roots are deduplicated before scanning. |
-| Cursor | `~/.cursor/skills` | `<workspace>/.cursor/skills`, `<workspace>/.agents/skills` | `/` | Uses slash-style commands. |
-| OpenCode | `~/.config/opencode/skills`, `~/.claude/skills`, `~/.agents/skills` | Cwd-to-topmost-git-root `.opencode/skills`, `.claude/skills`, and `.agents/skills` | `/` | Reuses OpenCode, Claude, and Agents skill locations. Overlapping roots are deduplicated before scanning. |
+| Antigravity | `~/.gemini/antigravity-cli/skills`, `~/.gemini/skills` | `<workspace>/.agents/skills` | `/` | The CLI-specific user root is writable through CloudCLI. |
 
 Command forms currently used by the providers are:
 
 - Claude user/project skills: `/skill-name`
 - Claude plugin skills: `/plugin-name:skill-name`
 - Codex skills: `$skill-name`
-- Cursor skills: `/skill-name`
-- OpenCode skills: `/skill-name`
+- Antigravity skills: `/skill-name`
 
 6. Implement sessions.
 
@@ -185,8 +181,7 @@ Current session sync roots are:
 | --- | --- | --- |
 | Claude | `~/.claude/projects/**/*.jsonl` | Uses `~/.claude/history.jsonl` for name lookup and the trailing `ai-title`, `last-prompt`, or `custom-title` entries for title recovery. |
 | Codex | `~/.codex/sessions/**/*.jsonl` | Uses `~/.codex/session_index.jsonl` for title lookup and the last `task_complete` message for a fallback title. |
-| Cursor | `~/.cursor/projects/**/*.jsonl` | Uses sibling `worker.log` to recover `workspacePath`, then derives the session title from the first user prompt. |
-| OpenCode | `~/.local/share/opencode/opencode.db` | Reads active sessions/messages/parts from OpenCode's shared SQLite database and stores `jsonl_path` as `null` so deleting one app session cannot remove the shared DB. |
+| Antigravity | `~/.gemini/antigravity-cli/brain/**/transcript.jsonl` | Uses `history.jsonl` for workspace/title metadata and the transcript as the message source. |
 
 8. Register the provider.
 
@@ -344,5 +339,4 @@ alongside the implementation.
 - Forgetting that Claude plugin skills are discovered differently from normal
   user/project skill folders.
 - Assuming one provider's MCP config file format works for the others.
-
 

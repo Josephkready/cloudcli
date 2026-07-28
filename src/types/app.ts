@@ -1,4 +1,4 @@
-export type LLMProvider = 'claude' | 'codex';
+export type LLMProvider = 'claude' | 'codex' | 'antigravity';
 
 export type ProviderModelOption = {
   value: string;

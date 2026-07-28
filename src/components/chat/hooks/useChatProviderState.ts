@@ -20,9 +20,10 @@ import {
 const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
   claude: 'default',
   codex: 'gpt-5.4',
+  antigravity: 'gemini-3.6-flash-medium',
 };
 
-const PROVIDERS: LLMProvider[] = ['claude', 'codex'];
+const PROVIDERS: LLMProvider[] = ['claude', 'codex', 'antigravity'];
 
 const readStoredProvider = (): LLMProvider => {
   const storedProvider = localStorage.getItem('selected-provider');
@@ -40,6 +41,7 @@ const readStoredProvider = (): LLMProvider => {
 const FALLBACK_PERMISSION_MODES: Record<LLMProvider, PermissionMode[]> = {
   claude: ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'],
   codex: ['default', 'acceptEdits', 'bypassPermissions'],
+  antigravity: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
 };
 
 type ProviderCapabilities = {
@@ -94,6 +96,9 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   const [codexModel, setCodexModel] = useState<string>(() => {
     return localStorage.getItem('codex-model') || FALLBACK_DEFAULT_MODEL.codex;
   });
+  const [antigravityModel, setAntigravityModel] = useState<string>(() => {
+    return localStorage.getItem('antigravity-model') || FALLBACK_DEFAULT_MODEL.antigravity;
+  });
   const [providerEfforts, setProviderEfforts] = useState<Partial<Record<LLMProvider, string>>>(() => {
     return PROVIDERS.reduce<Partial<Record<LLMProvider, string>>>((acc, targetProvider) => {
       acc[targetProvider] = localStorage.getItem(`${targetProvider}-effort`) || DEFAULT_EFFORT_VALUE;
@@ -130,8 +135,16 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
       return;
     }
 
-    setClaudeModel(model);
-    localStorage.setItem('claude-model', model);
+    if (targetProvider === 'antigravity') {
+      setAntigravityModel(model);
+      localStorage.setItem('antigravity-model', model);
+      return;
+    }
+
+    if (targetProvider === 'claude') {
+      setClaudeModel(model);
+      localStorage.setItem('claude-model', model);
+    }
   }, []);
 
   const setStoredProviderEffort = useCallback((targetProvider: LLMProvider, effort: string) => {
@@ -333,7 +346,8 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   const providerModels = useMemo<Record<LLMProvider, string>>(() => ({
     claude: claudeModel,
     codex: codexModel,
-  }), [claudeModel, codexModel]);
+    antigravity: antigravityModel,
+  }), [antigravityModel, claudeModel, codexModel]);
 
   useEffect(() => {
     const claude = providerModelCatalog.claude;
@@ -360,6 +374,19 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
       }
     }
   }, [providerModelCatalog.codex, codexModel]);
+
+  useEffect(() => {
+    const antigravity = providerModelCatalog.antigravity;
+    if (antigravity) {
+      const next = pickStoredOrCurrent('antigravity-model', antigravityModel, antigravity);
+      if (next !== antigravityModel) {
+        setAntigravityModel(next);
+      }
+      if (localStorage.getItem('antigravity-model') !== next) {
+        localStorage.setItem('antigravity-model', next);
+      }
+    }
+  }, [providerModelCatalog.antigravity, antigravityModel]);
 
   useEffect(() => {
     const nextEfforts: Partial<Record<LLMProvider, string>> = {};
@@ -497,6 +524,8 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     setClaudeModel,
     codexModel,
     setCodexModel,
+    antigravityModel,
+    setAntigravityModel,
     currentProviderEffort,
     currentProviderEffortOptions,
     permissionMode,

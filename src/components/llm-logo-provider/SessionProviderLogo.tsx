@@ -1,6 +1,8 @@
 import type { LLMProvider } from '../../types/app';
+
 import ClaudeLogo from './ClaudeLogo';
 import CodexLogo from './CodexLogo';
+import AntigravityLogo from './AntigravityLogo';
 
 type SessionProviderLogoProps = {
   provider?: LLMProvider | string | null;
@@ -13,6 +15,9 @@ export default function SessionProviderLogo({
 }: SessionProviderLogoProps) {
   if (provider === 'codex') {
     return <CodexLogo className={className} />;
+  }
+  if (provider === 'antigravity') {
+    return <AntigravityLogo className={className} />;
   }
 
   return <ClaudeLogo className={className} />;

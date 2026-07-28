@@ -34,6 +34,14 @@ test('buildShellCommand resumes claude by the provider id', { skip: os.platform(
   assert.equal(buildShellCommand(message(), d), `claude --resume "${PROVIDER_ID}" || claude`);
 });
 
+test('buildShellCommand resumes Antigravity by the provider conversation id', () => {
+  const d = deps(() => PROVIDER_ID);
+  assert.equal(
+    buildShellCommand(message({ provider: 'antigravity' }), d),
+    `agy --conversation "${PROVIDER_ID}"`,
+  );
+});
+
 test('a throwing resolver falls back to the app id — the #69 failure mode', () => {
   // Documents why the missing sessionsDb import broke resume: the ReferenceError
   // is caught, resumeSessionId becomes undefined, and it falls back to the app

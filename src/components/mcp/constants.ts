@@ -3,16 +3,19 @@ import type { McpFormState, McpProvider, McpScope, McpTransport } from './types'
 export const MCP_PROVIDER_NAMES: Record<McpProvider, string> = {
   claude: 'Claude',
   codex: 'Codex',
+  antigravity: 'Antigravity',
 };
 
 export const MCP_SUPPORTED_SCOPES: Record<McpProvider, McpScope[]> = {
   claude: ['user', 'project', 'local'],
   codex: ['user', 'project'],
+  antigravity: ['user', 'project'],
 };
 
 export const MCP_SUPPORTED_TRANSPORTS: Record<McpProvider, McpTransport[]> = {
   claude: ['stdio', 'http', 'sse'],
   codex: ['stdio', 'http'],
+  antigravity: ['stdio', 'http'],
 };
 
 export const MCP_GLOBAL_SUPPORTED_SCOPES: McpScope[] = ['user', 'project'];
@@ -22,11 +25,13 @@ export const MCP_GLOBAL_SUPPORTED_TRANSPORTS: McpTransport[] = ['stdio', 'http']
 export const MCP_PROVIDER_BUTTON_CLASSES: Record<McpProvider, string> = {
   claude: 'bg-primary text-primary-foreground hover:bg-primary/90',
   codex: 'bg-primary text-primary-foreground hover:bg-primary/90',
+  antigravity: 'bg-primary text-primary-foreground hover:bg-primary/90',
 };
 
 export const MCP_SUPPORTS_WORKING_DIRECTORY: Record<McpProvider, boolean> = {
   claude: false,
   codex: true,
+  antigravity: true,
 };
 
 export const DEFAULT_MCP_FORM: McpFormState = {
