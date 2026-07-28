@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import test from 'node:test';
 
-import { buildShellCommand, resolveResumeSessionId } from './shell-websocket.service.js';
+import {
+  buildShellCommand,
+  quoteShellExecutable,
+  resolveResumeSessionId,
+} from './shell-websocket.service.js';
 
 // #69: the Shell tab must resume by the PROVIDER session id, not the app id.
 // Claude only knows the provider id, so resuming by the app id fails ("no
@@ -47,6 +51,13 @@ test('buildShellCommand resumes Antigravity by the provider conversation id', ()
     if (previousExecutable === undefined) delete process.env.ANTIGRAVITY_CLI_PATH;
     else process.env.ANTIGRAVITY_CLI_PATH = previousExecutable;
   }
+});
+
+test('quoteShellExecutable uses the PowerShell call operator for a path with spaces', () => {
+  assert.equal(
+    quoteShellExecutable('C:\\Program Files\\Antigravity\\agy.exe', 'win32'),
+    "& 'C:\\Program Files\\Antigravity\\agy.exe'",
+  );
 });
 
 test('a throwing resolver falls back to the app id — the #69 failure mode', () => {

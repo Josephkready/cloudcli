@@ -70,12 +70,15 @@ function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function quoteShellExecutable(executable: string): string {
+export function quoteShellExecutable(
+  executable: string,
+  platform: NodeJS.Platform = os.platform()
+): string {
   if (/^[a-zA-Z0-9_./:\\-]+$/.test(executable)) {
     return executable;
   }
-  if (os.platform() === 'win32') {
-    return `'${executable.replaceAll("'", "''")}'`;
+  if (platform === 'win32') {
+    return `& '${executable.replaceAll("'", "''")}'`;
   }
   return `'${executable.replaceAll("'", "'\\''")}'`;
 }
