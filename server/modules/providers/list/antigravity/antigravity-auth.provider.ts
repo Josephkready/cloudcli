@@ -9,11 +9,16 @@ const execFileAsync = promisify(execFile);
 
 type AgyCommandStatus = 'ok' | 'timeout' | 'failed';
 
-async function runAgy(args: string[], timeout: number): Promise<AgyCommandStatus> {
+async function runAgy(
+  executable: string,
+  env: NodeJS.ProcessEnv,
+  args: string[],
+  timeout: number,
+): Promise<AgyCommandStatus> {
   try {
-    await execFileAsync(resolveProviderCliExecutable('ANTIGRAVITY_CLI_PATH', 'agy'), args, {
+    await execFileAsync(executable, args, {
       encoding: 'utf8',
-      env: buildProviderCliEnv(),
+      env,
       timeout,
     });
     return 'ok';
@@ -24,8 +29,17 @@ async function runAgy(args: string[], timeout: number): Promise<AgyCommandStatus
 }
 
 export class AntigravityProviderAuth implements IProviderAuth {
+  private readonly executable: string;
+  private readonly env: NodeJS.ProcessEnv;
+
+  constructor(options: { executable?: string; env?: NodeJS.ProcessEnv } = {}) {
+    this.executable = options.executable
+      ?? resolveProviderCliExecutable('ANTIGRAVITY_CLI_PATH', 'agy');
+    this.env = options.env ?? buildProviderCliEnv();
+  }
+
   async getStatus(): Promise<ProviderAuthStatus> {
-    const installStatus = await runAgy(['--version'], 5_000);
+    const installStatus = await runAgy(this.executable, this.env, ['--version'], 5_000);
     if (installStatus !== 'ok') {
       return {
         installed: false,
@@ -37,7 +51,7 @@ export class AntigravityProviderAuth implements IProviderAuth {
       };
     }
 
-    const authenticationStatus = await runAgy(['models'], 20_000);
+    const authenticationStatus = await runAgy(this.executable, this.env, ['models'], 20_000);
     const authenticated = authenticationStatus === 'ok';
     const authenticationError = authenticationStatus === 'timeout'
       ? 'Timed out while checking Antigravity authentication'

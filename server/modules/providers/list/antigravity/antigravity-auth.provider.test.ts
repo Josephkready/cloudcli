@@ -6,18 +6,11 @@ import test from 'node:test';
 
 import { AntigravityProviderAuth } from './antigravity-auth.provider.js';
 
-const findEnvKey = (name: string) =>
-  Object.keys(process.env).find((key) => key.toLowerCase() === name.toLowerCase()) || name;
-
-test('Antigravity auth finds agy in a user executable directory', { concurrency: false }, async () => {
+test('Antigravity auth checks the configured agy executable', async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'antigravity-auth-'));
   const binDir = path.join(tempRoot, 'bin');
   const scriptPath = path.join(binDir, 'agy.js');
   const commandPath = path.join(binDir, process.platform === 'win32' ? 'agy.cmd' : 'agy');
-  const pathKey = findEnvKey('PATH');
-  const previousPath = process.env[pathKey];
-  const previousPrefix = process.env.npm_config_prefix;
-  const previousExecutable = process.env.ANTIGRAVITY_CLI_PATH;
 
   try {
     await mkdir(binDir);
@@ -34,21 +27,15 @@ process.exit(1);
       await chmod(commandPath, 0o755);
     }
 
-    process.env[pathKey] = '/usr/bin';
-    process.env.npm_config_prefix = tempRoot;
-    process.env.ANTIGRAVITY_CLI_PATH = commandPath;
-    const status = await new AntigravityProviderAuth().getStatus();
+    const status = await new AntigravityProviderAuth({
+      executable: commandPath,
+      env: { ...process.env },
+    }).getStatus();
 
     assert.equal(status.installed, true);
     assert.equal(status.authenticated, true);
     assert.equal(status.method, 'agy');
   } finally {
-    if (previousPath === undefined) delete process.env[pathKey];
-    else process.env[pathKey] = previousPath;
-    if (previousPrefix === undefined) delete process.env.npm_config_prefix;
-    else process.env.npm_config_prefix = previousPrefix;
-    if (previousExecutable === undefined) delete process.env.ANTIGRAVITY_CLI_PATH;
-    else process.env.ANTIGRAVITY_CLI_PATH = previousExecutable;
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
