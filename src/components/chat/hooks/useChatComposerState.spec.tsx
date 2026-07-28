@@ -86,7 +86,7 @@ describe('useChatComposerState — Antigravity send options', () => {
     await act(async () => {
       await result.current.handleSubmit({
         preventDefault: vi.fn(),
-      } as FormEvent<HTMLFormElement>);
+      } as unknown as FormEvent<HTMLFormElement>);
     });
 
     expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
