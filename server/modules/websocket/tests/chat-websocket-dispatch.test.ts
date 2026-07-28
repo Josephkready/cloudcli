@@ -85,13 +85,17 @@ function makeDependencies(
   const approvalLookups: string[] = [];
 
   const dependencies = {
-    spawnFns: overrides.spawnFns ?? { claude: spawn, codex: spawn },
+    spawnFns: overrides.spawnFns ?? { claude: spawn, codex: spawn, antigravity: spawn },
     abortFns: {
       claude: (providerSessionId: string) => {
         aborts.push({ providerSessionId });
         return overrides.abortFn ? overrides.abortFn(providerSessionId) : true;
       },
       codex: (providerSessionId: string) => {
+        aborts.push({ providerSessionId });
+        return overrides.abortFn ? overrides.abortFn(providerSessionId) : true;
+      },
+      antigravity: (providerSessionId: string) => {
         aborts.push({ providerSessionId });
         return overrides.abortFn ? overrides.abortFn(providerSessionId) : true;
       },
@@ -308,6 +312,52 @@ test('a follow-up send resumes the provider-native id the previous run establish
 
     finishRun(calls[1] as SpawnCall);
     await settle();
+  });
+});
+
+test('an Antigravity conversation is running until its agy completion clears the status', async () => {
+  await withIsolatedDatabase(async () => {
+    const { spawn, calls } = makeControllableSpawn();
+    const { dependencies } = makeDependencies(spawn);
+    sessionsDb.createAppSession('agy-status-session', 'antigravity', '/workspace/demo');
+
+    const starter = new FakeSocket();
+    connect(starter, dependencies);
+    sendChat(starter, 'agy-status-session', 'hello', {
+      model: 'gemini-3.6-flash-low',
+    });
+    await settle();
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.options.model, 'gemini-3.6-flash-low');
+    assert.deepEqual(
+      chatRunRegistry.listRunningRuns().map(({ sessionId, provider }) => ({ sessionId, provider })),
+      [{ sessionId: 'agy-status-session', provider: 'antigravity' }],
+    );
+
+    const observer = new FakeSocket();
+    connect(observer, dependencies);
+    emit(observer, {
+      type: 'chat.subscribe',
+      sessions: [{ sessionId: 'agy-status-session' }],
+    });
+    await settle();
+    assert.equal(observer.framesOfKind('chat_subscribed')[0]?.isProcessing, true);
+
+    const call = calls[0] as SpawnCall;
+    call.writer.send({
+      kind: 'complete',
+      provider: 'antigravity',
+      sessionId: 'agy-native-session',
+      exitCode: 0,
+      success: true,
+    });
+    call.resolve();
+    await settle();
+
+    assert.equal(chatRunRegistry.listRunningRuns().length, 0);
+    assert.equal(observer.framesOfKind('complete').length, 1);
+    assert.equal(observer.framesOfKind('complete')[0]?.success, true);
   });
 });
 

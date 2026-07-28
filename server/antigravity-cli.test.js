@@ -132,6 +132,7 @@ test('spawnAntigravity streams NDJSON deltas and captures the native conversatio
     await spawnAntigravity('Hi there', {
       cwd: tempRoot,
       model: 'gemini-test-model',
+      effort: 'high',
       permissionMode: 'acceptEdits',
     }, writer);
 
@@ -145,6 +146,9 @@ test('spawnAntigravity streams NDJSON deltas and captures the native conversatio
 
     const capture = JSON.parse(await readFile(capturePath, 'utf8'));
     assert.equal(capture.args.includes('--conversation'), false);
+    assert.equal(capture.args.includes('--effort'), false);
+    const modelIndex = capture.args.indexOf('--model');
+    assert.equal(capture.args[modelIndex + 1], 'gemini-test-model');
     assert.ok(capture.args.indexOf('--output-format') < capture.args.indexOf('--print'));
     assert.deepEqual(capture.args.slice(-2), ['--print', 'Hi there']);
   });
@@ -165,7 +169,9 @@ test('spawnAntigravity resumes with --conversation and does not announce a new s
 
     const capture = JSON.parse(await readFile(capturePath, 'utf8'));
     const conversationIndex = capture.args.indexOf('--conversation');
+    const modelIndex = capture.args.indexOf('--model');
     assert.equal(capture.args[conversationIndex + 1], 'agy-existing');
+    assert.equal(capture.args[modelIndex + 1], 'gemini-test-model');
     assert.equal(writer.messages.some((message) => message.kind === 'session_created'), false);
   });
 });
