@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
 
@@ -84,6 +84,24 @@ function getProviderDisplayName(p: LLMProvider) {
   return "Claude";
 }
 
+function useCoarsePointer() {
+  const [isCoarsePointer, setIsCoarsePointer] = useState(
+    () => typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia?.("(pointer: coarse)");
+    if (!query) return undefined;
+
+    const update = () => setIsCoarsePointer(query.matches);
+    update();
+    query.addEventListener?.("change", update);
+    return () => query.removeEventListener?.("change", update);
+  }, []);
+
+  return isCoarsePointer;
+}
+
 export default function ProviderSelectionEmptyState({
   selectedSession,
   currentSessionId,
@@ -99,6 +117,7 @@ export default function ProviderSelectionEmptyState({
 }: ProviderSelectionEmptyStateProps) {
   const { t } = useTranslation("chat");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const isCoarsePointer = useCoarsePointer();
 
   const visibleProviderGroups = useMemo<ProviderGroup[]>(() => {
     return PROVIDER_META.map((p) => ({
@@ -195,18 +214,21 @@ export default function ProviderSelectionEmptyState({
               </Card>
             </DialogTrigger>
 
-            <DialogContent className="max-w-md overflow-hidden p-0">
+            <DialogContent
+              initialFocus={isCoarsePointer ? "container" : "first"}
+              className="bottom-0 left-0 top-auto flex max-h-[85dvh] w-full max-w-none translate-x-0 translate-y-0 animate-none flex-col overflow-hidden rounded-b-none rounded-t-2xl p-0 sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:max-h-none sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:animate-dialog-content-show sm:rounded-xl"
+            >
               <DialogTitle>Model Selector</DialogTitle>
-              <div className="border-b border-border/60 bg-muted/20 px-4 py-3">
+              <div className="shrink-0 border-b border-border/60 bg-muted/20 px-4 py-3">
                 <p className="text-sm font-semibold text-foreground">Choose a model</p>
               </div>
-              <Command filter={modelSearchFilter}>
+              <Command filter={modelSearchFilter} className="min-h-0 flex-1">
                 <CommandInput
                   placeholder={t("providerSelection.searchModels", {
                     defaultValue: "Search models...",
                   })}
                 />
-                <CommandList className="max-h-[350px]">
+                <CommandList className="max-h-none min-h-0 flex-1 overscroll-contain pb-safe-area-inset-bottom">
                   <CommandEmpty>
                     {t("providerSelection.noModelsFound", {
                       defaultValue: "No models found.",

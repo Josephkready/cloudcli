@@ -332,7 +332,7 @@ function ModelsContent({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="flex min-h-full flex-col gap-3 sm:h-full sm:min-h-0">
       {/* Compact context bar: active model + refresh, no clutter */}
       <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-muted/20 px-3.5 py-2.5">
         <div className="min-w-0">
@@ -367,7 +367,10 @@ function ModelsContent({
       )}
 
       {filteredOptions.length > 0 ? (
-        <div className="scrollbar-thin -mr-1 min-h-0 flex-1 overflow-y-auto pr-1">
+        <div
+          data-testid="model-selector-options"
+          className="scrollbar-thin -mr-1 min-h-0 pr-1 sm:flex-1 sm:overflow-y-auto sm:overscroll-contain"
+        >
           <div className="grid gap-2 md:grid-cols-2">
             {filteredOptions.map((option, index) => {
               const isCurrent = option.value === currentModel;
@@ -612,7 +615,13 @@ export default function CommandResultModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex h-[min(92dvh,48rem)] w-[calc(100vw-1rem)] max-w-5xl flex-col overflow-hidden rounded-3xl border-border/80 bg-popover/95 p-0 shadow-2xl sm:w-[min(94vw,64rem)]">
+      <DialogContent
+        className={
+          isModelsModal
+            ? 'bottom-0 left-0 top-auto flex h-dvh max-h-dvh w-full max-w-none translate-x-0 translate-y-0 animate-none flex-col overflow-hidden rounded-none border-x-0 border-b-0 border-border/80 bg-popover/95 p-0 shadow-2xl sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:h-[min(92dvh,48rem)] sm:max-h-none sm:w-[min(94vw,64rem)] sm:max-w-5xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:animate-dialog-content-show sm:rounded-3xl sm:border'
+            : 'flex h-[min(92dvh,48rem)] w-[calc(100vw-1rem)] max-w-5xl flex-col overflow-hidden rounded-3xl border-border/80 bg-popover/95 p-0 shadow-2xl sm:w-[min(94vw,64rem)]'
+        }
+      >
         <DialogTitle>{activeMeta?.title || 'Command Result'}</DialogTitle>
 
         <div
@@ -635,7 +644,7 @@ export default function CommandResultModal({
               <p className="mt-0.5 text-lg font-semibold tracking-tight text-foreground sm:text-xl">
                 {activeMeta?.title}
               </p>
-              <p className="mt-0.5 max-w-2xl text-sm leading-5 text-muted-foreground">
+              <p className={`mt-0.5 max-w-2xl text-sm leading-5 text-muted-foreground ${isModelsModal ? 'hidden sm:block' : ''}`}>
                 {activeMeta?.subtitle}
               </p>
             </div>
@@ -653,7 +662,14 @@ export default function CommandResultModal({
           </Button>
         </div>
 
-        <div className="settings-content-enter min-h-0 flex-1 overflow-hidden px-4 py-4 sm:px-6 sm:py-5">
+        <div
+          data-testid={isModelsModal ? 'model-selector-scroll-region' : undefined}
+          className={`settings-content-enter min-h-0 flex-1 px-4 py-4 sm:px-6 sm:py-5 ${
+            isModelsModal
+              ? 'touch-pan-y overflow-y-auto overscroll-contain pb-safe-area-inset-bottom sm:overflow-hidden'
+              : 'overflow-hidden'
+          }`}
+        >
           {payload?.kind === 'help' && <HelpContent data={payload.data as HelpCommandData} />}
           {payload?.kind === 'models' && (
             <ModelsContent
@@ -669,7 +685,9 @@ export default function CommandResultModal({
           {payload?.kind === 'status' && <StatusContent data={payload.data as StatusCommandData} />}
         </div>
 
-        <div className="flex shrink-0 flex-col gap-3 border-t border-border/70 bg-muted/20 px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className={`shrink-0 flex-col gap-3 border-t border-border/70 bg-muted/20 px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6 ${
+          isModelsModal ? 'hidden sm:flex' : 'flex'
+        }`}>
           <div className="flex items-center gap-2">
             <Gauge className="h-3.5 w-3.5" />
             <span>Esc closes the modal.</span>

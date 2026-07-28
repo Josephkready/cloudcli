@@ -92,19 +92,21 @@ const DialogTrigger = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttrib
 DialogTrigger.displayName = 'DialogTrigger';
 
 interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement> {
+  initialFocus?: 'first' | 'container';
   onEscapeKeyDown?: () => void;
   onPointerDownOutside?: () => void;
   wrapperClassName?: string;
 }
 
 const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
-  ({ className, children, onEscapeKeyDown, onPointerDownOutside, wrapperClassName, ...props }, ref) => {
+  ({ className, children, initialFocus, onEscapeKeyDown, onPointerDownOutside, wrapperClassName, ...props }, ref) => {
     const { open, onOpenChange, triggerRef } = useDialog();
     // Tab containment, initial focus and focus restore all live in the shared
     // hook the hand-rolled overlays use (#274) — one implementation, one
     // overlay stack, so a hand-rolled dialog stacked over a Dialog still wins.
     const { containerRef: contentRef } = useFocusTrap<HTMLDivElement>({
       isActive: open,
+      initialFocus,
       restoreFocusRef: triggerRef,
     });
 
