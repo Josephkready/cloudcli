@@ -82,6 +82,7 @@ export const parseProvider = (value: unknown): LLMProvider => {
   if (
     normalized === 'claude'
     || normalized === 'codex'
+    || normalized === 'antigravity'
   ) {
     return normalized;
   }

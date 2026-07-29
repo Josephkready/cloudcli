@@ -5,7 +5,11 @@ import path from 'node:path';
 import pty, { type IPty } from 'node-pty';
 import { WebSocket, type RawData } from 'ws';
 
-import { parseIncomingJsonObject } from '@/shared/utils.js';
+import {
+  buildProviderCliEnv,
+  parseIncomingJsonObject,
+  resolveProviderCliExecutable,
+} from '@/shared/utils.js';
 
 type ShellIncomingMessage = {
   type?: string;
@@ -64,6 +68,19 @@ function readBoolean(value: unknown, fallback = false): boolean {
  */
 function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+export function quoteShellExecutable(
+  executable: string,
+  platform: NodeJS.Platform = os.platform()
+): string {
+  if (/^[a-zA-Z0-9_./:\\-]+$/.test(executable)) {
+    return executable;
+  }
+  if (platform === 'win32') {
+    return `& '${executable.replaceAll("'", "''")}'`;
+  }
+  return `'${executable.replaceAll("'", "'\\''")}'`;
 }
 
 /**
@@ -137,6 +154,15 @@ export function buildShellCommand(
       return `codex resume "${resumeSessionId}" || codex`;
     }
     return 'codex';
+  }
+
+  if (provider === 'antigravity') {
+    const executable = quoteShellExecutable(
+      resolveProviderCliExecutable('ANTIGRAVITY_CLI_PATH', 'agy')
+    );
+    return resumeSessionId
+      ? `${executable} --conversation "${resumeSessionId}"`
+      : executable;
   }
 
   const command = initialCommand || 'claude';
@@ -317,7 +343,8 @@ export function handleShellConnection(
           os.platform() === 'win32' ? ['-Command', shellCommand] : ['-c', shellCommand];
         const termCols = readNumber(data.cols, 80);
         const termRows = readNumber(data.rows, 24);
-        const prioritizedPath = prioritizeUserNpmGlobalBin(process.env);
+        const providerCliEnv = buildProviderCliEnv();
+        const prioritizedPath = prioritizeUserNpmGlobalBin(providerCliEnv);
 
         shellProcess = pty.spawn(shell, shellArgs, {
           name: 'xterm-256color',
@@ -325,7 +352,7 @@ export function handleShellConnection(
           rows: termRows,
           cwd: resolvedProjectPath,
           env: {
-            ...process.env,
+            ...providerCliEnv,
             [prioritizedPath.key]: prioritizedPath.value,
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
@@ -449,7 +476,11 @@ export function handleShellConnection(
 
         let welcomeMsg = `\x1b[36mStarting terminal in: ${projectPath}\x1b[0m\r\n`;
         if (!isPlainShell) {
-          const providerName = provider === 'codex' ? 'Codex' : 'Claude';
+          const providerName = provider === 'codex'
+            ? 'Codex'
+            : provider === 'antigravity'
+              ? 'Antigravity'
+              : 'Claude';
           welcomeMsg = hasSession && resumeSessionId
             ? `\x1b[36mResuming ${providerName} session ${resumeSessionId} in: ${projectPath}\x1b[0m\r\n`
             : `\x1b[36mStarting new ${providerName} session in: ${projectPath}\x1b[0m\r\n`;

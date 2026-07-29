@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import test from 'node:test';
 
-import { buildShellCommand, resolveResumeSessionId } from './shell-websocket.service.js';
+import {
+  buildShellCommand,
+  quoteShellExecutable,
+  resolveResumeSessionId,
+} from './shell-websocket.service.js';
 
 // #69: the Shell tab must resume by the PROVIDER session id, not the app id.
 // Claude only knows the provider id, so resuming by the app id fails ("no
@@ -32,6 +36,28 @@ test('resolveResumeSessionId maps the app id to the provider id', () => {
 test('buildShellCommand resumes claude by the provider id', { skip: os.platform() === 'win32' }, () => {
   const d = deps(() => PROVIDER_ID);
   assert.equal(buildShellCommand(message(), d), `claude --resume "${PROVIDER_ID}" || claude`);
+});
+
+test('buildShellCommand resumes Antigravity by the provider conversation id', () => {
+  const d = deps(() => PROVIDER_ID);
+  const previousExecutable = process.env.ANTIGRAVITY_CLI_PATH;
+  process.env.ANTIGRAVITY_CLI_PATH = '/opt/Google Antigravity/agy';
+  try {
+    assert.equal(
+      buildShellCommand(message({ provider: 'antigravity' }), d),
+      `'/opt/Google Antigravity/agy' --conversation "${PROVIDER_ID}"`,
+    );
+  } finally {
+    if (previousExecutable === undefined) delete process.env.ANTIGRAVITY_CLI_PATH;
+    else process.env.ANTIGRAVITY_CLI_PATH = previousExecutable;
+  }
+});
+
+test('quoteShellExecutable uses the PowerShell call operator for a path with spaces', () => {
+  assert.equal(
+    quoteShellExecutable('C:\\Program Files\\Antigravity\\agy.exe', 'win32'),
+    "& 'C:\\Program Files\\Antigravity\\agy.exe'",
+  );
 });
 
 test('a throwing resolver falls back to the app id — the #69 failure mode', () => {

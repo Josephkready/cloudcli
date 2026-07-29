@@ -161,5 +161,9 @@ export async function getSessionTokenUsage(
     return readCodexTokenUsage(sessionFilePath);
   }
 
+  if (provider === 'antigravity') {
+    return buildUnsupportedResponse('Antigravity token usage is not available for persisted sessions');
+  }
+
   return dependencies.getClaudeUsage(sessionId);
 }

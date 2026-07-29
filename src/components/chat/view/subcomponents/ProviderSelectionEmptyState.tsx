@@ -26,6 +26,7 @@ import {
 const PROVIDER_META: { id: LLMProvider; name: string }[] = [
   { id: "claude", name: "Anthropic" },
   { id: "codex", name: "OpenAI" },
+  { id: "antigravity", name: "Google" },
 ];
 
 const MOD_KEY =
@@ -52,6 +53,8 @@ type ProviderSelectionEmptyStateProps = {
   setClaudeModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
+  antigravityModel: string;
+  setAntigravityModel: (model: string) => void;
   providerModelCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>>;
   providerModelsLoading: boolean;
 };
@@ -74,13 +77,16 @@ function getCurrentModel(
   p: LLMProvider,
   c: string,
   co: string,
+  ag: string,
 ) {
   if (p === "codex") return co;
+  if (p === "antigravity") return ag;
   return c;
 }
 
 function getProviderDisplayName(p: LLMProvider) {
   if (p === "codex") return "Codex";
+  if (p === "antigravity") return "Antigravity";
   return "Claude";
 }
 
@@ -94,6 +100,8 @@ export default function ProviderSelectionEmptyState({
   setClaudeModel,
   codexModel,
   setCodexModel,
+  antigravityModel,
+  setAntigravityModel,
   providerModelCatalog,
   providerModelsLoading,
 }: ProviderSelectionEmptyStateProps) {
@@ -112,6 +120,7 @@ export default function ProviderSelectionEmptyState({
     provider,
     claudeModel,
     codexModel,
+    antigravityModel,
   );
 
   const currentModelLabel = useMemo(() => {
@@ -127,12 +136,15 @@ export default function ProviderSelectionEmptyState({
       if (providerId === "codex") {
         setCodexModel(modelValue);
         localStorage.setItem("codex-model", modelValue);
+      } else if (providerId === "antigravity") {
+        setAntigravityModel(modelValue);
+        localStorage.setItem("antigravity-model", modelValue);
       } else {
         setClaudeModel(modelValue);
         localStorage.setItem("claude-model", modelValue);
       }
     },
-    [setClaudeModel, setCodexModel],
+    [setAntigravityModel, setClaudeModel, setCodexModel],
   );
 
   const handleModelSelect = useCallback(
@@ -274,6 +286,9 @@ export default function ProviderSelectionEmptyState({
                 }),
                 codex: t("providerSelection.readyPrompt.codex", {
                   model: codexModel,
+                }),
+                antigravity: t("providerSelection.readyPrompt.antigravity", {
+                  model: antigravityModel,
                 }),
               }[provider]
             }

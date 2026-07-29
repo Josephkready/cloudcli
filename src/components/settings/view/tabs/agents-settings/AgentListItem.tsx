@@ -12,7 +12,7 @@ type AgentListItemProps = {
 
 type AgentConfig = {
   name: string;
-  color: 'blue' | 'gray';
+  color: 'blue' | 'gray' | 'cyan';
 };
 
 const agentConfig: Record<AgentProvider, AgentConfig> = {
@@ -24,6 +24,10 @@ const agentConfig: Record<AgentProvider, AgentConfig> = {
     name: 'Codex',
     color: 'gray',
   },
+  antigravity: {
+    name: 'Antigravity',
+    color: 'cyan',
+  },
 };
 
 const colorClasses = {
@@ -32,6 +36,9 @@ const colorClasses = {
   },
   gray: {
     dot: 'bg-foreground/60',
+  },
+  cyan: {
+    dot: 'bg-cyan-500',
   },
 } as const;
 
@@ -82,7 +89,7 @@ export default function AgentListItem({
       {authStatus.authenticated ? (
         <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${colors.dot}`} />
       ) : authStatus.loading ? (
-        <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-muted-foreground/30 animate-pulse" />
+        <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-muted-foreground/30" />
       ) : null}
     </button>
   );

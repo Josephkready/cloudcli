@@ -23,6 +23,13 @@ const providerCards = [
     iconContainerClassName: 'bg-gray-100 dark:bg-gray-800',
     loginButtonClassName: 'bg-gray-800 hover:bg-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600',
   },
+  {
+    provider: 'antigravity' as const,
+    title: 'Google Antigravity',
+    connectedClassName: 'border-cyan-200 bg-cyan-50 dark:border-cyan-800 dark:bg-cyan-900/20',
+    iconContainerClassName: 'bg-cyan-100 dark:bg-cyan-900/30',
+    loginButtonClassName: 'bg-cyan-700 hover:bg-cyan-800',
+  },
 ];
 
 export default function AgentConnectionsStep({

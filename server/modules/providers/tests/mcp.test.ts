@@ -188,7 +188,7 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
       workspacePath,
     });
 
-    assert.equal(globalResult.length, 2);
+    assert.equal(globalResult.length, 3);
     assert.ok(globalResult.every((entry) => entry.created === true));
 
     const claudeProject = await readJson(path.join(workspacePath, '.mcp.json'));
@@ -196,6 +196,10 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
 
     const codexProject = TOML.parse(await fs.readFile(path.join(workspacePath, '.codex', 'config.toml'), 'utf8')) as Record<string, unknown>;
     assert.ok((codexProject.mcp_servers as Record<string, unknown>)['global-http']);
+
+    const antigravityProject = await readJson(path.join(workspacePath, '.agents', 'mcp_config.json'));
+    const antigravityServer = (antigravityProject.mcpServers as Record<string, Record<string, unknown>>)['global-http'];
+    assert.equal(antigravityServer.serverUrl, 'https://global.example.com/mcp');
 
     await assert.rejects(
       providerMcpService.addMcpServerToAllProviders({
@@ -215,4 +219,3 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
-

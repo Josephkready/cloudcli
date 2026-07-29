@@ -141,6 +141,26 @@ describe('ChatComposer — permission-mode pill on phones (#239)', () => {
   });
 });
 
+describe('ChatComposer — effort capability', () => {
+  it('omits the effort selector when the selected provider offers no effort options', () => {
+    renderComposer('default', {
+      availableEffortOptions: [],
+      effort: 'default',
+    });
+
+    expect(screen.queryByLabelText('Select reasoning effort')).toBeNull();
+  });
+
+  it('renders the effort selector when the selected provider offers effort options', () => {
+    renderComposer('default', {
+      availableEffortOptions: [{ value: 'high' }],
+      effort: 'default',
+    });
+
+    expect(screen.getByLabelText('Select reasoning effort')).toBeTruthy();
+  });
+});
+
 /*
  * Touch targets in the composer's control row (#275).
  *

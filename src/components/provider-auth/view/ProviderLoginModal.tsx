@@ -1,4 +1,5 @@
 import { X } from 'lucide-react';
+
 import { DEFAULT_PROJECT_FOR_EMPTY_SHELL, IS_PLATFORM } from '../../../constants/config';
 import type { LLMProvider } from '../../../types/app';
 import LazySurface, { lazySurface } from '../../lazy/LazySurface';
@@ -40,12 +41,16 @@ const getProviderCommand = ({
   if (provider === 'codex') {
     return IS_PLATFORM ? 'codex login --device-auth' : 'codex login';
   }
+  if (provider === 'antigravity') {
+    return 'agy';
+  }
 
   return 'claude --dangerously-skip-permissions /login';
 };
 
 const getProviderTitle = (provider: LLMProvider) => {
   if (provider === 'codex') return 'Codex CLI Login';
+  if (provider === 'antigravity') return 'Antigravity CLI Login';
   return 'Claude CLI Login';
 };
 

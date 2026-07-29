@@ -69,6 +69,8 @@ function ChatInterface({
     setClaudeModel,
     codexModel,
     setCodexModel,
+    antigravityModel,
+    setAntigravityModel,
     currentProviderEffort,
     currentProviderEffortOptions,
     permissionMode,
@@ -196,6 +198,7 @@ function ChatInterface({
     cyclePermissionMode,
     claudeModel,
     codexModel,
+    antigravityModel,
     currentProviderEffort,
     isLoading: isProcessing,
     canAbortSession,
@@ -309,7 +312,9 @@ function ChatInterface({
     const selectedProviderLabel =
       provider === 'codex'
         ? t('messageTypes.codex')
-        : t('messageTypes.claude');
+        : provider === 'antigravity'
+          ? t('messageTypes.antigravity')
+          : t('messageTypes.claude');
 
     return (
       <div className="flex h-full items-center justify-center">
@@ -345,6 +350,8 @@ function ChatInterface({
           setClaudeModel={setClaudeModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
+          antigravityModel={antigravityModel}
+          setAntigravityModel={setAntigravityModel}
           providerModelCatalog={providerModelCatalog}
           providerModelsLoading={providerModelsLoading}
           isLoadingMoreMessages={isLoadingMoreMessages}
@@ -452,7 +459,9 @@ function ChatInterface({
             provider:
               provider === 'codex'
                 ? t('messageTypes.codex')
-                : t('messageTypes.claude'),
+                : provider === 'antigravity'
+                  ? t('messageTypes.antigravity')
+                  : t('messageTypes.claude'),
           })}
           isTextareaExpanded={isTextareaExpanded}
           sendByCtrlEnter={sendByCtrlEnter}

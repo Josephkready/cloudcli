@@ -6,6 +6,7 @@ import type { AgentSelectorSectionProps } from '../types';
 const AGENT_NAMES: Record<AgentProvider, string> = {
   claude: 'Claude',
   codex: 'Codex',
+  antigravity: 'Antigravity',
 };
 
 export default function AgentSelectorSection({
@@ -18,8 +19,11 @@ export default function AgentSelectorSection({
     <div className="flex-shrink-0 border-b border-border px-3 py-2 md:px-4 md:py-3">
       <PillBar className="w-full md:w-auto">
         {agents.map((agent) => {
-          const dotColor =
-            agent === 'claude' ? 'bg-blue-500' : 'bg-foreground/60';
+          const dotColor = agent === 'claude'
+            ? 'bg-blue-500'
+            : agent === 'antigravity'
+              ? 'bg-cyan-500'
+              : 'bg-foreground/60';
 
           return (
             <Pill

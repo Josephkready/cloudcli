@@ -18,7 +18,8 @@
     "error": "Error",
     "tool": "Tool",
     "claude": "Claude",
-    "codex": "Codex"
+    "codex": "Codex",
+    "antigravity": "Antigravity"
   },
   "tools": {
     "settings": "Tool Settings",
@@ -158,6 +159,7 @@
     "readyPrompt": {
       "claude": "Ready to use Claude with {{model}}. Start typing your message below.",
       "codex": "Ready to use Codex with {{model}}. Start typing your message below.",
+      "antigravity": "Ready to use Antigravity with {{model}}. Start typing your message below.",
       "default": "Select a provider above to begin"
     },
     "pressToSearch": "Press <kbd>{{shortcut}}</kbd> to search sessions, files, and commits"

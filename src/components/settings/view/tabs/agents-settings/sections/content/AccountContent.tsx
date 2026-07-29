@@ -1,5 +1,6 @@
 import { LogIn } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+
 import { Badge, Button } from '../../../../../../../shared/view/ui';
 import SessionProviderLogo from '../../../../../../llm-logo-provider/SessionProviderLogo';
 import type { AgentProvider, AuthStatus } from '../../../../../types/types';
@@ -36,6 +37,14 @@ const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
     textClass: 'text-gray-900 dark:text-gray-100',
     subtextClass: 'text-gray-700 dark:text-gray-300',
     buttonClass: 'bg-gray-800 hover:bg-gray-900 active:bg-gray-950 dark:bg-gray-700 dark:hover:bg-gray-600 dark:active:bg-gray-500',
+  },
+  antigravity: {
+    name: 'Antigravity',
+    bgClass: 'bg-cyan-50 dark:bg-cyan-900/20',
+    borderClass: 'border-cyan-200 dark:border-cyan-800',
+    textClass: 'text-cyan-950 dark:text-cyan-100',
+    subtextClass: 'text-cyan-800 dark:text-cyan-300',
+    buttonClass: 'bg-cyan-700 hover:bg-cyan-800 active:bg-cyan-900',
   },
 };
 

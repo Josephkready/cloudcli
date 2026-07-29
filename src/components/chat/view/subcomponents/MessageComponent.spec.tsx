@@ -13,7 +13,7 @@ import MessageComponent from './MessageComponent';
  * elsewhere; this closes the untested render link.
  */
 
-function renderMessage(message: Partial<ChatMessage>) {
+function renderMessage(message: Partial<ChatMessage>, provider = 'claude') {
   const full = {
     type: 'user',
     timestamp: '2026-07-21T10:00:00.000Z',
@@ -25,7 +25,7 @@ function renderMessage(message: Partial<ChatMessage>) {
       message={full}
       prevMessage={null}
       createDiff={() => []}
-      provider="claude"
+      provider={provider}
     />,
   );
 }
@@ -88,5 +88,17 @@ describe('MessageComponent — local-command chip (#39)', () => {
     expect(bubble).not.toHaveClass('font-mono');
     expect(container.querySelector('.font-mono')).toBeNull();
     expect(container.querySelector('.rounded-br-md')).not.toBeNull();
+  });
+});
+
+describe('MessageComponent — provider identity', () => {
+  it('labels Antigravity assistant messages as Antigravity', () => {
+    renderMessage({
+      type: 'assistant',
+      content: 'Hello from Antigravity',
+    }, 'antigravity');
+
+    expect(screen.getByText('Antigravity')).toBeInTheDocument();
+    expect(screen.queryByText('Claude')).not.toBeInTheDocument();
   });
 });
