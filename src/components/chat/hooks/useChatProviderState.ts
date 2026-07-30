@@ -25,6 +25,26 @@ const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
 
 const PROVIDERS: LLMProvider[] = ['claude', 'codex', 'antigravity'];
 
+/**
+ * Hard ceiling on a single provider-models request. The model picker only
+ * clears its "Loading models…" placeholder once the request settles, so a
+ * request that hangs forever leaves the picker stuck on that placeholder with
+ * no way out but a page reload. Mobile clients hit this routinely: a
+ * backgrounded PWA or a roaming radio leaves the fetch pending rather than
+ * failing it.
+ *
+ * Built on AbortController rather than `AbortSignal.timeout` so the deadline
+ * runs on a patchable `setTimeout` (testable) and works on iOS Safari < 16 —
+ * squarely inside the mobile population this timeout exists to protect.
+ */
+const PROVIDER_MODELS_TIMEOUT_MS = 15000;
+
+const createTimeoutSignal = (timeoutMs: number): { signal: AbortSignal; clear: () => void } => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
+};
+
 const readStoredProvider = (): LLMProvider => {
   const storedProvider = localStorage.getItem('selected-provider');
   return PROVIDERS.includes(storedProvider as LLMProvider)
@@ -125,6 +145,12 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   >({});
   const [providerModelsLoading, setProviderModelsLoading] = useState(true);
   const [providerModelsRefreshing, setProviderModelsRefreshing] = useState(false);
+  /**
+   * Providers whose catalog is still missing after the last load attempt. Used
+   * only to arm the recovery listeners below, so a fully loaded catalog costs
+   * nothing.
+   */
+  const [unloadedProviders, setUnloadedProviders] = useState<LLMProvider[]>([]);
 
   const providerModelsRequestIdRef = useRef(0);
 
@@ -168,57 +194,95 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
       setProviderModelsLoading(true);
     }
 
-    try {
-      const results = await Promise.all(
-        PROVIDERS.map(async (p) => {
+    // Every provider settles independently and applies its own catalog the
+    // moment it arrives. The previous `Promise.all` was all-or-nothing: one
+    // rejecting request discarded the catalogs that *had* loaded (the picker
+    // then claimed "No models found" despite two healthy providers), and one
+    // stalled request never settled at all, so the loading flag was never
+    // cleared and every group sat on "Loading models…" forever.
+    const results = await Promise.all(
+      PROVIDERS.map(async (p): Promise<LLMProvider | null> => {
+        const timeout = createTimeoutSignal(PROVIDER_MODELS_TIMEOUT_MS);
+
+        try {
           const params = new URLSearchParams();
           if (options.bypassCache) {
             params.set('bypassCache', 'true');
           }
 
           const queryString = params.toString();
-          const response = await authenticatedFetch(`/api/providers/${p}/models${queryString ? `?${queryString}` : ''}`);
+          const response = await authenticatedFetch(
+            `/api/providers/${p}/models${queryString ? `?${queryString}` : ''}`,
+            { signal: timeout.signal },
+          );
           const body = (await response.json()) as ProviderModelsApiResponse;
           if (!body.success || !body.data?.models || !body.data?.cache) {
+            return p;
+          }
+
+          if (providerModelsRequestIdRef.current !== requestId) {
             return null;
           }
 
-          return body.data;
-        }),
-      );
-
-      if (providerModelsRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      const nextCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>> = {};
-      const nextCacheCatalog: Partial<Record<LLMProvider, ProviderModelsCacheInfo>> = {};
-
-      PROVIDERS.forEach((p, i) => {
-        const entry = results[i];
-        if (!entry) {
-          return;
+          const { models, cache } = body.data;
+          setProviderModelCatalog((previous) => ({ ...previous, [p]: models }));
+          setProviderModelCacheCatalog((previous) => ({ ...previous, [p]: cache }));
+          return null;
+        } catch (error) {
+          console.error(`Error loading provider models for "${p}":`, error);
+          return p;
+        } finally {
+          timeout.clear();
         }
+      }),
+    );
 
-        nextCatalog[p] = entry.models;
-        nextCacheCatalog[p] = entry.cache;
-      });
-
-      setProviderModelCatalog(nextCatalog);
-      setProviderModelCacheCatalog(nextCacheCatalog);
-    } catch (error) {
-      console.error('Error loading provider models:', error);
-    } finally {
-      if (providerModelsRequestIdRef.current === requestId) {
-        setProviderModelsLoading(false);
-        setProviderModelsRefreshing(false);
-      }
+    if (providerModelsRequestIdRef.current !== requestId) {
+      return;
     }
+
+    const failedProviders = results.filter((p): p is LLMProvider => p !== null);
+    // Preserve array identity when the failure set is unchanged, so the
+    // recovery effect below is not torn down and re-armed on every load.
+    setUnloadedProviders((previous) => (
+      previous.length === failedProviders.length
+        && previous.every((p, i) => p === failedProviders[i])
+        ? previous
+        : failedProviders
+    ));
+    setProviderModelsLoading(false);
+    setProviderModelsRefreshing(false);
   }, []);
 
   useEffect(() => {
     void loadProviderModels();
   }, [loadProviderModels]);
+
+  // Without this, a provider that timed out or errored stays missing until a
+  // full page reload: the effect above runs exactly once per mount and nothing
+  // else refetches. Retry when the client regains connectivity or the tab
+  // returns to the foreground — the two moments a mobile client recovers from
+  // the stalls that cause the failure in the first place.
+  useEffect(() => {
+    if (unloadedProviders.length === 0) {
+      return;
+    }
+
+    const retry = () => {
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+
+      void loadProviderModels();
+    };
+
+    window.addEventListener('online', retry);
+    document.addEventListener('visibilitychange', retry);
+    return () => {
+      window.removeEventListener('online', retry);
+      document.removeEventListener('visibilitychange', retry);
+    };
+  }, [unloadedProviders, loadProviderModels]);
 
   useEffect(() => {
     let cancelled = false;
