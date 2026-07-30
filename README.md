@@ -62,6 +62,18 @@ Reading the output takes judgement: zero usage is a *candidate* for removal, not
 a verdict. Give it a long window (90+ days — rare is not dead), and rule out
 "unused because it's broken or undiscoverable" before trusting a zero.
 
+## Reporting bugs
+
+The bug icon in the app's top panel opens a reporter: write what went wrong, and
+the app attaches the session details (versions, provider, space, active tab,
+browser) and files a GitHub issue for you. It shows you exactly what it will
+send before it sends it.
+
+Filing runs the **host's `gh` CLI**, so the server needs `gh` installed and
+authenticated (`gh auth login`) — otherwise the dialog reports the failure and
+files nothing. Reports go to `Josephkready/cloudcli` unless `BUG_REPORT_REPO`
+says otherwise.
+
 ## Deployment
 
 Production runs on `dante` and is reconciled by `ansible-pull` against `origin/main`. The build (`scripts/dante-build.sh`: `npm ci` + `vite build` + asset precompression + `tsc`/`tsc-alias`, atomic swap) and the `systemd` unit that runs `node dist-server/server/index.js` are owned by the deploy repo — **ship changes by merging to `origin/main`, not by SSH+rsync.** See the mind design doc `cloudcli-dante-deploy` and the `dante-sync` / `dante-live` skills for the full workflow.
