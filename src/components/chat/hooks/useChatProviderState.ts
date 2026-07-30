@@ -37,7 +37,7 @@ const PROVIDERS: LLMProvider[] = ['claude', 'codex', 'antigravity'];
  * runs on a patchable `setTimeout` (testable) and works on iOS Safari < 16 —
  * squarely inside the mobile population this timeout exists to protect.
  */
-const PROVIDER_MODELS_TIMEOUT_MS = 15000;
+export const PROVIDER_MODELS_TIMEOUT_MS = 15000;
 
 const createTimeoutSignal = (timeoutMs: number): { signal: AbortSignal; clear: () => void } => {
   const controller = new AbortController();
@@ -153,6 +153,13 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   const [unloadedProviders, setUnloadedProviders] = useState<LLMProvider[]>([]);
 
   const providerModelsRequestIdRef = useRef(0);
+  /**
+   * Number of loads currently in flight. The recovery listeners can fire in
+   * bursts — a flaky radio flapping `online`, or a user flicking between apps —
+   * and without this each event would start another full round of requests
+   * against a provider that is still being retried.
+   */
+  const providerModelsInFlightRef = useRef(0);
 
   const setStoredProviderModel = useCallback((targetProvider: LLMProvider, model: string) => {
     if (targetProvider === 'codex') {
@@ -194,64 +201,75 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
       setProviderModelsLoading(true);
     }
 
-    // Every provider settles independently and applies its own catalog the
-    // moment it arrives. The previous `Promise.all` was all-or-nothing: one
-    // rejecting request discarded the catalogs that *had* loaded (the picker
-    // then claimed "No models found" despite two healthy providers), and one
-    // stalled request never settled at all, so the loading flag was never
-    // cleared and every group sat on "Loading models…" forever.
-    const results = await Promise.all(
-      PROVIDERS.map(async (p): Promise<LLMProvider | null> => {
-        const timeout = createTimeoutSignal(PROVIDER_MODELS_TIMEOUT_MS);
+    providerModelsInFlightRef.current += 1;
 
-        try {
-          const params = new URLSearchParams();
-          if (options.bypassCache) {
-            params.set('bypassCache', 'true');
-          }
+    try {
+      // Every provider settles independently and applies its own catalog the
+      // moment it arrives. The previous `Promise.all` was all-or-nothing: one
+      // rejecting request discarded the catalogs that *had* loaded (the picker
+      // then claimed "No models found" despite two healthy providers), and one
+      // stalled request never settled at all, so the loading flag was never
+      // cleared and every group sat on "Loading models…" forever.
+      const results = await Promise.all(
+        PROVIDERS.map(async (p): Promise<LLMProvider | null> => {
+          const timeout = createTimeoutSignal(PROVIDER_MODELS_TIMEOUT_MS);
 
-          const queryString = params.toString();
-          const response = await authenticatedFetch(
-            `/api/providers/${p}/models${queryString ? `?${queryString}` : ''}`,
-            { signal: timeout.signal },
-          );
-          const body = (await response.json()) as ProviderModelsApiResponse;
-          if (!body.success || !body.data?.models || !body.data?.cache) {
-            return p;
-          }
+          try {
+            const params = new URLSearchParams();
+            if (options.bypassCache) {
+              params.set('bypassCache', 'true');
+            }
 
-          if (providerModelsRequestIdRef.current !== requestId) {
+            const queryString = params.toString();
+            const response = await authenticatedFetch(
+              `/api/providers/${p}/models${queryString ? `?${queryString}` : ''}`,
+              { signal: timeout.signal },
+            );
+            const body = (await response.json()) as ProviderModelsApiResponse;
+            if (!body.success || !body.data?.models || !body.data?.cache) {
+              // A well-formed HTTP response carrying an unusable payload drops
+              // the provider from the picker. Say so: silently returning left
+              // the provider simply missing, with nothing in the console to
+              // explain it.
+              console.warn(`Provider "${p}" returned an unusable models payload.`);
+              return p;
+            }
+
+            if (providerModelsRequestIdRef.current !== requestId) {
+              return null;
+            }
+
+            const { models, cache } = body.data;
+            setProviderModelCatalog((previous) => ({ ...previous, [p]: models }));
+            setProviderModelCacheCatalog((previous) => ({ ...previous, [p]: cache }));
             return null;
+          } catch (error) {
+            console.error(`Error loading provider models for "${p}":`, error);
+            return p;
+          } finally {
+            timeout.clear();
           }
+        }),
+      );
 
-          const { models, cache } = body.data;
-          setProviderModelCatalog((previous) => ({ ...previous, [p]: models }));
-          setProviderModelCacheCatalog((previous) => ({ ...previous, [p]: cache }));
-          return null;
-        } catch (error) {
-          console.error(`Error loading provider models for "${p}":`, error);
-          return p;
-        } finally {
-          timeout.clear();
-        }
-      }),
-    );
+      if (providerModelsRequestIdRef.current !== requestId) {
+        return;
+      }
 
-    if (providerModelsRequestIdRef.current !== requestId) {
-      return;
+      const failedProviders = results.filter((p): p is LLMProvider => p !== null);
+      // Preserve array identity when the failure set is unchanged, so the
+      // recovery effect below is not torn down and re-armed on every load.
+      setUnloadedProviders((previous) => (
+        previous.length === failedProviders.length
+          && previous.every((p, i) => p === failedProviders[i])
+          ? previous
+          : failedProviders
+      ));
+      setProviderModelsLoading(false);
+      setProviderModelsRefreshing(false);
+    } finally {
+      providerModelsInFlightRef.current -= 1;
     }
-
-    const failedProviders = results.filter((p): p is LLMProvider => p !== null);
-    // Preserve array identity when the failure set is unchanged, so the
-    // recovery effect below is not torn down and re-armed on every load.
-    setUnloadedProviders((previous) => (
-      previous.length === failedProviders.length
-        && previous.every((p, i) => p === failedProviders[i])
-        ? previous
-        : failedProviders
-    ));
-    setProviderModelsLoading(false);
-    setProviderModelsRefreshing(false);
   }, []);
 
   useEffect(() => {
@@ -269,7 +287,15 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     }
 
     const retry = () => {
+      // A tab that came back only to be hidden again has no user waiting on the
+      // picker, and `online` can fire while backgrounded.
       if (document.visibilityState === 'hidden') {
+        return;
+      }
+
+      // Bursts of these events are normal on a flapping connection. Coalesce
+      // them onto the load that is already running.
+      if (providerModelsInFlightRef.current > 0) {
         return;
       }
 

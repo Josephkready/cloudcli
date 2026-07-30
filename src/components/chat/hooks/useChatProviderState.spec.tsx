@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProviderModelsCacheInfo } from '../../../types/app';
 
-import { useChatProviderState } from './useChatProviderState';
+import { PROVIDER_MODELS_TIMEOUT_MS, useChatProviderState } from './useChatProviderState';
 
 const { authenticatedFetch, recordFeatureUse } = vi.hoisted(() => ({
   authenticatedFetch: vi.fn(),
@@ -143,7 +143,7 @@ describe('useChatProviderState — provider model catalog resilience', () => {
     }));
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(15000);
+      await vi.advanceTimersByTimeAsync(PROVIDER_MODELS_TIMEOUT_MS);
     });
 
     expect(result.current.providerModelsLoading).toBe(false);
@@ -179,6 +179,111 @@ describe('useChatProviderState — provider model catalog resilience', () => {
     await waitFor(() => expect(result.current.providerModelCatalog.antigravity)
       .toEqual(modelDefinitions.antigravity));
     expect(antigravityAttempts).toBe(2);
+  });
+
+  it('retries a failed provider when connectivity returns', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let antigravityAttempts = 0;
+    authenticatedFetch.mockImplementation(async (input: string, init?: RequestInit) => {
+      if (input.startsWith('/api/providers/antigravity/models')) {
+        antigravityAttempts += 1;
+        if (antigravityAttempts === 1) {
+          throw new Error('network down');
+        }
+      }
+      return providerApi(input, init);
+    });
+
+    const { result } = renderHook(() => useChatProviderState({
+      selectedSession: null,
+      selectedProject: null,
+    }));
+
+    await waitFor(() => expect(result.current.providerModelsLoading).toBe(false));
+    expect(result.current.providerModelCatalog.antigravity).toBeUndefined();
+
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+
+    await waitFor(() => expect(result.current.providerModelCatalog.antigravity)
+      .toEqual(modelDefinitions.antigravity));
+  });
+
+  it('does not retry while the tab is hidden', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let antigravityAttempts = 0;
+    authenticatedFetch.mockImplementation(async (input: string, init?: RequestInit) => {
+      if (input.startsWith('/api/providers/antigravity/models')) {
+        antigravityAttempts += 1;
+        throw new Error('network down');
+      }
+      return providerApi(input, init);
+    });
+
+    const { result } = renderHook(() => useChatProviderState({
+      selectedSession: null,
+      selectedProject: null,
+    }));
+
+    await waitFor(() => expect(result.current.providerModelsLoading).toBe(false));
+    expect(antigravityAttempts).toBe(1);
+
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('online'));
+    });
+
+    // A backgrounded tab has nobody waiting on the picker.
+    expect(antigravityAttempts).toBe(1);
+    visibility.mockRestore();
+  });
+
+  it('coalesces a burst of recovery events onto one in-flight retry', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let antigravityAttempts = 0;
+    let releaseRetry: (() => void) | undefined;
+    authenticatedFetch.mockImplementation(async (input: string, init?: RequestInit) => {
+      if (input.startsWith('/api/providers/antigravity/models')) {
+        antigravityAttempts += 1;
+        if (antigravityAttempts === 1) {
+          throw new Error('network down');
+        }
+        // Hold the retry open so the later events in the burst arrive while it
+        // is still running.
+        await new Promise<void>((resolve) => { releaseRetry = resolve; });
+      }
+      return providerApi(input, init);
+    });
+
+    const { result } = renderHook(() => useChatProviderState({
+      selectedSession: null,
+      selectedProject: null,
+    }));
+
+    await waitFor(() => expect(result.current.providerModelsLoading).toBe(false));
+    expect(antigravityAttempts).toBe(1);
+
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await waitFor(() => expect(antigravityAttempts).toBe(2));
+
+    // A flapping connection fires these repeatedly — they must not each start
+    // another round of requests against the provider already being retried.
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('online'));
+    });
+    expect(antigravityAttempts).toBe(2);
+
+    await act(async () => {
+      releaseRetry?.();
+    });
+    await waitFor(() => expect(result.current.providerModelCatalog.antigravity)
+      .toEqual(modelDefinitions.antigravity));
   });
 
   it('does not retry while the catalog is complete', async () => {
