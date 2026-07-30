@@ -15,7 +15,7 @@ import {
 } from './buildBugReportMetadata';
 
 /** Mirrors the server's `MAX_DESCRIPTION_LENGTH`, so the UI blocks what the API would reject. */
-export const MAX_DESCRIPTION_LENGTH = 20000;
+const MAX_DESCRIPTION_LENGTH = 20000;
 
 /** Long enough to rule out an accidental submit, short enough not to nag. */
 const MIN_DESCRIPTION_LENGTH = 10;
