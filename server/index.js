@@ -58,6 +58,7 @@ import usageRoutes from './routes/usage.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import { pruneOrphanedBrowserMcp } from './modules/providers/services/orphaned-mcp-cleanup.service.js';
 import voiceRoutes from './voice-proxy.js';
+import bugReportRoutes from './routes/bug-report.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
 import { initializeDatabase, projectsDb, sessionsDb } from './modules/database/index.js';
@@ -233,6 +234,9 @@ app.use('/api/providers', authenticateToken, providerRoutes);
 app.use('/api/agent', agentRoutes);
 
 app.use('/api/voice', authenticateToken, voiceRoutes);
+
+// In-app bug reporter — files a GitHub issue via the host's `gh` CLI (protected)
+app.use('/api/bug-report', authenticateToken, bugReportRoutes);
 
 // Serve the SPA's index.html through a small response transform so we can
 // inject `window.__ROUTER_BASENAME__` before any client JS executes. This is
