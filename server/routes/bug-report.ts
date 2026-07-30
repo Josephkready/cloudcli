@@ -14,39 +14,42 @@ import express from 'express';
 import {
   buildIssueBody,
   buildIssueTitle,
+  describeDescriptionRejection,
   normalizeDescription,
   parseIssueUrl,
   resolveBugReportRepo,
-  MAX_DESCRIPTION_LENGTH,
   type BugReportMetadata,
 } from '@/shared/bug-report.js';
 import { AppError, asyncHandler, createApiSuccessResponse, readObjectRecord } from '@/shared/utils.js';
 
-const router = express.Router();
-
 /** `gh` occasionally hangs on a stale auth prompt; don't hold the request open forever. */
 const GH_TIMEOUT_MS = 30000;
 
-type GhResult = { code: number | null; stdout: string; stderr: string };
+export type GhResult = { code: number | null; stdout: string; stderr: string };
+
+export type GhRunner = (args: string[]) => Promise<GhResult>;
 
 /**
  * Runs `gh` with the given args, never through a shell.
  *
  * Arguments are passed as an argv array so a description containing shell
- * metacharacters is inert.
+ * metacharacters is inert. `command` exists so tests can drive the timeout and
+ * ENOENT branches against a fixture binary instead of a real `gh`.
  */
 export function runGh(
   args: string[],
   timeoutMs: number = GH_TIMEOUT_MS,
+  command = 'gh',
 ): Promise<GhResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn('gh', args, { shell: false });
+    const child = spawn(command, args, { shell: false });
     let stdout = '';
     let stderr = '';
     let settled = false;
 
     const timer = setTimeout(() => {
       settled = true;
+      console.error(`Bug report gh timed out after ${timeoutMs}ms:`, args[0], args[1]);
       child.kill('SIGKILL');
       reject(new AppError('Timed out talking to GitHub. Please try again.', {
         code: 'BUG_REPORT_GH_TIMEOUT',
@@ -61,6 +64,7 @@ export function runGh(
       clearTimeout(timer);
       if (settled) return;
       settled = true;
+      console.error('Bug report gh spawn error:', error);
       if (error.code === 'ENOENT') {
         reject(new AppError(
           'The GitHub CLI (`gh`) is not installed on the server, so the report could not be filed.',
@@ -86,7 +90,7 @@ export function runGh(
  * The raw stderr is not returned to the client: it can carry host paths and
  * token hints, and it rarely says anything a reporter can use.
  */
-function describeGhFailure(stderr: string): AppError {
+export function describeGhFailure(stderr: string): AppError {
   const text = stderr.toLowerCase();
 
   if (text.includes('not logged into') || text.includes('gh auth login') || text.includes('authentication')) {
@@ -116,17 +120,28 @@ function describeGhFailure(stderr: string): AppError {
   });
 }
 
-router.post(
+/**
+ * Builds the reporter router.
+ *
+ * `runGh` is injectable — following the same dependency-object shape the
+ * project-clone service uses — so the route's own branches can be tested
+ * against canned `gh` results instead of a real GitHub round trip.
+ */
+export function createBugReportRouter(dependencies: { runGh?: GhRunner } = {}) {
+  const router = express.Router();
+  const run = dependencies.runGh ?? ((args: string[]) => runGh(args));
+
+  router.post(
   '/',
   asyncHandler(async (req, res) => {
     const body = readObjectRecord(req.body) ?? {};
     const description = normalizeDescription(body.description);
 
     if (!description) {
-      throw new AppError(
-        `Please describe the bug (up to ${MAX_DESCRIPTION_LENGTH} characters).`,
-        { code: 'BUG_REPORT_DESCRIPTION_REQUIRED', statusCode: 400 },
-      );
+      throw new AppError(describeDescriptionRejection(body.description), {
+        code: 'BUG_REPORT_DESCRIPTION_REQUIRED',
+        statusCode: 400,
+      });
     }
 
     const clientMetadata = (readObjectRecord(body.metadata) ?? {}) as BugReportMetadata;
@@ -142,7 +157,7 @@ router.post(
     const title = buildIssueTitle(description);
     const issueBody = buildIssueBody(description, metadata);
 
-    const result = await runGh([
+    const result = await run([
       'issue', 'create',
       '--repo', repo,
       '--title', title,
@@ -150,6 +165,10 @@ router.post(
     ]);
 
     if (result.code !== 0) {
+      // The client only ever sees the mapped message, and the global error
+      // middleware doesn't log AppErrors — so without this line a broken
+      // reporter leaves the operator nothing at all to debug from.
+      console.error('Bug report gh issue create failed:', result.code, result.stderr.trim());
       throw describeGhFailure(result.stderr);
     }
 
@@ -163,6 +182,9 @@ router.post(
 
     res.json(createApiSuccessResponse({ issueUrl, repo }));
   }),
-);
+  );
 
-export default router;
+  return router;
+}
+
+export default createBugReportRouter();

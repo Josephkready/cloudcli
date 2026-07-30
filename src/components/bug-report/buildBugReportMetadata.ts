@@ -28,7 +28,6 @@ export type BugReportMetadata = {
   appVersion?: string;
   serverVersion?: string;
   provider?: string;
-  model?: string;
   sessionId?: string;
   projectName?: string;
   projectPath?: string;

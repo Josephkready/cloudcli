@@ -27,7 +27,6 @@ export const METADATA_FIELDS = [
   ['appVersion', 'App version'],
   ['serverVersion', 'Server version'],
   ['provider', 'Provider'],
-  ['model', 'Model'],
   ['sessionId', 'Session ID'],
   ['projectName', 'Project'],
   ['projectPath', 'Project path'],
@@ -62,6 +61,18 @@ export function normalizeDescription(raw: unknown): string | null {
   }
 
   return trimmed;
+}
+
+/**
+ * Says *why* a description was rejected, so a 20001-character paste isn't told
+ * it wrote nothing.
+ */
+export function describeDescriptionRejection(raw: unknown): string {
+  if (typeof raw === 'string' && raw.trim().length > MAX_DESCRIPTION_LENGTH) {
+    return `That report is too long — please trim it to ${MAX_DESCRIPTION_LENGTH} characters.`;
+  }
+
+  return 'Please describe the bug before filing it.';
 }
 
 /**

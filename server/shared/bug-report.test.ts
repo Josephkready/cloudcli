@@ -8,6 +8,7 @@ import {
   MAX_TITLE_LENGTH,
   buildIssueBody,
   buildIssueTitle,
+  describeDescriptionRejection,
   formatMetadataTable,
   normalizeDescription,
   normalizeMetadataValue,
@@ -87,16 +88,23 @@ test('formatMetadataTable renders known fields in declared order and drops unkno
 
 test('formatMetadataTable returns empty string when nothing survives', () => {
   assert.equal(formatMetadataTable({}), '');
-  assert.equal(formatMetadataTable({ sessionId: '  ', model: null }), '');
+  assert.equal(formatMetadataTable({ sessionId: '  ', provider: null }), '');
 });
 
 test('buildIssueBody keeps the description verbatim and appends the marker', () => {
-  const body = buildIssueBody('It **broke**\n\n- step one', { model: 'opus' });
+  const body = buildIssueBody('It **broke**\n\n- step one', { provider: 'claude' });
 
   assert.ok(body.includes('### What happened'));
   assert.ok(body.includes('It **broke**\n\n- step one'));
-  assert.ok(body.includes('| Model | `opus` |'));
+  assert.ok(body.includes('| Provider | `claude` |'));
   assert.ok(body.includes('CloudCLI in-app bug reporter'));
+});
+
+test('describeDescriptionRejection tells a long paste apart from an empty one', () => {
+  assert.match(describeDescriptionRejection('x'.repeat(MAX_DESCRIPTION_LENGTH + 1)), /too long/);
+  assert.match(describeDescriptionRejection(''), /describe the bug/);
+  assert.match(describeDescriptionRejection('   '), /describe the bug/);
+  assert.match(describeDescriptionRejection(undefined), /describe the bug/);
 });
 
 test('buildIssueBody omits the details section when there is no metadata', () => {
