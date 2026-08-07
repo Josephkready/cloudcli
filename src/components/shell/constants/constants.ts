@@ -4,6 +4,26 @@ export const SHELL_RESTART_DELAY_MS = 200;
 export const TERMINAL_INIT_DELAY_MS = 100;
 export const TERMINAL_RESIZE_DELAY_MS = 50;
 
+/**
+ * Backstop for building the terminal when no paint ever happens (#272).
+ *
+ * The build is normally scheduled off the frame that paints the shell chrome,
+ * but a hidden document never paints and therefore never runs its rAF callback
+ * — the provider-login terminal has to come up in a background tab all the
+ * same. This timer is what gets it built there. It is not a paint-tuning knob:
+ * in the visible case the rAF path wins the race long before it fires.
+ */
+export const TERMINAL_BUILD_FALLBACK_DELAY_MS = 120;
+
+/**
+ * Upper bound on how long the terminal runs on xterm's DOM renderer before the
+ * WebGL upgrade is forced through, and the delay used where there is no
+ * `requestIdleCallback` (Safari). Long enough for the pty handshake and first
+ * prompt to land first, short enough that heavy output is on the fast renderer.
+ */
+export const WEBGL_UPGRADE_IDLE_TIMEOUT_MS = 1_000;
+export const WEBGL_UPGRADE_FALLBACK_DELAY_MS = 300;
+
 // CLI prompt overlay detection
 export const PROMPT_DEBOUNCE_MS = 500;
 export const PROMPT_BUFFER_SCAN_LINES = 20;
