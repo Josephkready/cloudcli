@@ -9,9 +9,12 @@ import { Terminal } from '@xterm/xterm';
 import type { Project } from '../../../types/app';
 import { copyTextToClipboard } from '../../../utils/clipboard';
 import {
+  TERMINAL_BUILD_FALLBACK_DELAY_MS,
   TERMINAL_INIT_DELAY_MS,
   TERMINAL_OPTIONS,
   TERMINAL_RESIZE_DELAY_MS,
+  WEBGL_UPGRADE_FALLBACK_DELAY_MS,
+  WEBGL_UPGRADE_IDLE_TIMEOUT_MS,
 } from '../constants/constants';
 import {
   installMobileTerminalSelection,
@@ -57,19 +60,6 @@ const ClipboardAddonCtor = ClipboardAddon as unknown as new (
   base64?: unknown,
   provider?: IClipboardProvider,
 ) => ClipboardAddon;
-
-// One frame of slack: long enough for the browser to paint the shell chrome
-// before xterm is built, short enough that the terminal still fills in within
-// the same interaction. `requestAnimationFrame` alone is not enough — it runs
-// *before* paint, so the construction would still land in the same frame.
-const TERMINAL_BUILD_FALLBACK_DELAY_MS = 120;
-
-// Upper bound on how long the terminal runs on xterm's DOM renderer before the
-// WebGL upgrade is forced through, and the delay used where there is no
-// `requestIdleCallback` (Safari). Long enough for the pty handshake and first
-// prompt to land first, short enough that heavy output is on the fast renderer.
-const WEBGL_UPGRADE_IDLE_TIMEOUT_MS = 1_000;
-const WEBGL_UPGRADE_FALLBACK_DELAY_MS = 300;
 
 /**
  * Schedules the WebGL renderer upgrade off the critical path, returning a
