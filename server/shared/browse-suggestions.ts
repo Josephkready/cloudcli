@@ -64,6 +64,31 @@ export function parseBrowseCommonDirs(rawValue: string | undefined): string[] {
  * The generic constraint keeps this decoupled from the endpoint's concrete
  * directory shape; it only needs a `name` to match against `commonDirs`.
  */
+/**
+ * Tags each suggestion with whether it is a git repository root.
+ *
+ * The picker lists repositories only (issue #309: browsing the workspace root
+ * offered every subfolder of every repo, when the only useful targets are the
+ * repos themselves), so it needs one bit per entry the listing can't derive
+ * from the directory name.
+ *
+ * This costs one extra `stat` per entry, which is why it is opt-in at the
+ * endpoint (`?repoFlags=1`) rather than always-on: the path-autocomplete caller
+ * doesn't need the flag and shouldn't pay for it. The predicate is injected so
+ * the ordering/annotation logic stays unit-testable without touching a disk.
+ */
+export async function annotateRepositoryFlags<T extends { path: string }>(
+  directories: readonly T[],
+  isRepositoryRoot: (dirPath: string) => Promise<boolean>,
+): Promise<(T & { isRepository: boolean })[]> {
+  return Promise.all(
+    directories.map(async (entry) => ({
+      ...entry,
+      isRepository: await isRepositoryRoot(entry.path),
+    })),
+  );
+}
+
 export function buildBrowseSuggestions<T extends { name: string }>(
   directories: readonly T[],
   commonDirs: readonly string[],

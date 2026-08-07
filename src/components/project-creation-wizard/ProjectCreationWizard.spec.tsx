@@ -173,7 +173,7 @@ describe('ProjectCreationWizard — focus trap (#274)', () => {
     await user.tab();
     expect(picker.contains(document.activeElement)).toBe(true);
     expect(document.activeElement).toBe(
-      screen.getByRole('button', { name: 'Show hidden folders' }),
+      screen.getByRole('button', { name: 'Show all folders' }),
     );
 
     await user.keyboard('{Escape}');

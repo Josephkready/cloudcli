@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Eye, EyeOff, FolderOpen, FolderPlus, Loader2, Plus, X } from 'lucide-react';
+import { Eye, EyeOff, Folder, FolderGit2, FolderOpen, Loader2, Plus, X } from 'lucide-react';
 import { Button, Input } from '../../../shared/view/ui';
 import { useFocusTrap } from '../../../shared/view/ui/useFocusTrap';
 import { useOverlayDismiss } from '../../../shared/view/ui/useOverlayDismiss';
 import { browseFilesystemFolders, createFolderInFilesystem } from '../data/workspaceApi';
-import { getParentPath, joinFolderPath } from '../utils/pathUtils';
+import { joinFolderPath } from '../utils/pathUtils';
 import type { FolderSuggestion } from '../types';
 
 type FolderBrowserModalProps = {
@@ -14,32 +14,44 @@ type FolderBrowserModalProps = {
   onFolderSelected: (folderPath: string, advanceToConfirm: boolean) => void;
 };
 
+/**
+ * Picks a workspace folder from the configured WORKSPACES_ROOT.
+ *
+ * The picker is deliberately *flat*: it lists the repositories sitting directly
+ * in the workspace root and never descends. Descending is what made it unusable
+ * (#309) — every repo opened into its own `src/`, `docs/`, … when the only
+ * folders anyone wants here are the repos themselves and the root (the parent a
+ * clone lands in). Anything else can still be typed into the workspace path
+ * field, which keeps its own autocomplete.
+ *
+ * Because it never leaves the root, the ".." row #238 was about is gone too:
+ * there is no navigation left to offer a click that could only 403.
+ */
 export default function FolderBrowserModal({
   isOpen,
   autoAdvanceOnSelect,
   onClose,
   onFolderSelected,
 }: FolderBrowserModalProps) {
-  const [currentPath, setCurrentPath] = useState('~');
-  // Only the server knows WORKSPACES_ROOT, so it tells us when the current
-  // directory has no navigable parent (#238).
-  const [isAtWorkspaceRoot, setIsAtWorkspaceRoot] = useState(true);
+  const [rootPath, setRootPath] = useState('~');
   const [folders, setFolders] = useState<FolderSuggestion[]>([]);
   const [loadingFolders, setLoadingFolders] = useState(false);
+  // Repositories are the default listing; this is the escape hatch for the
+  // plain folders beside them (a not-yet-initialised project directory, say).
+  const [showAllFolders, setShowAllFolders] = useState(false);
   const [showHiddenFolders, setShowHiddenFolders] = useState(false);
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadFolders = useCallback(async (pathToLoad: string) => {
+  const loadFolders = useCallback(async () => {
     setLoadingFolders(true);
     setError(null);
 
     try {
-      const result = await browseFilesystemFolders(pathToLoad);
-      setCurrentPath(result.path);
-      setIsAtWorkspaceRoot(result.isAtRoot);
+      const result = await browseFilesystemFolders('~', { includeRepositoryFlags: true });
+      setRootPath(result.path);
       setFolders(result.suggestions);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load folders');
@@ -52,16 +64,28 @@ export default function FolderBrowserModal({
     if (!isOpen) {
       return;
     }
-    loadFolders('~');
+    loadFolders();
   }, [isOpen, loadFolders]);
 
   const visibleFolders = useMemo(
     () =>
       folders
+        .filter((folder) => showAllFolders || folder.isRepository)
         .filter((folder) => showHiddenFolders || !folder.name.startsWith('.'))
         .sort((firstFolder, secondFolder) =>
           firstFolder.name.toLowerCase().localeCompare(secondFolder.name.toLowerCase()),
         ),
+    [folders, showAllFolders, showHiddenFolders],
+  );
+
+  // Only offer the "there is more here" hint when the repo filter is what is
+  // holding entries back — hidden folders have their own toggle.
+  const nonRepoCount = useMemo(
+    () =>
+      folders.filter(
+        (folder) =>
+          !folder.isRepository && (showHiddenFolders || !folder.name.startsWith('.')),
+      ).length,
     [folders, showHiddenFolders],
   );
 
@@ -96,21 +120,19 @@ export default function FolderBrowserModal({
     setError(null);
 
     try {
-      const folderPath = joinFolderPath(currentPath, newFolderName);
+      const folderPath = joinFolderPath(rootPath, newFolderName);
       const createdPath = await createFolderInFilesystem(folderPath);
       resetNewFolderState();
-      await loadFolders(createdPath);
+      // A folder created here exists to be used, and a brand-new one is never a
+      // repository — it would vanish from the default listing if we merely
+      // refreshed. Hand it straight back instead.
+      onFolderSelected(createdPath, autoAdvanceOnSelect);
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'Failed to create folder');
     } finally {
       setCreatingFolder(false);
     }
-  }, [currentPath, loadFolders, newFolderName]);
-
-  // At the workspace root the parent is out of bounds, so browsing to it can
-  // only ever 403 — don't offer the row at all. getParentPath still guards the
-  // filesystem-root edge cases ('/', '~', 'C:\').
-  const parentPath = isAtWorkspaceRoot ? null : getParentPath(currentPath);
+  }, [autoAdvanceOnSelect, newFolderName, onFolderSelected, rootPath]);
 
   if (!isOpen) {
     return null;
@@ -139,6 +161,17 @@ export default function FolderBrowserModal({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowAllFolders((previous) => !previous)}
+              className={`rounded-md p-2 transition-colors ${
+                showAllFolders
+                  ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300'
+                  : 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'
+              }`}
+              title={showAllFolders ? 'Show repositories only' : 'Show all folders'}
+            >
+              {showAllFolders ? <Folder className="h-5 w-5" /> : <FolderGit2 className="h-5 w-5" />}
+            </button>
             <button
               onClick={() => setShowHiddenFolders((previous) => !previous)}
               className={`rounded-md p-2 transition-colors ${
@@ -218,42 +251,36 @@ export default function FolderBrowserModal({
             </div>
           ) : (
             <div className="space-y-1">
-              {parentPath && (
-                <button
-                  onClick={() => loadFolders(parentPath)}
-                  className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700"
-                >
-                  <FolderOpen className="h-5 w-5 text-gray-400" />
-                  <span className="font-medium text-gray-700 dark:text-gray-300">..</span>
-                </button>
-              )}
-
               {visibleFolders.length === 0 ? (
                 <div className="py-8 text-center text-gray-500 dark:text-gray-400">
-                  No subfolders found
+                  {showAllFolders ? 'No folders found' : 'No repositories found'}
                 </div>
               ) : (
                 visibleFolders.map((folder) => (
-                  <div key={folder.path} className="flex items-center gap-2">
-                    <button
-                      onClick={() => loadFolders(folder.path)}
-                      className="flex flex-1 items-center gap-3 rounded-lg px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700"
-                    >
-                      <FolderPlus className="h-5 w-5 text-blue-500" />
-                      <span className="font-medium text-gray-900 dark:text-white">
-                        {folder.name}
-                      </span>
-                    </button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onFolderSelected(folder.path, autoAdvanceOnSelect)}
-                      className="px-3 text-xs"
-                    >
-                      Select
-                    </Button>
-                  </div>
+                  <button
+                    key={folder.path}
+                    onClick={() => onFolderSelected(folder.path, autoAdvanceOnSelect)}
+                    className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    {folder.isRepository ? (
+                      <FolderGit2 className="h-5 w-5 flex-shrink-0 text-blue-500" />
+                    ) : (
+                      <Folder className="h-5 w-5 flex-shrink-0 text-gray-400" />
+                    )}
+                    <span className="truncate font-medium text-gray-900 dark:text-white">
+                      {folder.name}
+                    </span>
+                  </button>
                 ))
+              )}
+
+              {!showAllFolders && nonRepoCount > 0 && (
+                <button
+                  onClick={() => setShowAllFolders(true)}
+                  className="w-full px-4 py-2 text-left text-xs text-gray-500 underline dark:text-gray-400"
+                >
+                  Show all folders ({nonRepoCount} more)
+                </button>
               )}
             </div>
           )}
@@ -261,19 +288,16 @@ export default function FolderBrowserModal({
 
         <div className="border-t border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2 bg-gray-50 px-4 py-3 dark:bg-gray-900/50">
-            <span className="text-sm text-gray-600 dark:text-gray-400">Path:</span>
+            <span className="text-sm text-gray-600 dark:text-gray-400">Workspace root:</span>
             <code className="flex-1 truncate font-mono text-sm text-gray-900 dark:text-white">
-              {currentPath}
+              {rootPath}
             </code>
           </div>
           <div className="flex items-center justify-end gap-2 p-4">
             <Button variant="outline" onClick={handleClose}>
               Cancel
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => onFolderSelected(currentPath, autoAdvanceOnSelect)}
-            >
+            <Button variant="outline" onClick={() => onFolderSelected(rootPath, autoAdvanceOnSelect)}>
               Use this folder
             </Button>
           </div>

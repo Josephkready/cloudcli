@@ -10,9 +10,13 @@ import express from 'express';
 import cors from 'cors';
 import mime from 'mime-types';
 
-import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
+import { AppError, WORKSPACES_ROOT, isGitRepositoryRoot, validateWorkspacePath } from '@/shared/utils.js';
 import { shouldExcludeFileTreeEntry } from '@/shared/file-tree-excludes.js';
-import { buildBrowseSuggestions, parseBrowseCommonDirs } from '@/shared/browse-suggestions.js';
+import {
+    annotateRepositoryFlags,
+    buildBrowseSuggestions,
+    parseBrowseCommonDirs,
+} from '@/shared/browse-suggestions.js';
 import {
     getRouterBasename,
     injectRouterBasenameIntoHtml,
@@ -357,7 +361,12 @@ const listDirectChildDirectories = async (dirPath) => {
 // directory contains huge subtrees like ~/.claude/projects/.
 app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
     try {
-        const { path: dirPath } = req.query;
+        const { path: dirPath, repoFlags } = req.query;
+        // Opt-in: the folder picker needs to know which children are git
+        // repositories so it can list repos only (#309). Path autocomplete
+        // doesn't, and this costs a stat per entry — so it stays off by
+        // default rather than being folded into the listing.
+        const includeRepoFlags = repoFlags === '1' || repoFlags === 'true';
 
         // Default to home directory if no path provided
         const defaultRoot = WORKSPACES_ROOT;
@@ -407,11 +416,14 @@ app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
             // Use default root as-is if realpath fails
         }
         const isAtRoot = resolvedPath === resolvedWorkspaceRoot;
-        const suggestions = buildBrowseSuggestions(
+        const orderedDirectories = buildBrowseSuggestions(
             directories,
             BROWSE_COMMON_DIRS,
             isAtRoot,
         );
+        const suggestions = includeRepoFlags
+            ? await annotateRepositoryFlags(orderedDirectories, isGitRepositoryRoot)
+            : orderedDirectories;
 
         // `isAtRoot` is what lets the picker hide its ".." row here: only the
         // server knows WORKSPACES_ROOT, so a client deriving the parent by

@@ -53,6 +53,47 @@ test('browseFilesystemFolders: defaults isAtRoot to false when the field is miss
   assert.equal(result.isAtRoot, false);
 });
 
+/*
+ * #309: the picker lists repositories rather than descending into every
+ * subfolder, so it asks the endpoint to tag entries. That tagging costs a stat
+ * per entry server-side, so it has to stay opt-in — the path-autocomplete
+ * caller must keep asking without it.
+ */
+
+test('browseFilesystemFolders: omits repoFlags unless the caller opts in', async (t) => {
+  const get = t.mock.method(api, 'get', async () => jsonResponse({ path: '~', suggestions: [] }));
+
+  await browseFilesystemFolders('~');
+
+  assert.equal(get.mock.calls[0].arguments[0], '/browse-filesystem?path=~');
+});
+
+test('browseFilesystemFolders: requests repoFlags when repository flags are wanted', async (t) => {
+  const get = t.mock.method(api, 'get', async () => jsonResponse({ path: '~', suggestions: [] }));
+
+  await browseFilesystemFolders('~', { includeRepositoryFlags: true });
+
+  assert.equal(get.mock.calls[0].arguments[0], '/browse-filesystem?path=~&repoFlags=1');
+});
+
+test('browseFilesystemFolders: passes the isRepository flag through to the caller', async (t) => {
+  t.mock.method(api, 'get', async () => jsonResponse({
+    path: '/var/tmp/audit',
+    suggestions: [
+      { name: 'demo', path: '/var/tmp/audit/demo', type: 'directory', isRepository: true },
+      { name: 'scratch', path: '/var/tmp/audit/scratch', type: 'directory', isRepository: false },
+    ],
+    isAtRoot: true,
+  }));
+
+  const result = await browseFilesystemFolders('~', { includeRepositoryFlags: true });
+
+  assert.deepEqual(
+    result.suggestions.map((entry) => entry.isRepository),
+    [true, false],
+  );
+});
+
 test('browseFilesystemFolders: still throws the server error on a failed browse', async (t) => {
   t.mock.method(api, 'get', async () => jsonResponse(
     { error: 'Workspace path must be within the allowed workspace root: /var/tmp/audit' },

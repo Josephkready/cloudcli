@@ -74,8 +74,22 @@ export const fetchGithubTokenCredentials = async () => {
   return (data.credentials || []).filter((credential) => credential.is_active);
 };
 
-export const browseFilesystemFolders = async (pathToBrowse: string) => {
-  const endpoint = `/browse-filesystem?path=${encodeURIComponent(pathToBrowse)}`;
+type BrowseOptions = {
+  /**
+   * Ask the server to tag each entry with `isRepository`. Off by default: it
+   * costs a stat per entry server-side and only the folder picker — which
+   * lists repositories rather than every subfolder (#309) — needs the flag.
+   */
+  includeRepositoryFlags?: boolean;
+};
+
+export const browseFilesystemFolders = async (
+  pathToBrowse: string,
+  { includeRepositoryFlags = false }: BrowseOptions = {},
+) => {
+  const endpoint = `/browse-filesystem?path=${encodeURIComponent(pathToBrowse)}${
+    includeRepositoryFlags ? '&repoFlags=1' : ''
+  }`;
   const response = await api.get(endpoint);
   const data = await parseJson<BrowseFilesystemResponse>(response);
 
