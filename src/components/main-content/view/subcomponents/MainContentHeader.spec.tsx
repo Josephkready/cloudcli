@@ -90,6 +90,32 @@ const cloudSession = {
   lastActivity: '2026-07-22T00:00:00Z',
 } as unknown as ProjectSession;
 
+/*
+ * The bug reporter's own behavior is covered by BugReportDialog.spec.tsx; what
+ * only the header can prove is that the button is actually wired to it — and
+ * that it's reachable even with no conversation open, since a bug worth filing
+ * often left the app in a state where nothing else works.
+ */
+describe('MainContentHeader — bug reporter', () => {
+  it('opens the reporter dialog from the top panel', async () => {
+    renderHeader(session);
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByLabelText('What happened?')).toBeInTheDocument();
+  });
+
+  it('offers the reporter even when no conversation is open', () => {
+    renderHeader(null);
+
+    expect(screen.getByRole('button', { name: 'Report a bug' })).toBeInTheDocument();
+  });
+});
+
 describe('MainContentHeader — CLI-origin badge (#225)', () => {
   it('badges the open-session title when the session is terminal/CLI-driven', () => {
     renderHeader(cliSession);

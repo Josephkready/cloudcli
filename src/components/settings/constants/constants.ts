@@ -34,7 +34,7 @@ export const SETTINGS_MAIN_TABS: SettingsMainTabMeta[] = [
   { id: 'about', label: 'About', keywords: 'about version info', icon: Info },
 ];
 
-export const AGENT_PROVIDERS: AgentProvider[] = ['claude', 'codex'];
+export const AGENT_PROVIDERS: AgentProvider[] = ['claude', 'codex', 'antigravity'];
 export const AGENT_CATEGORIES: AgentCategory[] = ['account', 'permissions', 'mcp'];
 
 // Keep in sync with `DEFAULT_PROJECT_SORT_ORDER` in

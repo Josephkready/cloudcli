@@ -1,7 +1,7 @@
 <div align="center">
  <img src="public/logo.svg" alt="Cloud CLI" width="64" height="64">
  <h1>Cloud CLI</h1>
- <p>A single-user web UI + iOS PWA for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a> and <a href="https://developers.openai.com/codex">Codex</a> — view and drive your agent sessions from any device on the tailnet.</p>
+ <p>A single-user web UI + iOS PWA for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>, <a href="https://developers.openai.com/codex">Codex</a>, and <a href="https://antigravity.google/cli">Google Antigravity CLI</a> — view and drive your agent sessions from any device on the tailnet.</p>
 </div>
 
 ---
@@ -13,7 +13,7 @@ This is a **private, single-user fork** of [siteboon/claudecodeui](https://githu
 - **Single user, LAN/tailnet-only** web app + iOS PWA — not exposed to the public internet.
 - Runs as a **host `systemd` service** (bare metal, no Docker) on the `dante` host.
 - **Login is disabled** (single-user install); the auth stack is kept buildable as a security fallback, not deleted.
-- **Claude + Codex providers only** — upstream's other providers, the desktop/Electron app, Docker sandboxing, browser-use, and the marketing/community surface are being removed to lean out the fork (see the `cleanup` / `epic` issues).
+- **Claude + Codex + Antigravity providers only** — upstream's other providers, the desktop/Electron app, Docker sandboxing, browser-use, and the marketing/community surface are being removed to lean out the fork (see the `cleanup` / `epic` issues).
 - **Deployed by `ansible-pull`** from a git checkout: merges to `origin/main` are reconciled onto the host automatically — there is no npm publish and no release cut.
 
 Because of that shape, this fork **intentionally diverges** from upstream. Feature removals are kept as atomic, well-labeled commits so future upstream syncs resolve to a simple "re-delete."
@@ -61,6 +61,18 @@ Set `FEATURE_USAGE_ENABLED=false` in `.env` to stop recording.
 Reading the output takes judgement: zero usage is a *candidate* for removal, not
 a verdict. Give it a long window (90+ days — rare is not dead), and rule out
 "unused because it's broken or undiscoverable" before trusting a zero.
+
+## Reporting bugs
+
+The bug icon in the app's top panel opens a reporter: write what went wrong, and
+the app attaches the session details (versions, provider, space, active tab,
+browser) and files a GitHub issue for you. It shows you exactly what it will
+send before it sends it.
+
+Filing runs the **host's `gh` CLI**, so the server needs `gh` installed and
+authenticated (`gh auth login`) — otherwise the dialog reports the failure and
+files nothing. Reports go to `Josephkready/cloudcli` unless `BUG_REPORT_REPO`
+says otherwise.
 
 ## Deployment
 

@@ -10,9 +10,13 @@ import express from 'express';
 import cors from 'cors';
 import mime from 'mime-types';
 
-import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
+import { AppError, WORKSPACES_ROOT, isGitRepositoryRoot, validateWorkspacePath } from '@/shared/utils.js';
 import { shouldExcludeFileTreeEntry } from '@/shared/file-tree-excludes.js';
-import { buildBrowseSuggestions, parseBrowseCommonDirs } from '@/shared/browse-suggestions.js';
+import {
+    annotateRepositoryFlags,
+    buildBrowseSuggestions,
+    parseBrowseCommonDirs,
+} from '@/shared/browse-suggestions.js';
 import {
     getRouterBasename,
     injectRouterBasenameIntoHtml,
@@ -36,6 +40,10 @@ import {
     abortCodexSession,
 } from './openai-codex.js';
 import {
+    spawnAntigravity,
+    abortAntigravitySession,
+} from './antigravity-cli.js';
+import {
     stripAnsiSequences,
     normalizeDetectedUrl,
     extractUrlsFromText,
@@ -54,6 +62,7 @@ import usageRoutes from './routes/usage.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import { pruneOrphanedBrowserMcp } from './modules/providers/services/orphaned-mcp-cleanup.service.js';
 import voiceRoutes from './voice-proxy.js';
+import bugReportRoutes from './routes/bug-report.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
 import { initializeDatabase, projectsDb, sessionsDb } from './modules/database/index.js';
@@ -98,7 +107,7 @@ const server = http.createServer(app);
 // provider runtimes at the deterministic in-process mock (routes/mock-agent-provider.js)
 // so a Playwright/e2e browser session can drive a full chat turn — send ->
 // streamed frames -> terminal `complete` — with no real CLI/SDK, network, or
-// auth. The session's provider column stays 'claude'/'codex', so the frontend
+// auth. The session's provider column stays provider-native, so the frontend
 // flow is unchanged; only the runtime that streams frames is swapped. Read live
 // (not import-frozen) so it is a pure env toggle, mirroring the POST /api/agent
 // gate in routes/agent.js.
@@ -111,13 +120,22 @@ const makeMockSpawnFn = (provider) => (message, options, writer) => {
     return runMockAgentProvider(message, { ...options, provider }, writer);
 };
 const chatSpawnFns = AGENT_MOCK_PROVIDER
-    ? { claude: makeMockSpawnFn('claude'), codex: makeMockSpawnFn('codex') }
-    : { claude: queryClaudeSDK, codex: queryCodex };
+    ? {
+        claude: makeMockSpawnFn('claude'),
+        codex: makeMockSpawnFn('codex'),
+        antigravity: makeMockSpawnFn('antigravity'),
+    }
+    : {
+        claude: queryClaudeSDK,
+        codex: queryCodex,
+        antigravity: spawnAntigravity,
+    };
 // Provider abort fns, addressed by the provider-native session id. Shared by the
 // chat.abort handler and the stale-run reaper's abort hook (below).
 const chatAbortFns = {
     claude: abortClaudeSDKSession,
     codex: abortCodexSession,
+    antigravity: abortAntigravitySession,
 };
 // The activation warning is emitted in the "Ready" banner below (next to the
 // AUTH_DISABLED warning), where an operator scanning startup output will see it.
@@ -220,6 +238,9 @@ app.use('/api/providers', authenticateToken, providerRoutes);
 app.use('/api/agent', agentRoutes);
 
 app.use('/api/voice', authenticateToken, voiceRoutes);
+
+// In-app bug reporter — files a GitHub issue via the host's `gh` CLI (protected)
+app.use('/api/bug-report', authenticateToken, bugReportRoutes);
 
 // Serve the SPA's index.html through a small response transform so we can
 // inject `window.__ROUTER_BASENAME__` before any client JS executes. This is
@@ -340,7 +361,12 @@ const listDirectChildDirectories = async (dirPath) => {
 // directory contains huge subtrees like ~/.claude/projects/.
 app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
     try {
-        const { path: dirPath } = req.query;
+        const { path: dirPath, repoFlags } = req.query;
+        // Opt-in: the folder picker needs to know which children are git
+        // repositories so it can list repos only (#309). Path autocomplete
+        // doesn't, and this costs a stat per entry — so it stays off by
+        // default rather than being folded into the listing.
+        const includeRepoFlags = repoFlags === '1' || repoFlags === 'true';
 
         // Default to home directory if no path provided
         const defaultRoot = WORKSPACES_ROOT;
@@ -390,11 +416,14 @@ app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
             // Use default root as-is if realpath fails
         }
         const isAtRoot = resolvedPath === resolvedWorkspaceRoot;
-        const suggestions = buildBrowseSuggestions(
+        const orderedDirectories = buildBrowseSuggestions(
             directories,
             BROWSE_COMMON_DIRS,
             isAtRoot,
         );
+        const suggestions = includeRepoFlags
+            ? await annotateRepositoryFlags(orderedDirectories, isGitRepositoryRoot)
+            : orderedDirectories;
 
         // `isAtRoot` is what lets the picker hide its ".." row here: only the
         // server knows WORKSPACES_ROOT, so a client deriving the parent by

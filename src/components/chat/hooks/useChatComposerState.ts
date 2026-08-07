@@ -45,6 +45,7 @@ interface UseChatComposerStateArgs {
   resolvePermissionModeForProvider: (provider: LLMProvider, requestedMode: PermissionMode | string) => PermissionMode;
   claudeModel: string;
   codexModel: string;
+  antigravityModel: string;
   currentProviderEffort: string;
   isLoading: boolean;
   canAbortSession: boolean;
@@ -219,6 +220,7 @@ export function useChatComposerState({
   resolvePermissionModeForProvider,
   claudeModel,
   codexModel,
+  antigravityModel,
   currentProviderEffort,
   isLoading,
   canAbortSession,
@@ -396,7 +398,11 @@ export function useChatComposerState({
           projectId: selectedProject.projectId,
           sessionId: currentSessionId,
           provider,
-          model: provider === 'codex' ? codexModel : claudeModel,
+          model: provider === 'codex'
+            ? codexModel
+            : provider === 'antigravity'
+              ? antigravityModel
+              : claudeModel,
           tokenUsage: tokenBudget,
         };
 
@@ -445,6 +451,7 @@ export function useChatComposerState({
       }
     },
     [
+      antigravityModel,
       claudeModel,
       codexModel,
       currentSessionId,
@@ -609,8 +616,11 @@ export function useChatComposerState({
   const buildSendOptions = useCallback((currentInput: string): QueuedSendOptions => {
     const getToolsSettings = () => {
       try {
-        const settingsKey =
-          provider === 'codex' ? 'codex-settings' : 'claude-settings';
+        const settingsKey = provider === 'codex'
+          ? 'codex-settings'
+          : provider === 'antigravity'
+            ? 'antigravity-settings'
+            : 'claude-settings';
         const savedSettings = safeLocalStorage.getItem(settingsKey);
         if (savedSettings) {
           return JSON.parse(savedSettings);
@@ -627,7 +637,11 @@ export function useChatComposerState({
     };
 
     const toolsSettings = getToolsSettings();
-    const model = provider === 'codex' ? codexModel : claudeModel;
+    const model = provider === 'codex'
+      ? codexModel
+      : provider === 'antigravity'
+        ? antigravityModel
+        : claudeModel;
 
     return {
       model,
@@ -638,6 +652,7 @@ export function useChatComposerState({
       sessionSummary: getNotificationSessionSummary(selectedSession, currentInput),
     };
   }, [
+    antigravityModel,
     claudeModel,
     codexModel,
     currentProviderEffort,

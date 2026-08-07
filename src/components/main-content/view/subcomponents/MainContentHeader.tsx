@@ -1,10 +1,11 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
-import { Archive } from 'lucide-react';
+import { Archive, Bug } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Tooltip } from '../../../../shared/view/ui';
 import type { MainContentHeaderProps } from '../../types/types';
 import { recordFeatureUse } from '../../../../utils/featureUsage';
+import BugReportDialog from '../../../bug-report/BugReportDialog';
 
 import MobileMenuButton from './MobileMenuButton';
 import MainContentTabSwitcher from './MainContentTabSwitcher';
@@ -28,6 +29,14 @@ export default function MainContentHeader({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const [bugReportOpen, setBugReportOpen] = useState(false);
+
+  // The reporter is always reachable — a bug worth filing is often one that
+  // left the app in a state where nothing else works.
+  const handleReportBugClick = useCallback(() => {
+    recordFeatureUse('bug_report.open');
+    setBugReportOpen(true);
+  }, []);
 
   const updateScrollState = useCallback(() => {
     const el = scrollRef.current;
@@ -68,6 +77,17 @@ export default function MainContentHeader({
         </div>
 
         <div className="flex items-center gap-1">
+          <Tooltip content={t('mainContent.reportBugTooltip')} position="bottom">
+            <button
+              type="button"
+              onClick={handleReportBugClick}
+              aria-label={t('mainContent.reportBug')}
+              className="flex-shrink-0 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+            >
+              <Bug className="h-4 w-4" />
+            </button>
+          </Tooltip>
+
           {selectedSession && (
             <Tooltip content={t('mainContent.archiveSessionTooltip')} position="bottom">
               <button
@@ -111,6 +131,14 @@ export default function MainContentHeader({
         isMobile={isMobile}
         onSessionSelect={onSessionSelect}
         onNewSession={onNewSession}
+      />
+
+      <BugReportDialog
+        open={bugReportOpen}
+        onOpenChange={setBugReportOpen}
+        activeTab={activeTab}
+        selectedProject={selectedProject}
+        selectedSession={selectedSession}
       />
     </div>
   );

@@ -20,9 +20,30 @@ import {
 const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
   claude: 'default',
   codex: 'gpt-5.4',
+  antigravity: 'gemini-3.6-flash-medium',
 };
 
-const PROVIDERS: LLMProvider[] = ['claude', 'codex'];
+const PROVIDERS: LLMProvider[] = ['claude', 'codex', 'antigravity'];
+
+/**
+ * Hard ceiling on a single provider-models request. The model picker only
+ * clears its "Loading models…" placeholder once the request settles, so a
+ * request that hangs forever leaves the picker stuck on that placeholder with
+ * no way out but a page reload. Mobile clients hit this routinely: a
+ * backgrounded PWA or a roaming radio leaves the fetch pending rather than
+ * failing it.
+ *
+ * Built on AbortController rather than `AbortSignal.timeout` so the deadline
+ * runs on a patchable `setTimeout` (testable) and works on iOS Safari < 16 —
+ * squarely inside the mobile population this timeout exists to protect.
+ */
+export const PROVIDER_MODELS_TIMEOUT_MS = 15000;
+
+const createTimeoutSignal = (timeoutMs: number): { signal: AbortSignal; clear: () => void } => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
+};
 
 const readStoredProvider = (): LLMProvider => {
   const storedProvider = localStorage.getItem('selected-provider');
@@ -40,6 +61,7 @@ const readStoredProvider = (): LLMProvider => {
 const FALLBACK_PERMISSION_MODES: Record<LLMProvider, PermissionMode[]> = {
   claude: ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'],
   codex: ['default', 'acceptEdits', 'bypassPermissions'],
+  antigravity: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
 };
 
 type ProviderCapabilities = {
@@ -94,6 +116,9 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   const [codexModel, setCodexModel] = useState<string>(() => {
     return localStorage.getItem('codex-model') || FALLBACK_DEFAULT_MODEL.codex;
   });
+  const [antigravityModel, setAntigravityModel] = useState<string>(() => {
+    return localStorage.getItem('antigravity-model') || FALLBACK_DEFAULT_MODEL.antigravity;
+  });
   const [providerEfforts, setProviderEfforts] = useState<Partial<Record<LLMProvider, string>>>(() => {
     return PROVIDERS.reduce<Partial<Record<LLMProvider, string>>>((acc, targetProvider) => {
       acc[targetProvider] = localStorage.getItem(`${targetProvider}-effort`) || DEFAULT_EFFORT_VALUE;
@@ -120,8 +145,21 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   >({});
   const [providerModelsLoading, setProviderModelsLoading] = useState(true);
   const [providerModelsRefreshing, setProviderModelsRefreshing] = useState(false);
+  /**
+   * Providers whose catalog is still missing after the last load attempt. Used
+   * only to arm the recovery listeners below, so a fully loaded catalog costs
+   * nothing.
+   */
+  const [unloadedProviders, setUnloadedProviders] = useState<LLMProvider[]>([]);
 
   const providerModelsRequestIdRef = useRef(0);
+  /**
+   * Number of loads currently in flight. The recovery listeners can fire in
+   * bursts — a flaky radio flapping `online`, or a user flicking between apps —
+   * and without this each event would start another full round of requests
+   * against a provider that is still being retried.
+   */
+  const providerModelsInFlightRef = useRef(0);
 
   const setStoredProviderModel = useCallback((targetProvider: LLMProvider, model: string) => {
     if (targetProvider === 'codex') {
@@ -130,8 +168,16 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
       return;
     }
 
-    setClaudeModel(model);
-    localStorage.setItem('claude-model', model);
+    if (targetProvider === 'antigravity') {
+      setAntigravityModel(model);
+      localStorage.setItem('antigravity-model', model);
+      return;
+    }
+
+    if (targetProvider === 'claude') {
+      setClaudeModel(model);
+      localStorage.setItem('claude-model', model);
+    }
   }, []);
 
   const setStoredProviderEffort = useCallback((targetProvider: LLMProvider, effort: string) => {
@@ -155,22 +201,54 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
       setProviderModelsLoading(true);
     }
 
+    providerModelsInFlightRef.current += 1;
+
     try {
+      // Every provider settles independently and applies its own catalog the
+      // moment it arrives. The previous `Promise.all` was all-or-nothing: one
+      // rejecting request discarded the catalogs that *had* loaded (the picker
+      // then claimed "No models found" despite two healthy providers), and one
+      // stalled request never settled at all, so the loading flag was never
+      // cleared and every group sat on "Loading models…" forever.
       const results = await Promise.all(
-        PROVIDERS.map(async (p) => {
-          const params = new URLSearchParams();
-          if (options.bypassCache) {
-            params.set('bypassCache', 'true');
-          }
+        PROVIDERS.map(async (p): Promise<LLMProvider | null> => {
+          const timeout = createTimeoutSignal(PROVIDER_MODELS_TIMEOUT_MS);
 
-          const queryString = params.toString();
-          const response = await authenticatedFetch(`/api/providers/${p}/models${queryString ? `?${queryString}` : ''}`);
-          const body = (await response.json()) as ProviderModelsApiResponse;
-          if (!body.success || !body.data?.models || !body.data?.cache) {
+          try {
+            const params = new URLSearchParams();
+            if (options.bypassCache) {
+              params.set('bypassCache', 'true');
+            }
+
+            const queryString = params.toString();
+            const response = await authenticatedFetch(
+              `/api/providers/${p}/models${queryString ? `?${queryString}` : ''}`,
+              { signal: timeout.signal },
+            );
+            const body = (await response.json()) as ProviderModelsApiResponse;
+            if (!body.success || !body.data?.models || !body.data?.cache) {
+              // A well-formed HTTP response carrying an unusable payload drops
+              // the provider from the picker. Say so: silently returning left
+              // the provider simply missing, with nothing in the console to
+              // explain it.
+              console.warn(`Provider "${p}" returned an unusable models payload.`);
+              return p;
+            }
+
+            if (providerModelsRequestIdRef.current !== requestId) {
+              return null;
+            }
+
+            const { models, cache } = body.data;
+            setProviderModelCatalog((previous) => ({ ...previous, [p]: models }));
+            setProviderModelCacheCatalog((previous) => ({ ...previous, [p]: cache }));
             return null;
+          } catch (error) {
+            console.error(`Error loading provider models for "${p}":`, error);
+            return p;
+          } finally {
+            timeout.clear();
           }
-
-          return body.data;
         }),
       );
 
@@ -178,34 +256,59 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
         return;
       }
 
-      const nextCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>> = {};
-      const nextCacheCatalog: Partial<Record<LLMProvider, ProviderModelsCacheInfo>> = {};
-
-      PROVIDERS.forEach((p, i) => {
-        const entry = results[i];
-        if (!entry) {
-          return;
-        }
-
-        nextCatalog[p] = entry.models;
-        nextCacheCatalog[p] = entry.cache;
-      });
-
-      setProviderModelCatalog(nextCatalog);
-      setProviderModelCacheCatalog(nextCacheCatalog);
-    } catch (error) {
-      console.error('Error loading provider models:', error);
+      const failedProviders = results.filter((p): p is LLMProvider => p !== null);
+      // Preserve array identity when the failure set is unchanged, so the
+      // recovery effect below is not torn down and re-armed on every load.
+      setUnloadedProviders((previous) => (
+        previous.length === failedProviders.length
+          && previous.every((p, i) => p === failedProviders[i])
+          ? previous
+          : failedProviders
+      ));
+      setProviderModelsLoading(false);
+      setProviderModelsRefreshing(false);
     } finally {
-      if (providerModelsRequestIdRef.current === requestId) {
-        setProviderModelsLoading(false);
-        setProviderModelsRefreshing(false);
-      }
+      providerModelsInFlightRef.current -= 1;
     }
   }, []);
 
   useEffect(() => {
     void loadProviderModels();
   }, [loadProviderModels]);
+
+  // Without this, a provider that timed out or errored stays missing until a
+  // full page reload: the effect above runs exactly once per mount and nothing
+  // else refetches. Retry when the client regains connectivity or the tab
+  // returns to the foreground — the two moments a mobile client recovers from
+  // the stalls that cause the failure in the first place.
+  useEffect(() => {
+    if (unloadedProviders.length === 0) {
+      return;
+    }
+
+    const retry = () => {
+      // A tab that came back only to be hidden again has no user waiting on the
+      // picker, and `online` can fire while backgrounded.
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+
+      // Bursts of these events are normal on a flapping connection. Coalesce
+      // them onto the load that is already running.
+      if (providerModelsInFlightRef.current > 0) {
+        return;
+      }
+
+      void loadProviderModels();
+    };
+
+    window.addEventListener('online', retry);
+    document.addEventListener('visibilitychange', retry);
+    return () => {
+      window.removeEventListener('online', retry);
+      document.removeEventListener('visibilitychange', retry);
+    };
+  }, [unloadedProviders, loadProviderModels]);
 
   useEffect(() => {
     let cancelled = false;
@@ -333,7 +436,8 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   const providerModels = useMemo<Record<LLMProvider, string>>(() => ({
     claude: claudeModel,
     codex: codexModel,
-  }), [claudeModel, codexModel]);
+    antigravity: antigravityModel,
+  }), [antigravityModel, claudeModel, codexModel]);
 
   useEffect(() => {
     const claude = providerModelCatalog.claude;
@@ -360,6 +464,19 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
       }
     }
   }, [providerModelCatalog.codex, codexModel]);
+
+  useEffect(() => {
+    const antigravity = providerModelCatalog.antigravity;
+    if (antigravity) {
+      const next = pickStoredOrCurrent('antigravity-model', antigravityModel, antigravity);
+      if (next !== antigravityModel) {
+        setAntigravityModel(next);
+      }
+      if (localStorage.getItem('antigravity-model') !== next) {
+        localStorage.setItem('antigravity-model', next);
+      }
+    }
+  }, [providerModelCatalog.antigravity, antigravityModel]);
 
   useEffect(() => {
     const nextEfforts: Partial<Record<LLMProvider, string>> = {};
@@ -497,6 +614,8 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     setClaudeModel,
     codexModel,
     setCodexModel,
+    antigravityModel,
+    setAntigravityModel,
     currentProviderEffort,
     currentProviderEffortOptions,
     permissionMode,

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  getParentPath,
   getSuggestionRootPath,
   isCloneWorkflow,
   isSshGitUrl,
@@ -66,30 +65,6 @@ test('getSuggestionRootPath: a bare name with no separator falls back to `~`', (
   // Root-only path: the sole separator is at index 0 (not > 0), so it also
   // falls through to the `~` default.
   assert.equal(getSuggestionRootPath('/'), '~');
-});
-
-/* ── getParentPath ───────────────────────────────────────────────────────── */
-
-test('getParentPath: roots have no parent (null)', () => {
-  assert.equal(getParentPath('~'), null);
-  assert.equal(getParentPath('/'), null);
-  assert.equal(getParentPath('C:\\'), null);
-  assert.equal(getParentPath('C:'), null);
-});
-
-test('getParentPath: a top-level unix dir has `/` as its parent', () => {
-  assert.equal(getParentPath('/home'), '/');
-});
-
-test('getParentPath: a nested unix dir returns the directory above it', () => {
-  assert.equal(getParentPath('/home/user'), '/home');
-  assert.equal(getParentPath('/home/user/projects'), '/home/user');
-});
-
-test('getParentPath: windows paths walk up, drive root keeps the `\\`', () => {
-  assert.equal(getParentPath('C:\\Users\\foo'), 'C:\\Users');
-  // Only the drive letter remains → keep the backslash so it reads as a root.
-  assert.equal(getParentPath('C:\\Users'), 'C:\\');
 });
 
 /* ── joinFolderPath ──────────────────────────────────────────────────────── */

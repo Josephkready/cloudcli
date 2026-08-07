@@ -86,6 +86,12 @@ export const FEATURE_KEYS = [
   'mcp.server_add',
   'skills.install',
   'notifications.push',
+
+  // --- Feedback -------------------------------------------------------------
+  // Opens vs. actually-filed reports: the gap between them says whether the
+  // reporter is discoverable but too costly to finish.
+  'bug_report.open',
+  'bug_report.submit',
 ] as const;
 
 /** A member of the closed feature inventory above. */

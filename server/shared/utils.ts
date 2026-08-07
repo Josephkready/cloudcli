@@ -816,7 +816,14 @@ export const writeJsonConfig = async (filePath: string, data: Record<string, unk
 
 // ---------------------------
 //----------------- PROVIDER SKILL FILE UTILITIES ------------
-async function hasGitMarker(dirPath: string): Promise<boolean> {
+/**
+ * True when `dirPath` is the root of a git working tree.
+ *
+ * A `.git` **directory** is an ordinary clone; a `.git` **file** is a linked
+ * worktree or submodule, which is just as much a checkout from the picker's
+ * point of view — both count.
+ */
+export async function isGitRepositoryRoot(dirPath: string): Promise<boolean> {
   try {
     const gitMarkerStats = await stat(path.join(dirPath, '.git'));
     return gitMarkerStats.isDirectory() || gitMarkerStats.isFile();
@@ -838,7 +845,7 @@ export async function findTopmostGitRoot(startPath: string): Promise<string | nu
   let topmostGitRoot: string | null = null;
 
   while (true) {
-    if (await hasGitMarker(currentPath)) {
+    if (await isGitRepositoryRoot(currentPath)) {
       topmostGitRoot = currentPath;
     }
 
@@ -1302,3 +1309,76 @@ export async function extractFirstValidJsonlData<T>(
   return null;
 }
 
+/**
+ * Windows command wrappers can split multiline positional arguments. Keep the
+ * provider prompt as one argument there while preserving newlines elsewhere.
+ */
+export function flattenPromptForWindowsShell(prompt: string): string {
+  if (os.platform() !== 'win32') {
+    return prompt;
+  }
+  return prompt.replace(/\s*\r?\n\s*/g, ' ').trim();
+}
+
+function readEnvValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
+  const resolvedKey = Object.keys(env).find((envKey) => envKey.toLowerCase() === key.toLowerCase());
+  return resolvedKey ? env[resolvedKey] : undefined;
+}
+
+export function getPathEnvKey(env: NodeJS.ProcessEnv): string {
+  return Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH';
+}
+
+function uniquePathEntries(entries: string[]): string[] {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    const normalized = os.platform() === 'win32' ? entry.toLowerCase() : entry;
+    if (!entry || seen.has(normalized)) {
+      return false;
+    }
+    seen.add(normalized);
+    return true;
+  });
+}
+
+function getUserExecutablePathCandidates(env: NodeJS.ProcessEnv): string[] {
+  const home = os.homedir();
+  const npmPrefix = readEnvValue(env, 'npm_config_prefix');
+  const appData = readEnvValue(env, 'APPDATA');
+  return [
+    npmPrefix ? path.join(npmPrefix, 'bin') : '',
+    appData ? path.join(appData, 'npm') : '',
+    os.platform() === 'win32' ? path.join(home, 'AppData', 'Roaming', 'npm') : '',
+    path.join(home, '.local', 'bin'),
+    path.join(home, '.npm-global', 'bin'),
+    path.join(home, '.bun', 'bin'),
+    path.join(home, '.cargo', 'bin'),
+    path.join(home, 'go', 'bin'),
+  ];
+}
+
+/**
+ * Provider CLIs are commonly installed in user bins missing from service PATHs.
+ */
+export function buildProviderCliEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const nextEnv = { ...env };
+  const pathKey = getPathEnvKey(nextEnv);
+  const pathEntries = (nextEnv[pathKey] || '').split(path.delimiter).filter(Boolean);
+  nextEnv[pathKey] = uniquePathEntries([
+    ...getUserExecutablePathCandidates(nextEnv),
+    ...pathEntries,
+  ]).join(path.delimiter);
+  return nextEnv;
+}
+
+/**
+ * Resolves an optional provider-specific executable override.
+ */
+export function resolveProviderCliExecutable(
+  envName: string,
+  fallback: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const configured = env[envName]?.trim();
+  return configured || fallback;
+}

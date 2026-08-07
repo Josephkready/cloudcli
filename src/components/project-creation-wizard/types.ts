@@ -6,6 +6,12 @@ export type FolderSuggestion = {
   name: string;
   path: string;
   type?: string;
+  /**
+   * True when the folder is a git repository root. Only present when the browse
+   * request opted into repository flags (`?repoFlags=1`); absent means "not
+   * asked", not "not a repo".
+   */
+  isRepository?: boolean;
 };
 
 export type GithubTokenCredential = {

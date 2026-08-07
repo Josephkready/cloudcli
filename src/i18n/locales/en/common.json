@@ -99,7 +99,28 @@
     "renameSession": "Rename session",
     "renameSessionHint": "Click to rename",
     "archiveSession": "Archive conversation",
-    "archiveSessionTooltip": "Archive this conversation"
+    "archiveSessionTooltip": "Archive this conversation",
+    "reportBug": "Report a bug",
+    "reportBugTooltip": "Report a bug"
+  },
+  "bugReport": {
+    "title": "Report a bug",
+    "subtitle": "Describe what went wrong. We attach your session details automatically.",
+    "descriptionLabel": "What happened?",
+    "descriptionPlaceholder": "What did you do, what did you expect, and what happened instead?",
+    "descriptionHint": "Markdown is supported. Steps to reproduce help the most.",
+    "metadataToggle": "Session details attached ({{count}})",
+    "show": "Show",
+    "hide": "Hide",
+    "submit": "File issue",
+    "submitting": "Filing…",
+    "cancel": "Cancel",
+    "close": "Close bug report",
+    "successTitle": "Bug filed",
+    "successBody": "Thanks — your report is on GitHub.",
+    "viewIssue": "View issue",
+    "genericError": "The report could not be filed. Please try again.",
+    "networkError": "Could not reach the server. Check your connection and try again."
   },
   "fileTree": {
     "loading": "Loading files...",
