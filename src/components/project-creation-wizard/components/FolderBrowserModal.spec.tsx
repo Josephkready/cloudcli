@@ -12,13 +12,6 @@ vi.mock('../data/workspaceApi', () => ({
 
 const { default: FolderBrowserModal } = await import('./FolderBrowserModal');
 
-/*
- * #238: the picker derived the parent purely by string manipulation, so it
- * always rendered a ".." row — including at WORKSPACES_ROOT, where the only
- * possible outcome of clicking it is a 403 from /api/browse-filesystem. The
- * browse response now reports isAtRoot and the row is hidden there.
- */
-
 const ROOT = '/var/tmp/cloudcli-audit';
 const CHILD = `${ROOT}/demo-app`;
 
@@ -38,50 +31,113 @@ function renderPicker() {
 
 beforeEach(() => {
   browseFilesystemFolders.mockReset();
-  browseFilesystemFolders.mockImplementation(async (pathToBrowse: string) => {
-    if (pathToBrowse === CHILD) {
-      return { path: CHILD, suggestions: [], isAtRoot: false };
-    }
-    return {
-      path: ROOT,
-      suggestions: [{ name: 'demo-app', path: CHILD, type: 'directory' }],
-      isAtRoot: true,
-    };
-  });
+  createFolderInFilesystem.mockReset();
+  browseFilesystemFolders.mockImplementation(async () => ({
+    path: ROOT,
+    isAtRoot: true,
+    suggestions: [
+      { name: 'demo-app', path: CHILD, type: 'directory', isRepository: true },
+      { name: 'scratch', path: `${ROOT}/scratch`, type: 'directory', isRepository: false },
+      { name: '.dotted', path: `${ROOT}/.dotted`, type: 'directory', isRepository: true },
+    ],
+  }));
 });
 
-const parentRow = () => screen.queryByRole('button', { name: '..' });
-
-describe('FolderBrowserModal — parent row at the workspace root (#238)', () => {
-  it('hides the ".." row when the picker opens at the workspace root', async () => {
-    renderPicker();
-
-    // Wait for the initial browse to land before asserting on the list.
-    expect(await screen.findByRole('button', { name: /demo-app/ })).toBeInTheDocument();
-    expect(parentRow()).toBeNull();
-  });
-
-  it('offers ".." once the user has navigated below the root, and it navigates back', async () => {
-    const user = userEvent.setup();
-    renderPicker();
-
-    await user.click(await screen.findByRole('button', { name: /demo-app/ }));
-
-    const parent = await screen.findByRole('button', { name: '..' });
-    await user.click(parent);
-
-    // Back at the root: the row disappears again rather than offering a click
-    // that could only 403.
-    await waitFor(() => expect(parentRow()).toBeNull());
-    expect(browseFilesystemFolders).toHaveBeenLastCalledWith(ROOT);
-  });
-
-  it('does not offer ".." when the response omits isAtRoot but the path is a bare root', async () => {
-    browseFilesystemFolders.mockResolvedValue({ path: '/', suggestions: [], isAtRoot: false });
+/*
+ * #309: the picker used to browse — every row descended a level, so choosing a
+ * project meant wading through each repo's own src/, docs/, … It is now flat:
+ * the repositories sitting in WORKSPACES_ROOT, and nothing below them. That
+ * also subsumes #238's ".." row, since there is no navigation left to offer a
+ * click that could only 403.
+ */
+describe('FolderBrowserModal — flat repository list (#309)', () => {
+  it('asks the endpoint for repository flags when it opens', async () => {
     renderPicker();
 
     await waitFor(() => expect(browseFilesystemFolders).toHaveBeenCalled());
-    await waitFor(() => expect(parentRow()).toBeNull());
+    expect(browseFilesystemFolders).toHaveBeenCalledWith('~', { includeRepositoryFlags: true });
+  });
+
+  it('lists repositories and leaves plain folders out', async () => {
+    renderPicker();
+
+    expect(await screen.findByRole('button', { name: /demo-app/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /scratch/ })).toBeNull();
+  });
+
+  it('selects a repository instead of descending into it', async () => {
+    const user = userEvent.setup();
+    const { onFolderSelected } = renderPicker();
+
+    await user.click(await screen.findByRole('button', { name: /demo-app/ }));
+
+    expect(onFolderSelected).toHaveBeenCalledWith(CHILD, false);
+    // One browse, at open — clicking a row must not walk into the repo.
+    expect(browseFilesystemFolders).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no ".." row, because there is nowhere above the root to go', async () => {
+    renderPicker();
+
+    await screen.findByRole('button', { name: /demo-app/ });
+    expect(screen.queryByRole('button', { name: '..' })).toBeNull();
+  });
+
+  it('reveals the plain folders on request', async () => {
+    const user = userEvent.setup();
+    renderPicker();
+
+    await screen.findByRole('button', { name: /demo-app/ });
+    await user.click(screen.getByRole('button', { name: 'Show all folders' }));
+
+    expect(screen.getByRole('button', { name: /scratch/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /demo-app/ })).toBeInTheDocument();
+  });
+
+  it('keeps hidden folders hidden until asked, even when they are repositories', async () => {
+    const user = userEvent.setup();
+    renderPicker();
+
+    await screen.findByRole('button', { name: /demo-app/ });
+    expect(screen.queryByRole('button', { name: /\.dotted/ })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Show hidden folders' }));
+    expect(screen.getByRole('button', { name: /\.dotted/ })).toBeInTheDocument();
+  });
+
+  it('says so plainly when the root holds no repositories', async () => {
+    browseFilesystemFolders.mockResolvedValue({ path: ROOT, isAtRoot: true, suggestions: [] });
+    renderPicker();
+
+    expect(await screen.findByText('No repositories found')).toBeInTheDocument();
+  });
+
+  it('hands back the workspace root itself — the parent a clone lands in', async () => {
+    const user = userEvent.setup();
+    const { onFolderSelected } = renderPicker();
+
+    await screen.findByRole('button', { name: /demo-app/ });
+    await user.click(screen.getByRole('button', { name: 'Use this folder' }));
+
+    expect(onFolderSelected).toHaveBeenCalledWith(ROOT, false);
+  });
+
+  it('hands a newly created folder straight back rather than losing it to the filter', async () => {
+    const user = userEvent.setup();
+    createFolderInFilesystem.mockResolvedValue(`${ROOT}/fresh-idea`);
+    const { onFolderSelected } = renderPicker();
+
+    await screen.findByRole('button', { name: /demo-app/ });
+    await user.click(screen.getByRole('button', { name: 'Create new folder' }));
+    await user.type(screen.getByPlaceholderText('New folder name'), 'fresh-idea');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() =>
+      expect(createFolderInFilesystem).toHaveBeenCalledWith(`${ROOT}/fresh-idea`),
+    );
+    // A brand-new folder is never a repository, so leaving it in the list would
+    // mean creating something the default filter immediately swallows.
+    await waitFor(() => expect(onFolderSelected).toHaveBeenCalledWith(`${ROOT}/fresh-idea`, false));
   });
 });
 
@@ -177,9 +233,7 @@ describe('FolderBrowserModal — focus trap (#274)', () => {
     screen.getByRole('button', { name: 'Use this folder' }).focus();
     await user.tab();
 
-    expect(document.activeElement).toBe(
-      screen.getByRole('button', { name: 'Show hidden folders' }),
-    );
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Show all folders' }));
   });
 
   it('wraps Shift+Tab from the first control to the last', async () => {
@@ -187,7 +241,7 @@ describe('FolderBrowserModal — focus trap (#274)', () => {
     renderPickerOverPage();
 
     await screen.findByRole('button', { name: /demo-app/ });
-    screen.getByRole('button', { name: 'Show hidden folders' }).focus();
+    screen.getByRole('button', { name: 'Show all folders' }).focus();
     await user.tab({ shift: true });
 
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Use this folder' }));

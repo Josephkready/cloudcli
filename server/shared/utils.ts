@@ -816,7 +816,14 @@ export const writeJsonConfig = async (filePath: string, data: Record<string, unk
 
 // ---------------------------
 //----------------- PROVIDER SKILL FILE UTILITIES ------------
-async function hasGitMarker(dirPath: string): Promise<boolean> {
+/**
+ * True when `dirPath` is the root of a git working tree.
+ *
+ * A `.git` **directory** is an ordinary clone; a `.git` **file** is a linked
+ * worktree or submodule, which is just as much a checkout from the picker's
+ * point of view — both count.
+ */
+export async function isGitRepositoryRoot(dirPath: string): Promise<boolean> {
   try {
     const gitMarkerStats = await stat(path.join(dirPath, '.git'));
     return gitMarkerStats.isDirectory() || gitMarkerStats.isFile();
@@ -838,7 +845,7 @@ export async function findTopmostGitRoot(startPath: string): Promise<string | nu
   let topmostGitRoot: string | null = null;
 
   while (true) {
-    if (await hasGitMarker(currentPath)) {
+    if (await isGitRepositoryRoot(currentPath)) {
       topmostGitRoot = currentPath;
     }
 

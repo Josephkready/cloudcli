@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   DEFAULT_BROWSE_COMMON_DIRS,
+  annotateRepositoryFlags,
   buildBrowseSuggestions,
   parseBrowseCommonDirs,
 } from '@/shared/browse-suggestions.js';
@@ -85,6 +86,45 @@ test('buildBrowseSuggestions returns a new array and does not mutate the input',
     input.map((entry) => entry.name),
     ['alpha', 'beta', 'Documents', 'zeta'],
   );
+});
+
+//----------------- annotateRepositoryFlags (#309) ------------
+test('annotateRepositoryFlags tags each entry with the predicate result', async () => {
+  const annotated = await annotateRepositoryFlags(
+    [dir('cloudcli'), dir('scratch')],
+    async (dirPath) => dirPath === '/root/cloudcli',
+  );
+
+  assert.deepEqual(
+    annotated.map(({ name, isRepository }) => ({ name, isRepository })),
+    [
+      { name: 'cloudcli', isRepository: true },
+      { name: 'scratch', isRepository: false },
+    ],
+  );
+});
+
+test('annotateRepositoryFlags preserves the incoming order and the other fields', async () => {
+  const annotated = await annotateRepositoryFlags(sortedDirs, async () => true);
+
+  assert.deepEqual(
+    annotated.map((entry) => entry.name),
+    ['alpha', 'beta', 'Documents', 'zeta'],
+  );
+  assert.equal(annotated[0].path, '/root/alpha');
+  assert.equal(annotated[0].type, 'directory');
+});
+
+test('annotateRepositoryFlags does not mutate the input entries', async () => {
+  const input = [dir('alpha')];
+  const annotated = await annotateRepositoryFlags(input, async () => true);
+
+  assert.notEqual(annotated[0], input[0]);
+  assert.equal('isRepository' in input[0], false);
+});
+
+test('annotateRepositoryFlags handles an empty listing', async () => {
+  assert.deepEqual(await annotateRepositoryFlags([], async () => true), []);
 });
 
 test('DEFAULT_BROWSE_COMMON_DIRS preserves the historical hardcoded picker list', () => {
