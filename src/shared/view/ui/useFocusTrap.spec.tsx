@@ -62,6 +62,36 @@ describe('useFocusTrap (#274)', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'dialog first' }));
   });
 
+  it('can focus the dialog container without activating its first field', async () => {
+    const user = userEvent.setup();
+
+    function ContainerFocusedOverlay() {
+      const { containerRef } = useFocusTrap<HTMLDivElement>({
+        isActive: true,
+        initialFocus: 'container',
+      });
+
+      return (
+        <div ref={containerRef} role="dialog" aria-label="container focused">
+          <input aria-label="search" />
+          <button type="button">choose</button>
+        </div>
+      );
+    }
+
+    render(<ContainerFocusedOverlay />);
+
+    expect(document.activeElement).toBe(screen.getByRole('dialog', { name: 'container focused' }));
+    expect(screen.getByRole('textbox', { name: 'search' })).not.toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(screen.getByRole('button', { name: 'choose' })).toHaveFocus();
+
+    screen.getByRole('dialog', { name: 'container focused' }).focus();
+    await user.tab();
+    expect(screen.getByRole('textbox', { name: 'search' })).toHaveFocus();
+  });
+
   it('wraps Tab from the last control back to the first', async () => {
     const user = userEvent.setup();
     render(<PageWithOverlay isActive />);

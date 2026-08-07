@@ -28,6 +28,12 @@ type UseFocusTrapOptions = {
   /** Whether the overlay is currently open. */
   isActive: boolean;
   /**
+   * Where focus should land when the overlay opens. Mobile pickers can focus
+   * the container to avoid summoning the software keyboard before the user
+   * explicitly chooses to search.
+   */
+  initialFocus?: 'first' | 'container';
+  /**
    * Preferred element to focus on close (a dialog trigger, typically). Falls
    * back to whatever had focus when the overlay opened.
    */
@@ -36,6 +42,7 @@ type UseFocusTrapOptions = {
 
 export function useFocusTrap<T extends HTMLElement = HTMLElement>({
   isActive,
+  initialFocus = 'first',
   restoreFocusRef,
 }: UseFocusTrapOptions) {
   const containerRef = useRef<T | null>(null);
@@ -64,6 +71,13 @@ export function useFocusTrap<T extends HTMLElement = HTMLElement>({
     container.focus();
   }, []);
 
+  const focusContainer = useCallback((container: T) => {
+    if (!container.hasAttribute('tabindex')) {
+      container.tabIndex = -1;
+    }
+    container.focus();
+  }, []);
+
   useEffect(() => {
     if (!isActive) {
       return;
@@ -76,7 +90,11 @@ export function useFocusTrap<T extends HTMLElement = HTMLElement>({
     // behind the overlay and the very first Tab would leave.
     const container = containerRef.current;
     if (container && !container.contains(document.activeElement)) {
-      focusFirst(container);
+      if (initialFocus === 'container') {
+        focusContainer(container);
+      } else {
+        focusFirst(container);
+      }
     }
 
     return () => {
@@ -100,7 +118,7 @@ export function useFocusTrap<T extends HTMLElement = HTMLElement>({
         restoreTarget.focus();
       }
     };
-  }, [focusFirst, isActive]);
+  }, [focusContainer, focusFirst, initialFocus, isActive]);
 
   useEffect(() => {
     if (!isActive) {
@@ -132,6 +150,12 @@ export function useFocusTrap<T extends HTMLElement = HTMLElement>({
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       const active = document.activeElement as HTMLElement | null;
+
+      if (active === container) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+        return;
+      }
 
       if (!active || !container.contains(active)) {
         event.preventDefault();
