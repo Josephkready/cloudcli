@@ -8,9 +8,10 @@ Closes #
 
 ## Test plan
 
-<!-- CI runs lint + typecheck + server/unit tests on every PR. Confirm the
-     change is covered and the suites are green. -->
+<!-- Nothing runs automatically on GitHub. The gate is the local, pre-push
+     Docker runner over `.local-ci.toml` (lint + typecheck, build + the three
+     suites + coverage floor + entry-chunk gate, and e2e), which `/make-pr`
+     runs against the committed tree before pushing. Confirm it was green. -->
 
 - [ ] Tests added or updated for the change (backend and/or front-end)
-- [ ] `npm test` passes locally (server + unit)
-- [ ] `npm run lint` and `npm run typecheck` pass
+- [ ] The local gate passed: `python3 ~/.claude/scripts/local-ci.py --repo . --ref HEAD`

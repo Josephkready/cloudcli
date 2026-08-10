@@ -1,0 +1,86 @@
+# Local pre-push test gate — run with `~/.claude/scripts/local-ci.py` (invoked by /make-pr).
+#
+# Replaces the GitHub-hosted workflows in `.github/workflows/`, which re-ran the same
+# suites on metered runners minutes after they had already passed here. In July 2026
+# cloudcli was $3.65 of the account's $15.65 Actions bill (issue #300) against an
+# allowance that is now exhausted account-wide, at which point every job fails instantly
+# at zero steps — a gate that reports red for a reason unrelated to the commit.
+#
+# Lanes run in PARALLEL, so wall clock is the slowest lane rather than the sum. Each gets
+# a fresh container fed `git archive` of the COMMITTED tree, which is the part of hosted
+# CI that actually mattered: an uncommitted or untracked file cannot mask a missing-file
+# or dependency-drift bug the way a local `npm test` in a populated worktree can.
+#
+# `bake` burns `npm ci` into a derived image keyed on `bake_key`, so the install is paid
+# once per lockfile change instead of once per run.
+#
+# The `mv node_modules /deps/node_modules` + `setup = "ln -sfn …"` dance is not
+# ceremony. The bake installs in `/build` and the runner deletes `/build` in the same
+# layer (deliberately, so a stale source snapshot cannot linger and be imported), and
+# npm installs into `./node_modules` — i.e. *inside* the directory about to be deleted.
+# Without the move the image ends up with no dependencies at all and every lane dies on
+# `vite: not found`. Moving them out puts them beyond the doomed directory, and the
+# symlink re-points Node's resolution at them from the mounted source.
+#
+# The destination is `/deps/node_modules`, and the extra directory level is required, not
+# tidiness. Node resolves a nested `require` from the *realpath* of the requiring file and
+# walks up looking for directories literally named `node_modules`. With the tree at
+# `/deps`, resolving from `/deps/@playwright/test/cli.js` climbs to `/deps`, `/`, and
+# never sees a `node_modules` at all — every lane died on `Cannot find module` for a
+# package sitting right beside the one requiring it. Naming the directory correctly makes
+# that walk terminate where the packages actually are.
+#
+# What `setup` is *for* — re-installing first-party code against the mounted tree — has
+# no analogue here: this project is never installed as a package, so `npm ci` fetches
+# only third-party dependencies and the mounted `src/`, `server/` and `e2e/` trees ARE
+# the code under test. There is no baked snapshot of our own code to go stale.
+#
+# `python3 make g++` are for `better-sqlite3`: neither base image carries a toolchain,
+# and npm builds it from source whenever no prebuilt binary matches the image's Node ABI.
+#
+# WHY THREE LANES AND NOT FIVE. The three test suites cannot be split apart: the coverage
+# floor gate (#185) reads all three LCOV reports at once and fails if any suite drops
+# below its floor, so it has to run after all three in the same container. The entry-chunk
+# gate (#268/#269) likewise needs `dist/` from the build in that same lane. Lint and
+# typecheck have no such coupling and are much faster, so they get their own lane and
+# usually return long before the others.
+
+[[lane]]
+# Fast feedback: this lane is seconds, not minutes, so a formatting or type error surfaces
+# almost immediately instead of behind the full suite.
+name     = "lint"
+image    = "node:22-slim"
+bake     = "apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 make g++ >/dev/null && rm -rf /var/lib/apt/lists/* && npm ci --no-audit --no-fund && mkdir -p /deps && mv node_modules /deps/node_modules"
+bake_key = ["package-lock.json", "package.json"]
+setup    = "ln -sfn /deps/node_modules node_modules"
+run      = "npm run lint && npm run typecheck"
+
+[[lane]]
+# The build runs FIRST and deliberately, mirroring ci.yml: `src/test/entryStaticImports.test.ts`
+# and `check:bundle` inspect the emitted chunks, and entryStaticImports *self-skips* when
+# there is no build — so a lane that tested before building would silently stop enforcing
+# the #267 acceptance criterion rather than fail.
+name     = "tests"
+image    = "node:22-slim"
+bake     = "apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 make g++ >/dev/null && rm -rf /var/lib/apt/lists/* && npm ci --no-audit --no-fund && mkdir -p /deps && mv node_modules /deps/node_modules"
+bake_key = ["package-lock.json", "package.json"]
+setup    = "ln -sfn /deps/node_modules node_modules"
+run      = "npm run build:client && npm run test:server:coverage && npm run test:unit:coverage && npm run test:component:coverage && npm run coverage:floor:selftest && npm run coverage:floor && npm run check:bundle:selftest && npm run check:bundle"
+
+[[lane]]
+# The pinned Playwright image ships Chromium and its system libraries prebuilt, so this
+# skips the `playwright install --with-deps` download the GitHub workflow paid on every
+# run. Keep the tag in lockstep with the `@playwright/test` pin in package.json — a
+# mismatch makes Playwright refuse the bundled browser.
+#
+# `npm run test:e2e` builds the client itself (VITE_AUTH_DISABLED baked in) via the
+# Playwright global-setup, then boots a per-worker server against the deterministic
+# in-process mock provider, so no real CLI/SDK, network or credentials are needed.
+name     = "e2e"
+image    = "mcr.microsoft.com/playwright:v1.49.1-noble"
+bake     = "apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 make g++ >/dev/null && rm -rf /var/lib/apt/lists/* && npm ci --no-audit --no-fund && mkdir -p /deps && mv node_modules /deps/node_modules"
+bake_key = ["package-lock.json", "package.json"]
+setup    = "ln -sfn /deps/node_modules node_modules"
+run      = "npm run test:e2e"
+# Chromium crashes in confusing ways on Docker's default 64MB /dev/shm.
+shm      = "1g"

@@ -13,9 +13,30 @@ npm run client     # client only
 
 ## Quality gate
 
-Every pull request runs the same checks CI runs (see
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Run them locally before
-opening a PR:
+The gate is **local and pre-push**, not GitHub-hosted: `.local-ci.toml` defines
+three lanes that run in parallel Docker containers, each fed `git archive` of the
+**committed** tree. That last part is the whole point — an uncommitted or
+untracked file cannot mask a missing-file or dependency-drift bug the way a bare
+`npm test` in a populated working directory can. `/make-pr` runs it before
+pushing, or run it yourself:
+
+```bash
+python3 ~/.claude/scripts/local-ci.py --repo . --ref HEAD
+```
+
+Two consequences of the gate being local, both deliberate:
+
+- **Nothing verifies a PR on GitHub.** A push that skipped the gate — a machine
+  without Docker, or `git push --no-verify` — reaches `main` unchecked. The gate
+  is only as good as the push path that runs it.
+- **A red lane keeps its evidence.** The runner deletes its working tree on
+  success but retains it on failure, so the exported source, the per-lane logs
+  and anything a lane wrote (Playwright's `playwright-report/` and
+  `test-results/` included) stay under the `/tmp/local-ci-*` path printed in the
+  summary. `--keep` retains them on success too.
+
+The lanes run exactly the commands below, so running them directly is still the
+fast inner loop while you work:
 
 ```bash
 npm run lint       # eslint over src/ and server/
@@ -23,7 +44,7 @@ npm run typecheck  # tsc --noEmit for both the client and server tsconfigs
 npm test           # server tests, front-end unit tests, then component tests
 ```
 
-CI also runs an **entry-chunk gate** after the suites. It builds the client and
+The `tests` lane also runs an **entry-chunk gate** after the suites. It builds the client and
 inspects the emitted bundle, because the three test runners only see runtime
 behaviour — which stays perfectly correct while a single stray static import
 puts all ~290 Prism grammars or KaTeX's stylesheet back on the render-blocking
@@ -51,9 +72,9 @@ one uses vitest's v8 provider and also writes a browsable report to
 
 Each coverage script also emits a machine-readable LCOV report
 (`coverage/server.lcov`, `coverage/unit.lcov`,
-`coverage/component/lcov.info`). CI runs a separate **Coverage floor** step that
-parses those and fails the build if any suite's line coverage drops below its
-floor:
+`coverage/component/lcov.info`). The `tests` lane runs a separate **Coverage
+floor** step that parses those and fails the lane if any suite's line coverage
+drops below its floor:
 
 ```bash
 npm run coverage:floor   # checks the reports left by test:coverage
@@ -73,7 +94,7 @@ The floors are per-suite and tunable in
 climbs, raise its floor in the script, leaving a couple of points of headroom so
 an unrelated PR isn't blocked by noise. Never lower a floor just to make a red
 run pass — investigate the regression instead. The LCOV parser has self-tests
-(`npm run coverage:floor:selftest`) that CI runs before trusting the gate.
+(`npm run coverage:floor:selftest`) that the lane runs before trusting the gate.
 
 ## Two test runners, split by filename
 
@@ -124,8 +145,9 @@ guards their behavior.
 ## Browser e2e (Playwright)
 
 `npm run test:e2e` runs the Playwright browser suite in `e2e/` — separate from
-the three unit runners above, with its own CI job
-(`.github/workflows/e2e.yml`).
+the three unit runners above, and its own `e2e` lane in `.local-ci.toml` (on a
+pinned `mcr.microsoft.com/playwright` image, so the lane needs no local browser
+download).
 
 - One-time setup: `npx playwright install chromium`.
 - It builds the client once (with `VITE_AUTH_DISABLED=true` baked in) and boots
