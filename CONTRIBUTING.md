@@ -24,6 +24,17 @@ pushing, or run it yourself:
 python3 ~/.claude/scripts/local-ci.py --repo . --ref HEAD
 ```
 
+Two consequences of the gate being local, both deliberate:
+
+- **Nothing verifies a PR on GitHub.** A push that skipped the gate — a machine
+  without Docker, or `git push --no-verify` — reaches `main` unchecked. The gate
+  is only as good as the push path that runs it.
+- **A red lane keeps its evidence.** The runner deletes its working tree on
+  success but retains it on failure, so the exported source, the per-lane logs
+  and anything a lane wrote (Playwright's `playwright-report/` and
+  `test-results/` included) stay under the `/tmp/local-ci-*` path printed in the
+  summary. `--keep` retains them on success too.
+
 The lanes run exactly the commands below, so running them directly is still the
 fast inner loop while you work:
 
