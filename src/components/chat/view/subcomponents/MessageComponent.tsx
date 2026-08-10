@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Terminal } from 'lucide-react';
 
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
+import { disabledControlClasses } from '../../../../shared/view/ui/disabledState';
 import type {
   ChatMessage,
   ClaudePermissionSuggestion,
@@ -267,10 +268,14 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                             {options.map((option) => (
                               <button
                                 key={option.number}
+                                // Always disabled: this is a transcript replay of a
+                                // question that was already answered. The shared
+                                // treatment replaces a hand-rolled
+                                // `cursor-not-allowed opacity-75` (#290).
                                 className={`w-full rounded-lg border-2 px-4 py-3 text-left transition-colors duration-fast ${option.isSelected
                                   ? 'border-amber-600 bg-amber-600 text-white shadow-md dark:border-amber-700 dark:bg-amber-700'
                                   : 'border-amber-300 bg-white text-amber-900 dark:border-amber-700 dark:bg-gray-800 dark:text-amber-100'
-                                  } cursor-not-allowed opacity-75`}
+                                  } ${disabledControlClasses}`}
                                 disabled
                               >
                                 <div className="flex items-center gap-3">

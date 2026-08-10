@@ -180,3 +180,217 @@ describe('disabledState class strings', () => {
     }
   });
 });
+
+/*
+ * #290: #276/#289 fixed the `Button` primitive and left ~79 raw `hover:`/
+ * `active:` utilities sitting on other controls that carry the same shared
+ * treatment. Those controls changed appearance on hover *while disabled* — the
+ * identical defect, one layer out.
+ *
+ * The two checks below generalise the Button-only rule above to every call site,
+ * and close the hole the #276 guard left open: five files hand-rolled
+ * `cursor-not-allowed opacity-50` through a JS ternary, so they contained no
+ * literal `disabled:` prefix and the original guard passed straight over them.
+ *
+ * Scope note, from the trap #290 documents: `:enabled` only matches elements
+ * that can be disabled (`button`, `input`, `select`, `textarea`, `fieldset`,
+ * `optgroup`, `option`). Prefixing `enabled:` onto a `<div>`/`<a>`/`<span>`
+ * yields a selector that never matches and silently kills the hover. The scan
+ * below is therefore anchored on the element that carries the shared treatment
+ * — which is always a real form control — and not on `hover:` anywhere.
+ */
+describe('no control carrying the shared treatment reacts to hover while disabled (#290)', () => {
+  const TREATMENT = /disabled(?:Busy)?ControlClasses/g;
+  // `group-hover:`/`peer-hover:` are in scope deliberately: a hovered ancestor
+  // fires them regardless of this element's own disabled state, which is the
+  // same lie told one element out. Only an `enabled:`-prefixed utility is
+  // exempt, so `dark:hover:` — a real defect — is still reported while
+  // `dark:enabled:hover:` is not.
+  const UNSCOPED_HOVER = /(?<!enabled:)\b((?:group-|peer-)?(?:hover|active)):[\w[\]/.\-%]+/g;
+
+  /** Walks back from an index to the `<` that opens the enclosing JSX element. */
+  function openingTagStart(source: string, index: number): number | null {
+    let cursor = index;
+    while (cursor > 0) {
+      cursor = source.lastIndexOf('<', cursor);
+      if (cursor === -1) {
+        return null;
+      }
+      if (/^<[A-Za-z][\w.]*/.test(source.slice(cursor, cursor + 40))) {
+        return cursor;
+      }
+    }
+    return null;
+  }
+
+  /** End of that opening tag: the first `>` outside any JSX expression braces. */
+  function openingTagEnd(source: string, start: number): number {
+    let depth = 0;
+    for (let cursor = start; cursor < source.length; cursor += 1) {
+      const character = source[cursor];
+      if (character === '{') depth += 1;
+      else if (character === '}') depth -= 1;
+      else if (character === '>' && depth === 0) return cursor;
+    }
+    return start;
+  }
+
+  /**
+   * The class-list expression a treatment token belongs to.
+   *
+   * Usually that is the element's own opening tag, but a call site is free to
+   * build the string in a `const` first and pass the variable — in which case
+   * the hover utility and the treatment token are in the same expression yet
+   * never in the same JSX tag. Scanning only tags would let that form through,
+   * so an assignment whose right-hand side mentions the treatment is treated as
+   * a class list in its own right.
+   */
+  function classListRegionStart(source: string, index: number): number | null {
+    const assignment = source.lastIndexOf('=', index);
+    const tag = openingTagStart(source, index);
+    if (assignment !== -1) {
+      const declaration = source.slice(0, assignment).match(/(?:const|let|var)\s+[\w$]+[^\n=]*$/);
+      // An assignment closer to the token than its enclosing tag means the class
+      // list is variable-built (`const menuItemClasses = cn(...)`).
+      if (declaration && (tag === null || assignment > tag)) {
+        return assignment;
+      }
+    }
+    return tag;
+  }
+
+  /**
+   * End of the region: the opening tag's `>`, or for an assignment the end of
+   * its balanced right-hand side.
+   */
+  function classListRegionEnd(source: string, start: number): number {
+    if (source[start] !== '<') {
+      let depth = 0;
+      for (let cursor = start; cursor < source.length; cursor += 1) {
+        const character = source[cursor];
+        if (character === '(' || character === '[' || character === '{') depth += 1;
+        else if (character === ')' || character === ']' || character === '}') {
+          depth -= 1;
+          if (depth < 0) return cursor;
+        } else if ((character === ';' || character === '\n') && depth === 0 && cursor > start + 1) {
+          return cursor;
+        }
+      }
+      return source.length;
+    }
+    return openingTagEnd(source, start);
+  }
+
+  /** Every class-list expression in src/ that mentions the shared treatment. */
+  function treatedElements(): Array<{ file: string; fragment: string }> {
+    const elements: Array<{ file: string; fragment: string }> = [];
+    // This module is where the treatment is *defined*, so its two matches are
+    // the names being declared, not call sites wearing them.
+    for (const file of collectSourceFiles(SRC_ROOT).filter((candidate) => candidate !== THIS_MODULE)) {
+      const source = readFileSync(file, 'utf8');
+      const seen = new Set<number>();
+      for (const match of source.matchAll(TREATMENT)) {
+        const start = classListRegionStart(source, match.index ?? 0);
+        if (start === null || seen.has(start)) {
+          continue;
+        }
+        seen.add(start);
+        elements.push({ file, fragment: source.slice(start, classListRegionEnd(source, start)) });
+      }
+    }
+    return elements;
+  }
+
+  test('the scan finds the call sites, so the check is not vacuous', () => {
+    const elements = treatedElements();
+    const files = new Set(elements.map((element) => element.file));
+
+    // Both a count and a spread: a walk that regressed to one directory, or to
+    // half the sites, would still clear a bare count floor.
+    assert.ok(
+      elements.length >= 25,
+      `expected to find the controls carrying the shared treatment, found ${elements.length}`,
+    );
+    assert.ok(files.size >= 15, `expected the scan to span the codebase, found ${files.size} files`);
+    assert.ok(
+      // A fresh matcher per call: TREATMENT is /g and therefore stateful.
+      elements.every((element) => new RegExp(TREATMENT.source).test(element.fragment)),
+      'every captured region must actually contain the treatment token it was found by',
+    );
+  });
+
+  test('every hover:/active: utility on such a control is enabled:-scoped', () => {
+    const offenders = treatedElements().flatMap(({ file, fragment }) =>
+      [...fragment.matchAll(UNSCOPED_HOVER)].map(
+        (match) => `${path.relative(SRC_ROOT, file)}: ${match[0]}`,
+      ),
+    );
+
+    assert.deepEqual(
+      offenders,
+      [],
+      'These controls carry the shared disabled treatment, which since #276 leaves them '
+        + 'hit-testable — so an unscoped hover/active utility fires while they are disabled. '
+        + 'Prefix with `enabled:` (`dark:enabled:hover:` when also dark-scoped).',
+    );
+  });
+});
+
+describe('the disabled treatment is not hand-rolled through a ternary (#290)', () => {
+  const sourceFiles = collectSourceFiles(SRC_ROOT).filter((file) => file !== THIS_MODULE);
+
+  test('no call site writes cursor-not-allowed / cursor-wait itself', () => {
+    const offenders = sourceFiles.flatMap((file) =>
+      utilityHits(file, /(?<!disabled:)cursor-(not-allowed|wait)/).map(
+        (line) => `${path.relative(SRC_ROOT, file)}: ${line}`,
+      ),
+    );
+
+    assert.deepEqual(
+      offenders,
+      [],
+      'The blocked/busy cursor belongs to disabledControlClasses / disabledBusyControlClasses. '
+        + 'A JS-composed `cursor-not-allowed` carries no `disabled:` prefix, so it drifts out of '
+        + 'the shared treatment invisibly (#290).',
+    );
+  });
+
+  test('no call site gates a dimming opacity on a blocked/busy flag', () => {
+    // The exact shape the #276 guard missed: `disabled && 'opacity-50'` or
+    // `isLoading ? 'opacity-75' : ...` — a disabled treatment with no
+    // `disabled:` prefix anywhere in it.
+    //
+    // Two conditions, and both are load-bearing.
+    //
+    // The flag list is wider than the four names the offending sites happened
+    // to use, because an allowlist that tracks today's call sites repeats the
+    // mistake the `disabled:`-prefix guard made — the next author writes
+    // `readOnly` or `isBusy` and walks past. It is not dropped entirely,
+    // though: an unkeyed "any conditional opacity" rule fires on ~15 legitimate
+    // fade/reveal toggles in this codebase (sidebar hover reveals, panel
+    // collapse transitions, the mobile drawer), which would make the guard
+    // noise and get it deleted.
+    //
+    // The opacity must also be a *dimming* one. `opacity-0`/`opacity-100` is
+    // show/hide — the vocabulary of a transition, not of a blocked control.
+    // Anything in between is the "this is dead" cue that belongs to the shared
+    // treatment.
+    const blockedFlag =
+      '(?:is|has)?(?:disabled|readonly|read_only|busy|loading|pending|submitting|saving|blocked|inflight)';
+    const dimmingOpacity = 'opacity-(?!0\\b|100\\b)\\d+';
+    const ternaryOpacity = new RegExp(
+      `\\b${blockedFlag}\\b[^\\n]*(\\?|&&)[^\\n]*(?<!disabled:)${dimmingOpacity}`,
+      'i',
+    );
+    const offenders = sourceFiles.flatMap((file) =>
+      utilityHits(file, ternaryOpacity).map((line) => `${path.relative(SRC_ROOT, file)}: ${line}`),
+    );
+
+    assert.deepEqual(
+      offenders,
+      [],
+      'Route the disabled/busy appearance through disabledControlClasses / '
+        + 'disabledBusyControlClasses instead of gating an opacity on a JS flag (#290).',
+    );
+  });
+});

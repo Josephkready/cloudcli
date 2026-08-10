@@ -104,7 +104,7 @@ export default function NewBranchModal({
             <button
               onClick={() => void handleCreateBranch()}
               disabled={!newBranchName.trim() || isCreatingBranch}
-              className={`flex items-center space-x-2 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground transition-colors hover:bg-primary/90 ${disabledControlClasses}`}
+              className={`flex items-center space-x-2 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground transition-colors enabled:hover:bg-primary/90 ${disabledControlClasses}`}
             >
               {isCreatingBranch ? (
                 <>

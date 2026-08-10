@@ -270,7 +270,7 @@ export default function FileTree({ selectedProject, onFileOpen }: FileTreeProps)
               <button
                 onClick={operations.handleConfirmDelete}
                 disabled={operationLoading}
-                className={`flex items-center gap-2 rounded-md bg-red-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-red-700 ${disabledControlClasses}`}
+                className={`flex items-center gap-2 rounded-md bg-red-600 px-3 py-1.5 text-sm text-white transition-colors enabled:hover:bg-red-700 ${disabledControlClasses}`}
               >
                 {operationLoading && <Loader2 className="h-4 w-4 animate-spin" />}
                 {t('fileTree.delete.confirm', 'Delete')}

@@ -2,6 +2,7 @@ import { Fragment, useCallback, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Copy, Download, FileText, FolderPlus, Pencil, RefreshCw, Trash2, type LucideIcon } from 'lucide-react';
 import { cn } from '../../../lib/utils';
+import { disabledControlClasses } from '../../../shared/view/ui/disabledState';
 import { useCursorContextMenu } from '../../../shared/view/ui/useCursorContextMenu';
 import { recordFeatureUse } from '../../../utils/featureUsage';
 
@@ -201,17 +202,21 @@ export default function FileContextMenu({
                 <button
                   role="menuitem"
                   tabIndex={action.isDisabled ? -1 : 0}
-                  disabled={isLoading || action.isDisabled}
+                  // No `isLoading` here: this branch is the `else` of the
+                  // `isLoading ?` above, so the spinner has already replaced the
+                  // whole list. The old `isLoading || action.isDisabled` and its
+                  // `pointer-events-none` sibling could never fire.
+                  disabled={action.isDisabled}
                   onClick={() => runMenuActionAndClose(action.onSelect)}
                   className={cn(
                     'w-full flex items-center gap-3 px-3 py-2 text-sm text-left rounded-md transition-colors',
                     'focus:outline-none focus:bg-accent',
-                    action.isDisabled
-                      ? 'opacity-50 cursor-not-allowed'
-                      : action.isDanger
-                      ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950'
-                      : 'hover:bg-accent',
-                    isLoading && 'pointer-events-none',
+                    // Shared disabled treatment rather than a hand-rolled
+                    // opacity/cursor pair (#290).
+                    disabledControlClasses,
+                    action.isDanger
+                      ? 'text-red-600 dark:text-red-400 enabled:hover:bg-red-50 dark:enabled:hover:bg-red-950'
+                      : 'enabled:hover:bg-accent',
                   )}
                 >
                   {action.icon && <action.icon className="h-4 w-4 flex-shrink-0" />}

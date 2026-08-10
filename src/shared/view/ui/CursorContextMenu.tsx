@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 
 import type { ActionMenuItem } from './ActionMenu';
+import { disabledBusyControlClasses, disabledControlClasses } from './disabledState';
 import { useCursorContextMenu } from './useCursorContextMenu';
 
 /**
@@ -75,11 +76,18 @@ export default function CursorContextMenu({
                   className={cn(
                     'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors',
                     'focus:bg-accent focus:outline-none',
-                    item.disabled || item.loading
-                      ? 'cursor-not-allowed opacity-50'
-                      : item.isDanger
-                        ? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950'
-                        : 'hover:bg-accent',
+                    // The shared treatment instead of a hand-rolled
+                    // `cursor-not-allowed opacity-50` (#290): a `disabled:`-keyed
+                    // class is what the guard test can see, and it makes a
+                    // blocked item look blocked the same way every other control
+                    // does. Busy (own action in flight) reads as wait, not
+                    // blocked.
+                    item.loading ? disabledBusyControlClasses : disabledControlClasses,
+                    // `enabled:`-scoped because the element stays hit-testable
+                    // while disabled, so an unscoped hover would fire on it.
+                    item.isDanger
+                      ? 'text-red-600 enabled:hover:bg-red-50 dark:text-red-400 dark:enabled:hover:bg-red-950'
+                      : 'enabled:hover:bg-accent',
                   )}
                 >
                   {item.loading ? (

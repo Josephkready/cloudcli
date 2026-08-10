@@ -68,7 +68,7 @@ export default function CodeEditorUnsavedChangesPrompt({
             onClick={onSave}
             disabled={saving}
             autoFocus
-            className={`rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 ${disabledControlClasses}`}
+            className={`rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white enabled:hover:bg-blue-700 ${disabledControlClasses}`}
           >
             {saving ? labels.saving : labels.save}
           </button>

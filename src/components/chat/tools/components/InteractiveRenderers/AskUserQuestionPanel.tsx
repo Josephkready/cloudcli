@@ -365,7 +365,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                 type="button"
                 onClick={handleSubmit}
                 disabled={!hasCurrentSelection && !Object.keys(buildAnswers()).length}
-                className={`inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-sm transition-shadow duration-fast hover:shadow-md dark:from-blue-500 dark:to-blue-600 ${disabledControlClasses}`}
+                className={`inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-sm transition-shadow duration-fast enabled:hover:shadow-md dark:from-blue-500 dark:to-blue-600 ${disabledControlClasses}`}
               >
                 Submit
                 <span className="ml-0.5 font-mono text-[9px] opacity-70">Enter</span>

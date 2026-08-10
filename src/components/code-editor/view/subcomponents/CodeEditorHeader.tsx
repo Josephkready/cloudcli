@@ -146,7 +146,7 @@ export default function CodeEditorHeader({
               ? 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400'
               : isDirty
                 ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white'
+                : 'text-gray-600 enabled:hover:bg-gray-100 enabled:hover:text-gray-900 dark:text-gray-400 dark:enabled:hover:bg-gray-800 dark:enabled:hover:text-white'
           }`}
           title={saveTitle}
         >
