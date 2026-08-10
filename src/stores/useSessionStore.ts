@@ -240,9 +240,28 @@ export function useSessionStore() {
       if (fetchTicket <= slot._appliedFetchSeq) {
         return;
       }
+
+      const refreshed: NormalizedMessage[] = data.messages || [];
+
+      // An empty refresh over a transcript we already have is never a
+      // legitimate reason to clear the screen. The server is not fail-closed:
+      // `fetchHistory` catches every read/parse error and returns a
+      // well-formed empty page, so "the file briefly failed to read" and "this
+      // session has no messages" arrive identically. Since the JSONL is being
+      // appended to throughout a live run, applying it blanks the conversation
+      // the user is reading. Leave the slot alone and let the next refresh
+      // (or an explicit fetch) correct it. Deliberately does NOT consume the
+      // fetch ticket, so a later good response still applies.
+      if (refreshed.length === 0 && slot.serverMessages.length > 0) {
+        console.warn(
+          `[SessionStore] ignoring empty refresh for ${sessionId}; keeping ${slot.serverMessages.length} loaded message(s)`,
+        );
+        return;
+      }
+
       slot._appliedFetchSeq = fetchTicket;
 
-      slot.serverMessages = data.messages || [];
+      slot.serverMessages = refreshed;
       slot.total = data.total ?? slot.serverMessages.length;
       slot.hasMore = Boolean(data.hasMore);
       slot.fetchedAt = Date.now();
