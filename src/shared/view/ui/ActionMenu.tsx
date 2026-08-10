@@ -4,6 +4,7 @@ import { ChevronDown, Loader2, type LucideIcon } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 
 import { Button } from './Button';
+import { disabledBusyControlClasses, disabledControlClasses } from './disabledState';
 
 type ButtonVariant = 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
 type ButtonSize = 'default' | 'sm' | 'lg' | 'icon';
@@ -158,11 +159,12 @@ export default function ActionMenu({
                   className={cn(
                     'flex w-full items-start gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors',
                     'focus:bg-accent focus:outline-none',
-                    item.disabled || item.loading
-                      ? 'cursor-not-allowed opacity-50'
-                      : item.isDanger
-                        ? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950'
-                        : 'hover:bg-accent',
+                    // Shared disabled treatment rather than a hand-rolled
+                    // opacity/cursor pair (#290) — see CursorContextMenu.
+                    item.loading ? disabledBusyControlClasses : disabledControlClasses,
+                    item.isDanger
+                      ? 'text-red-600 enabled:hover:bg-red-50 dark:text-red-400 dark:enabled:hover:bg-red-950'
+                      : 'enabled:hover:bg-accent',
                   )}
                 >
                   {item.loading ? (

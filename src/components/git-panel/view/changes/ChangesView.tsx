@@ -198,7 +198,7 @@ export default function ChangesView({
             <button
               onClick={() => void onCreateInitialCommit()}
               disabled={isCreatingInitialCommit}
-              className={`flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-primary-foreground transition-colors hover:bg-primary/90 ${disabledControlClasses}`}
+              className={`flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-primary-foreground transition-colors enabled:hover:bg-primary/90 ${disabledControlClasses}`}
             >
               {isCreatingInitialCommit ? (
                 <>

@@ -180,3 +180,136 @@ describe('disabledState class strings', () => {
     }
   });
 });
+
+/*
+ * #290: #276/#289 fixed the `Button` primitive and left ~79 raw `hover:`/
+ * `active:` utilities sitting on other controls that carry the same shared
+ * treatment. Those controls changed appearance on hover *while disabled* — the
+ * identical defect, one layer out.
+ *
+ * The two checks below generalise the Button-only rule above to every call site,
+ * and close the hole the #276 guard left open: five files hand-rolled
+ * `cursor-not-allowed opacity-50` through a JS ternary, so they contained no
+ * literal `disabled:` prefix and the original guard passed straight over them.
+ *
+ * Scope note, from the trap #290 documents: `:enabled` only matches elements
+ * that can be disabled (`button`, `input`, `select`, `textarea`, `fieldset`,
+ * `optgroup`, `option`). Prefixing `enabled:` onto a `<div>`/`<a>`/`<span>`
+ * yields a selector that never matches and silently kills the hover. The scan
+ * below is therefore anchored on the element that carries the shared treatment
+ * — which is always a real form control — and not on `hover:` anywhere.
+ */
+describe('no control carrying the shared treatment reacts to hover while disabled (#290)', () => {
+  const TREATMENT = /disabled(?:Busy)?ControlClasses/g;
+  // Token-initial or `dark:`-prefixed only, so an already-scoped
+  // `enabled:hover:` / `dark:enabled:hover:` is not re-reported.
+  const UNSCOPED_HOVER = /(?<![\w:-])(hover|active):[\w[\]/.\-%]+/g;
+
+  /** Walks back from an index to the `<` that opens the enclosing JSX element. */
+  function openingTagStart(source: string, index: number): number | null {
+    let cursor = index;
+    while (cursor > 0) {
+      cursor = source.lastIndexOf('<', cursor);
+      if (cursor === -1) {
+        return null;
+      }
+      if (/^<[A-Za-z][\w.]*/.test(source.slice(cursor, cursor + 40))) {
+        return cursor;
+      }
+    }
+    return null;
+  }
+
+  /** End of that opening tag: the first `>` outside any JSX expression braces. */
+  function openingTagEnd(source: string, start: number): number {
+    let depth = 0;
+    for (let cursor = start; cursor < source.length; cursor += 1) {
+      const character = source[cursor];
+      if (character === '{') depth += 1;
+      else if (character === '}') depth -= 1;
+      else if (character === '>' && depth === 0) return cursor;
+    }
+    return start;
+  }
+
+  /** Every opening tag in src/ whose props mention the shared treatment. */
+  function treatedElements(): Array<{ file: string; fragment: string }> {
+    const elements: Array<{ file: string; fragment: string }> = [];
+    for (const file of collectSourceFiles(SRC_ROOT)) {
+      const source = readFileSync(file, 'utf8');
+      const seen = new Set<number>();
+      for (const match of source.matchAll(TREATMENT)) {
+        const start = openingTagStart(source, match.index ?? 0);
+        if (start === null || seen.has(start)) {
+          continue;
+        }
+        seen.add(start);
+        elements.push({ file, fragment: source.slice(start, openingTagEnd(source, start)) });
+      }
+    }
+    return elements;
+  }
+
+  test('the scan finds the call sites, so the check is not vacuous', () => {
+    // Import sites in disabledState.ts itself and the barrel are not elements,
+    // so this counts real controls only.
+    assert.ok(
+      treatedElements().length >= 20,
+      `expected to find the controls carrying the shared treatment, found ${treatedElements().length}`,
+    );
+  });
+
+  test('every hover:/active: utility on such a control is enabled:-scoped', () => {
+    const offenders = treatedElements().flatMap(({ file, fragment }) =>
+      [...fragment.matchAll(UNSCOPED_HOVER)].map(
+        (match) => `${path.relative(SRC_ROOT, file)}: ${match[0]}`,
+      ),
+    );
+
+    assert.deepEqual(
+      offenders,
+      [],
+      'These controls carry the shared disabled treatment, which since #276 leaves them '
+        + 'hit-testable — so an unscoped hover/active utility fires while they are disabled. '
+        + 'Prefix with `enabled:` (`dark:enabled:hover:` when also dark-scoped).',
+    );
+  });
+});
+
+describe('the disabled treatment is not hand-rolled through a ternary (#290)', () => {
+  const sourceFiles = collectSourceFiles(SRC_ROOT).filter((file) => file !== THIS_MODULE);
+
+  test('no call site writes cursor-not-allowed / cursor-wait itself', () => {
+    const offenders = sourceFiles.flatMap((file) =>
+      utilityHits(file, /(?<!disabled:)cursor-(not-allowed|wait)/).map(
+        (line) => `${path.relative(SRC_ROOT, file)}: ${line}`,
+      ),
+    );
+
+    assert.deepEqual(
+      offenders,
+      [],
+      'The blocked/busy cursor belongs to disabledControlClasses / disabledBusyControlClasses. '
+        + 'A JS-composed `cursor-not-allowed` carries no `disabled:` prefix, so it drifts out of '
+        + 'the shared treatment invisibly (#290).',
+    );
+  });
+
+  test('no call site gates an opacity on a disabled/loading flag', () => {
+    // The exact shape the #276 guard missed: `disabled && \'opacity-50\'` or
+    // `isLoading ? \'opacity-75\' : ...` — a disabled treatment with no
+    // `disabled:` prefix anywhere in it.
+    const ternaryOpacity =
+      /\b(disabled|isDisabled|isLoading|loading)\b[^\n]*(\?|&&)[^\n]*(?<!disabled:)opacity-\d/;
+    const offenders = sourceFiles.flatMap((file) =>
+      utilityHits(file, ternaryOpacity).map((line) => `${path.relative(SRC_ROOT, file)}: ${line}`),
+    );
+
+    assert.deepEqual(
+      offenders,
+      [],
+      'Route the disabled/busy appearance through disabledControlClasses / '
+        + 'disabledBusyControlClasses instead of gating an opacity on a JS flag (#290).',
+    );
+  });
+});

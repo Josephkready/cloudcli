@@ -1,4 +1,5 @@
 import { cn } from '../../../lib/utils';
+import { disabledControlClasses } from '../../../shared/view/ui/disabledState';
 
 type SettingsToggleProps = {
   checked: boolean;
@@ -20,7 +21,8 @@ export default function SettingsToggle({ checked, onChange, ariaLabel, disabled 
         'relative inline-flex h-7 w-12 flex-shrink-0 touch-manipulation cursor-pointer items-center rounded-full border-2 transition-colors duration-base',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
         checked ? 'border-primary bg-primary' : 'border-border bg-muted',
-        disabled && 'cursor-not-allowed opacity-50',
+        // The shared treatment, not a hand-rolled opacity/cursor pair (#290).
+        disabledControlClasses,
       )}
     >
       <span

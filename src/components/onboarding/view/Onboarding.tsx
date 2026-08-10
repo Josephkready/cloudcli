@@ -200,7 +200,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               <button
                 onClick={handlePreviousStep}
                 disabled={currentStep === 0 || isSubmitting}
-                className={`flex items-center gap-2 px-4 py-2 text-sm font-medium text-muted-foreground transition-colors duration-fast hover:text-foreground ${disabledControlClasses}`}
+                className={`flex items-center gap-2 px-4 py-2 text-sm font-medium text-muted-foreground transition-colors duration-fast enabled:hover:text-foreground ${disabledControlClasses}`}
               >
                 <ChevronLeft className="h-4 w-4" />
                 Previous
@@ -215,7 +215,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                     // keeps Next live and surfaces the error on click.
                     onClick={handleNextStep}
                     disabled={isSubmitting}
-                    className={`flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 font-medium text-primary-foreground shadow-lg shadow-primary/25 transition-[transform,box-shadow] duration-fast active:scale-[0.99] enabled:hover:brightness-110 ${disabledControlClasses}`}
+                    className={`flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 font-medium text-primary-foreground shadow-lg shadow-primary/25 transition-[transform,box-shadow] duration-fast enabled:active:scale-[0.99] enabled:hover:brightness-110 ${disabledControlClasses}`}
                   >
                     {isSubmitting ? (
                       <>
@@ -233,7 +233,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   <button
                     onClick={handleFinish}
                     disabled={isSubmitting}
-                    className={`flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-2.5 font-medium text-white shadow-lg shadow-emerald-600/25 transition-[transform,background-color] duration-fast hover:bg-emerald-700 active:scale-[0.99] ${disabledControlClasses}`}
+                    className={`flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-2.5 font-medium text-white shadow-lg shadow-emerald-600/25 transition-[transform,background-color] duration-fast enabled:hover:bg-emerald-700 enabled:active:scale-[0.99] ${disabledControlClasses}`}
                   >
                     {isSubmitting ? (
                       <>
