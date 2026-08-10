@@ -304,6 +304,15 @@ export function useProjectsState({
         return;
       }
 
+      // The first paint is served from the server's persisted index without
+      // waiting for a filesystem rescan (#302). When that background scan lands
+      // and it indexed something, the server says so and we reconcile silently —
+      // no loading state, because the sidebar is already on screen.
+      if (event.kind === 'projects_snapshot_stale') {
+        void refreshProjectsSilently();
+        return;
+      }
+
       // Attention is no longer tracked per-tab from websocket events. The sidebar
       // derives Blocked from the live server `blocked` flag and Done from the
       // persisted last_completed_at/last_viewed_at (conversationList.resolveStatus),
@@ -414,7 +423,7 @@ export function useProjectsState({
     };
 
     return subscribe(handleEvent);
-  }, [navigate, sessionId, subscribe]);
+  }, [navigate, refreshProjectsSilently, sessionId, subscribe]);
 
   useEffect(() => {
     return () => {
