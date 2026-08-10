@@ -94,6 +94,59 @@ describe('useSessionProtection — stale chat_subscribed processing acks (#318)'
     expect(result.current.processingSessions.has(SESSION)).toBe(true);
   });
 
+  it('an unguarded processing mark clears the stamp, so later acks are honoured', () => {
+    // The safety property the guard depends on: a genuinely new run always
+    // arrives via an UNGUARDED mark (the send path and streaming events). That
+    // must reset the idle stamp, or the new run's own subscribe ack would be
+    // judged stale against the PREVIOUS run's completion and be dropped —
+    // turning this fix into the very bug it replaces.
+    const { result } = renderHook(() => useSessionProtection());
+
+    // Run 1 completes at t=2000, leaving an idle stamp behind.
+    vi.setSystemTime(1_000);
+    act(() => result.current.markSessionProcessing(SESSION, { statusText: 'Run 1' }));
+    vi.setSystemTime(2_000);
+    act(() => result.current.markSessionIdle(SESSION));
+
+    // Run 2 starts via an UNGUARDED mark, which must clear that stamp.
+    vi.setSystemTime(3_000);
+    act(() => result.current.markSessionProcessing(SESSION, { statusText: 'Run 2 start' }));
+
+    // Run 2's own subscribe ack, sent at t=1500 — i.e. BEFORE run 1's idle.
+    // Judged against run 1's stale stamp it would be dropped; judged correctly
+    // (stamp cleared by run 2's start) it applies.
+    vi.setSystemTime(5_000);
+    act(() =>
+      result.current.markSessionProcessing(
+        SESSION,
+        { statusText: 'Run 2 ack' },
+        { ifNotIdledSince: 1_500 },
+      ),
+    );
+
+    // Asserting on statusText, not merely `has()`: the entry already exists
+    // from run 2's start, so presence alone cannot tell a dropped ack from an
+    // applied one.
+    expect(result.current.processingSessions.get(SESSION)?.statusText).toBe('Run 2 ack');
+  });
+
+  it('stamps an idle for a session that was already absent from the map', () => {
+    // A terminal `complete` can beat the subscribe ack it ought to invalidate,
+    // leaving nothing in the map to clear. Without stamping that no-op idle,
+    // the late ack would look fresh and strand the flag.
+    const { result } = renderHook(() => useSessionProtection());
+
+    vi.setSystemTime(3_000);
+    act(() => result.current.markSessionIdle(SESSION));
+
+    vi.setSystemTime(4_000);
+    act(() =>
+      result.current.markSessionProcessing(SESSION, undefined, { ifNotIdledSince: 2_000 }),
+    );
+
+    expect(result.current.processingSessions.has(SESSION)).toBe(false);
+  });
+
   it('an unguarded processing mark is unaffected (live streaming events)', () => {
     const { result } = renderHook(() => useSessionProtection());
 
