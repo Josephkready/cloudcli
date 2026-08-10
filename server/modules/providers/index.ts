@@ -1,4 +1,5 @@
 export { sessionSynchronizerService } from './services/session-synchronizer.service.js';
+export { requestBackgroundSessionSynchronization } from './services/background-session-sync.service.js';
 export { resolveSessionLiveStatus } from './services/session-live-status.service.js';
 export type { SessionLiveStatus } from './services/session-live-status.service.js';
 export { deriveSessionOrigin } from './services/session-origin.js';

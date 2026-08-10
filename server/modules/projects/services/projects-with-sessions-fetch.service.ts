@@ -106,6 +106,10 @@ const MAX_PROJECT_SESSIONS_PAGE_SIZE = 200;
 // page can be up to MAX_PROJECT_SESSIONS_PAGE_SIZE, so a raw Promise.all could
 // open that many file handles at once. Mirrors the synchronizer's bounded fan-out.
 const LIVE_STATUS_SCAN_CONCURRENCY = 12;
+// Projects are built with bounded fan-out too, so the all-projects response does
+// not scale linearly with the workspace count. Kept modest because each project
+// in flight opens its own page of live-status probes underneath.
+const PROJECT_BUILD_CONCURRENCY = 4;
 
 /**
  * Generate better display name from path.
@@ -263,15 +267,27 @@ export async function getProjectsWithSessions(
     isStarred?: number;
   }>;
   const totalProjects = projectRows.length;
-  const projects: ProjectListItem[] = [];
   let processedProjects = 0;
 
-  for (const row of projectRows) {
-    processedProjects += 1;
-
-    const projectId = row.project_id;
+  // Each project costs a package.json read plus a page of live-status probes, and
+  // those are independent per project — running them one project at a time made
+  // the response scale linearly with the workspace count (#302). Bounded fan-out
+  // keeps the disk pressure capped while collapsing the wall clock;
+  // mapWithConcurrency preserves input order, so the sidebar ordering is unchanged.
+  const projects = await mapWithConcurrency(projectRows, PROJECT_BUILD_CONCURRENCY, async (row) => {
     const projectPath = row.project_path;
 
+    const [displayName, sessionsPage] = await Promise.all([
+      row.custom_project_name && row.custom_project_name.trim().length > 0
+        ? Promise.resolve(row.custom_project_name)
+        : generateDisplayName(path.basename(projectPath) || projectPath, projectPath),
+      readProjectSessionsPageByPath(projectPath, {
+        limit: options.sessionsLimit,
+        offset: options.sessionsOffset,
+      }),
+    ]);
+
+    processedProjects += 1;
     broadcastProgress({
       phase: 'loading',
       current: processedProjects,
@@ -279,18 +295,8 @@ export async function getProjectsWithSessions(
       currentProject: projectPath,
     });
 
-    const displayName =
-      row.custom_project_name && row.custom_project_name.trim().length > 0
-        ? row.custom_project_name
-        : await generateDisplayName(path.basename(projectPath) || projectPath, projectPath);
-
-    const sessionsPage = await readProjectSessionsPageByPath(projectPath, {
-      limit: options.sessionsLimit,
-      offset: options.sessionsOffset,
-    });
-
-    projects.push({
-      projectId,
+    return {
+      projectId: row.project_id,
       path: projectPath,
       displayName,
       fullPath: projectPath,
@@ -300,8 +306,8 @@ export async function getProjectsWithSessions(
         hasMore: sessionsPage.hasMore,
         total: sessionsPage.total,
       },
-    });
-  }
+    } satisfies ProjectListItem;
+  });
 
   broadcastProgress({
     phase: 'complete',

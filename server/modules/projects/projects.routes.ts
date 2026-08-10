@@ -2,7 +2,7 @@ import express from 'express';
 
 import { createProject, updateProjectDisplayName } from '@/modules/projects/services/project-management.service.js';
 import { startCloneProject } from '@/modules/projects/services/project-clone.service.js';
-import { getSessionTokenUsage } from '@/modules/providers/index.js';
+import { getSessionTokenUsage, requestBackgroundSessionSynchronization } from '@/modules/providers/index.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 import { getArchivedProjectsWithSessions, getProjectSessionsPage, getProjectsWithSessions } from '@/modules/projects/services/projects-with-sessions-fetch.service.js';
 import { deleteOrArchiveProject, restoreArchivedProject } from '@/modules/projects/services/project-delete.service.js';
@@ -68,13 +68,21 @@ function resolveRouteErrorMessage(error: unknown): string {
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const skipSynchronization =
-      readQueryStringValue(req.query.skipSynchronization).trim() === '1' ||
-      readQueryStringValue(req.query.skipSync).trim() === '1';
+    // Snapshot-first (#302): the SQLite index is already durable from the prior
+    // server lifetime, so first paint must not wait on a filesystem rescan of the
+    // whole Claude/Codex history. Freshness is requested in the background and
+    // announced over the websocket when it lands. `?sync=1` restores the old
+    // await-the-scan behaviour for callers that need read-after-write.
+    const awaitSynchronization = readQueryStringValue(req.query.sync).trim() === '1';
     const sessionsLimit = readOptionalNumericQueryValue(req.query.sessionsLimit) ?? undefined;
     const sessionsOffset = readOptionalNumericQueryValue(req.query.sessionsOffset) ?? undefined;
+
+    if (!awaitSynchronization) {
+      void requestBackgroundSessionSynchronization();
+    }
+
     const projects = await getProjectsWithSessions({
-      skipSynchronization,
+      skipSynchronization: !awaitSynchronization,
       sessionsLimit,
       sessionsOffset,
     });

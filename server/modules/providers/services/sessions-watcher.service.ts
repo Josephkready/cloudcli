@@ -13,6 +13,7 @@ import {
   type WatcherEventType,
 } from '@/modules/providers/services/session-upsert-debouncer.js';
 import { sessionSynchronizerService } from '@/modules/providers/services/session-synchronizer.service.js';
+import { requestBackgroundSessionSynchronization } from '@/modules/providers/services/background-session-sync.service.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { LLMProvider } from '@/shared/types.js';
 import { generateDisplayName } from '@/modules/projects/index.js';
@@ -246,10 +247,13 @@ async function onUpdate(
 export async function initializeSessionsWatcher(): Promise<void> {
   console.log('Setting up session watchers');
 
-  const initialSync = await sessionSynchronizerService.synchronizeSessions();
+  // Routed through the background coordinator so it coalesces with any scan a
+  // request kicked off in the window between `server.listen()` and here, and so
+  // its completion notifies clients that loaded the pre-scan snapshot (#302).
+  const initialSync = await requestBackgroundSessionSynchronization();
   console.log('Initial session synchronization complete', {
-    processedByProvider: initialSync.processedByProvider,
-    failures: initialSync.failures,
+    processedByProvider: initialSync?.processedByProvider ?? null,
+    failures: initialSync?.failures ?? ['synchronization threw'],
   });
 
   for (const { provider, rootPath } of PROVIDER_WATCH_PATHS) {

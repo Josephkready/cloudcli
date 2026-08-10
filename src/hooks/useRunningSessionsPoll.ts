@@ -64,12 +64,14 @@ type UseRunningSessionsPollArgs = {
  * that started or explicitly subscribed to that run (issue #204). They never
  * reach every client.
  *
- * Two frame kinds *are* broadcast to all `connectedClients`, and neither
+ * Three frame kinds *are* broadcast to all `connectedClients`, and none of them
  * carries running/blocked state:
  *   - `session_upserted` (`sessions-watcher` and `chat-run-registry`) — a
  *     transcript row changed on disk;
  *   - `loading_progress` (`projects-with-sessions-fetch`) — project-scan
- *     progress.
+ *     progress;
+ *   - `projects_snapshot_stale` (`background-session-sync`, #302) — a background
+ *     provider scan indexed something, so the sidebar snapshot is superseded.
  *
  * So a run started on another device, in another tab, or before this tab loaded
  * is invisible over the socket until this client subscribes to that session —
