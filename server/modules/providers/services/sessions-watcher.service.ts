@@ -250,8 +250,11 @@ export async function initializeSessionsWatcher(): Promise<void> {
   // Routed through the background coordinator so it coalesces with any scan a
   // request kicked off in the window between `server.listen()` and here, and so
   // its completion notifies clients that loaded the pre-scan snapshot (#302).
-  await requestBackgroundSessionSynchronization();
-  console.log('Initial session synchronization complete');
+  const initialSync = await requestBackgroundSessionSynchronization();
+  console.log('Initial session synchronization complete', {
+    processedByProvider: initialSync?.processedByProvider ?? null,
+    failures: initialSync?.failures ?? ['synchronization threw'],
+  });
 
   for (const { provider, rootPath } of PROVIDER_WATCH_PATHS) {
     try {

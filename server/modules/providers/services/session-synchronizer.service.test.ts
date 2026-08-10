@@ -78,12 +78,18 @@ test('synchronizeSessions coalesces concurrent callers into one scan', async () 
         providerRegistry.listProviders().length,
         'the second caller must join the in-flight scan, not start another one',
       );
-      assert.equal(sessionSynchronizerService.isSynchronizing(), true);
-
       gate.resolve();
       const [firstResult, secondResult] = await Promise.all([first, second]);
       assert.deepEqual(firstResult, secondResult, 'joined callers share one result');
-      assert.equal(sessionSynchronizerService.isSynchronizing(), false);
+
+      // The slot is released once the run settles, so the next caller rescans
+      // rather than being served a cached result forever.
+      await sessionSynchronizerService.synchronizeSessions();
+      assert.equal(
+        stub.scanCount(),
+        providerRegistry.listProviders().length * 2,
+        'a call made after the run settled starts a fresh scan',
+      );
     } finally {
       gate.resolve();
       stub.restore();
@@ -124,9 +130,9 @@ test('synchronizeSessions releases the in-flight slot when a provider fails', as
     try {
       const result = await sessionSynchronizerService.synchronizeSessions();
       assert.equal(result.failures.length, providerRegistry.listProviders().length);
-      assert.equal(sessionSynchronizerService.isSynchronizing(), false);
 
-      // Still usable afterwards.
+      // Still usable afterwards: a rejected run must not wedge the slot, or every
+      // later caller would await a permanently failed promise.
       const second = await sessionSynchronizerService.synchronizeSessions();
       assert.equal(second.failures.length, providerRegistry.listProviders().length);
     } finally {

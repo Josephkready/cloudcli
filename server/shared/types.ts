@@ -195,6 +195,10 @@ export type GatewayEventKind =
   | 'chat_subscribed'
   | 'session_upserted'
   | 'loading_progress'
+  // Emitted when a background provider scan finished and indexed something the
+  // client's snapshot predates (#302). Carries no payload beyond a timestamp:
+  // it is a "refetch when convenient" signal, not a delta.
+  | 'projects_snapshot_stale'
   | 'protocol_error';
 
 /**

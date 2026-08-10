@@ -6,6 +6,7 @@ import test, { mock } from 'node:test';
 
 import { closeConnection, initializeDatabase } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
+import { sessionSynchronizerService } from '@/modules/providers/services/session-synchronizer.service.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
 
@@ -120,6 +121,35 @@ test('concurrent background sync requests share one scan and one signal', async 
       assert.equal(broadcasts.frames.length, 1, 'one staleness signal, not one per caller');
     } finally {
       release();
+      broadcasts.restore();
+      mock.restoreAll();
+    }
+  });
+});
+
+// A scan that rejects outright (as opposed to a per-provider failure, which
+// Promise.allSettled already absorbs) must not wedge the pending slot: every
+// later caller would inherit that one dead promise and freshness would stop
+// forever. It also must not reject its callers — server startup awaits this.
+test('a background sync that throws releases the slot and stays silent', async () => {
+  await withIsolatedDatabase(async () => {
+    const broadcasts = captureBroadcasts();
+    mock.method(sessionSynchronizerService, 'synchronizeSessions', async () => {
+      throw new Error('scan exploded');
+    });
+
+    try {
+      const result = await requestBackgroundSessionSynchronization();
+      assert.equal(result, null, 'callers see null, not a rejection');
+      assert.deepEqual(broadcasts.frames, [], 'a failed scan never claims the snapshot is stale');
+
+      mock.restoreAll();
+      stubProviderScans(1);
+
+      // The slot is free again, so the next request produces a real scan.
+      await requestBackgroundSessionSynchronization();
+      assert.equal(broadcasts.frames.length, 1, 'a later scan still works');
+    } finally {
       broadcasts.restore();
       mock.restoreAll();
     }

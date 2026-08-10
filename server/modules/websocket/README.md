@@ -61,6 +61,7 @@ flowchart LR
 
   I --> M[projects.service loading_progress]
   I --> N[sessions-watcher.service session_upserted]
+  I --> O[background-session-sync.service projects_snapshot_stale]
 ```
 
 ## Connection Handshake + Routing
@@ -143,7 +144,7 @@ flowchart TD
 
 ### Chat Notes
 
-1. **Unified envelope**: every server-to-client frame carries a `kind` — either a provider `NormalizedMessage` kind or a gateway kind (`chat_subscribed`, `chat_resumed`, `session_upserted`, `loading_progress`, `protocol_error`). There is no second `type`-based protocol.
+1. **Unified envelope**: every server-to-client frame carries a `kind` — either a provider `NormalizedMessage` kind or a gateway kind (`chat_subscribed`, `chat_resumed`, `session_upserted`, `loading_progress`, `projects_snapshot_stale`, `protocol_error`). There is no second `type`-based protocol.
 2. **Unified terminal lifecycle**: every provider run ends with exactly one `complete` message built by `createCompleteMessage()` (`server/shared/utils.ts`): `{ kind: "complete", sessionId, actualSessionId, exitCode, success, aborted }`. The chat handler emits a synthetic `complete` for runs that crash or get aborted, and the run registry drops duplicate completes. A **stale-run reaper** in the registry is a last-resort path to that `complete`: if a provider generator wedges without ever emitting one (a never-EOF stream, a stuck tool), a session would otherwise show "running" forever — so a periodic sweep force-completes any running, non-blocked run that has streamed nothing past `CLOUDCLI_RUN_INACTIVITY_TIMEOUT_MS` (default 45 min; `0` disables), best-effort aborting its child first. Runs blocked on a permission/plan prompt are exempt (the stale-*approval* reaper, `CLAUDE_TOOL_APPROVAL_REAP_MS`, owns those).
 3. **Per-run event log + multi-subscriber fan-out**: every live event gets a monotonically increasing `seq`. A run holds a **set** of subscriber sockets, not a single one, so `chat.subscribe { sessions: [{ sessionId, lastSeq }] }` **joins** the requesting socket to the live stream (any provider, not just Claude) rather than displacing whoever was already watching — a second device or a reconnecting tab both stream concurrently, and each still gets the terminal `complete` (issue #204). On subscribe, events with `seq > lastSeq` are replayed to the joining socket; if the buffer no longer covers `lastSeq`, the client refreshes over REST. Closed sockets are pruned from the set on the next send and on disconnect. Clients re-subscribe **every** running session (not just the viewed one) on reconnect, so background runs re-attach to the new socket.
 4. `chat_subscribed` includes `isProcessing` (replaces `check-session-status`), `pendingPermissions` (replaces `get-pending-permissions`), and `interrupted` (true when a previous process left in-flight/queued work for this session that a `chat.resume` can re-dispatch).
@@ -238,6 +239,8 @@ That shared set is consumed by:
 Broadcasts `kind: loading_progress` while project snapshots are being built.
 2. `modules/providers/services/sessions-watcher.service.ts`
 Broadcasts per-session `kind: session_upserted` deltas when provider session artifacts change (no full project snapshots).
+3. `modules/providers/services/background-session-sync.service.ts`
+Broadcasts `kind: projects_snapshot_stale` when a background provider scan indexed new or changed sessions (#302). `GET /api/projects` answers from the persisted SQLite index without awaiting a rescan, so this is how a client learns its snapshot has been superseded. It is a bare signal, not a delta — the scan reports per-provider counts, not the session ids it touched — and the client answers with one silent refetch.
 
 This design centralizes cross-module realtime fanout without requiring route-local references to WebSocket internals.
 

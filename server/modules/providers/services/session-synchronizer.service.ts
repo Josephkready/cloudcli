@@ -2,7 +2,7 @@ import { scanStateDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import type { LLMProvider } from '@/shared/types.js';
 
-type SessionSynchronizeResult = {
+export type SessionSynchronizeResult = {
   processedByProvider: Record<LLMProvider, number>;
   failures: string[];
 };
@@ -81,14 +81,6 @@ export const sessionSynchronizerService = {
         inFlightSynchronization = null;
       }
     }
-  },
-
-  /**
-   * True while a full synchronization is running. Lets callers decide whether to
-   * start a background refresh rather than pile onto one already in progress.
-   */
-  isSynchronizing(): boolean {
-    return inFlightSynchronization !== null;
   },
 
   /**
