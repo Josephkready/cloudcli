@@ -6,7 +6,7 @@ import readline from 'node:readline';
 
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
-import { createNormalizedMessage, generateMessageId, readObjectRecord, sliceTailPage } from '@/shared/utils.js';
+import { AppError, createNormalizedMessage, generateMessageId, readObjectRecord, sliceTailPage } from '@/shared/utils.js';
 import { sessionsDb } from '@/modules/database/index.js';
 
 const PROVIDER = 'claude';
@@ -268,8 +268,21 @@ async function getSessionMessages(
       limit,
     };
   } catch (error) {
+    // Deliberately NOT swallowed into an empty result. Returning `[]` here made
+    // a failed read indistinguishable from a session that genuinely has no
+    // messages, and the client applied that over the loaded transcript — the
+    // whole conversation vanished while the file on disk was intact (#320).
+    //
+    // Note what still resolves empty rather than throwing: the `!jsonLPath`
+    // branch above (a session with no transcript yet) and unparseable
+    // individual lines (skipped inline, since Claude Code appends to this file
+    // while we read it). Only a real I/O failure reaches here.
     console.error(`Error reading messages for session ${sessionId}:`, error);
-    return limit === null ? [] : { messages: [], total: 0, hasMore: false };
+    throw new AppError(`Could not read the transcript for session "${sessionId}".`, {
+      code: 'SESSION_TRANSCRIPT_UNREADABLE',
+      statusCode: 500,
+      details: { cause: error instanceof Error ? error.message : String(error) },
+    });
   }
 }
 
@@ -662,16 +675,20 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     const { limit = null, offset = 0 } = options;
     const providerSessionId = options.providerSessionId ?? sessionId;
 
-    let result: ClaudeHistoryResult;
-    try {
-      // Load full history first so `total` reflects frontend-normalized messages,
-      // not raw JSONL records.
-      result = await getSessionMessages(sessionId, providerSessionId, null, 0);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[ClaudeProvider] Failed to load session ${sessionId}:`, message);
-      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
-    }
+    // Load full history first so `total` reflects frontend-normalized messages,
+    // not raw JSONL records.
+    //
+    // A read failure is intentionally allowed to propagate to the route rather
+    // than being reported as an empty page. Presenting a failure as "no
+    // messages" is what let a transient read error blank a live conversation
+    // (#320); an honest error lets the client show a retryable error state
+    // instead of an empty thread that reads as data loss.
+    const result: ClaudeHistoryResult = await getSessionMessages(
+      sessionId,
+      providerSessionId,
+      null,
+      0,
+    );
 
     const rawMessages = Array.isArray(result) ? result : (result.messages || []);
 

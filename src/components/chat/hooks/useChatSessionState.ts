@@ -111,6 +111,12 @@ export function useChatSessionState({
 }: UseChatSessionStateArgs) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(selectedSession?.id || null);
   const [isLoadingSessionMessages, setIsLoadingSessionMessages] = useState(false);
+  /**
+   * The last history load for this session failed. Tracked separately from
+   * "zero messages" because the two are not the same thing: a failure that
+   * renders as empty looks to the user like the conversation was deleted.
+   */
+  const [sessionLoadFailed, setSessionLoadFailed] = useState(false);
   const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [totalMessages, setTotalMessages] = useState(0);
@@ -594,10 +600,14 @@ export function useChatSessionState({
 
     // Fetch from server → store updates → chatMessages re-derives automatically
     setIsLoadingSessionMessages(true);
+    setSessionLoadFailed(false);
     sessionStore.fetchFromServer(selectedSessionId, {
       limit: MESSAGES_PER_PAGE,
       offset: 0,
     }).then(slot => {
+      // `fetchFromServer` swallows its own errors and reports them on the slot,
+      // so the rejection path below never fires for a failed fetch.
+      setSessionLoadFailed(slot?.status === 'error');
       if (slot) {
         setHasMoreMessages(slot.hasMore);
         setTotalMessages(slot.total);
@@ -611,6 +621,7 @@ export function useChatSessionState({
       }
       setIsLoadingSessionMessages(false);
     }).catch(() => {
+      setSessionLoadFailed(true);
       setIsLoadingSessionMessages(false);
     });
   }, [
@@ -883,6 +894,34 @@ export function useChatSessionState({
     setVisibleMessageCount((prev) => prev + 100);
   }, []);
 
+  /**
+   * Re-runs the initial history fetch after a failure. A read failure is often
+   * transient (the transcript is appended to while we read it), so an in-place
+   * retry usually beats making the user reload the page.
+   */
+  const retryLoadSession = useCallback(async () => {
+    const sessionId = selectedSession?.id;
+    if (!sessionId) return;
+
+    setIsLoadingSessionMessages(true);
+    setSessionLoadFailed(false);
+    try {
+      const slot = await sessionStore.fetchFromServer(sessionId, {
+        limit: MESSAGES_PER_PAGE,
+        offset: 0,
+      });
+      setSessionLoadFailed(slot?.status === 'error');
+      if (slot) {
+        setHasMoreMessages(slot.hasMore);
+        setTotalMessages(slot.total);
+      }
+    } catch {
+      setSessionLoadFailed(true);
+    } finally {
+      setIsLoadingSessionMessages(false);
+    }
+  }, [selectedSession?.id, sessionStore]);
+
   return {
     chatMessages,
     addMessage,
@@ -894,6 +933,8 @@ export function useChatSessionState({
     currentSessionId,
     setCurrentSessionId,
     isLoadingSessionMessages,
+    sessionLoadFailed,
+    retryLoadSession,
     isLoadingMoreMessages,
     hasMoreMessages,
     totalMessages,

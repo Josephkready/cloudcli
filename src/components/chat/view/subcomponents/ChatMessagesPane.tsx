@@ -10,6 +10,7 @@ import type {
   ProviderModelsDefinition,
 } from '../../../../types/app';
 import { getIntrinsicMessageKey } from '../../utils/messageKeys';
+import { resolveMessagesPaneView } from '../../utils/messagesPaneView';
 import { groupConsecutiveTools, isToolGroupItem } from '../../utils/toolGrouping';
 
 import MessageComponent from './MessageComponent';
@@ -22,6 +23,8 @@ interface ChatMessagesPaneProps {
   onWheel: () => void;
   onTouchMove: () => void;
   isLoadingSessionMessages: boolean;
+  sessionLoadFailed?: boolean;
+  onRetryLoadSession?: () => void;
   /** True while the viewed session has an active provider run in flight. */
   isProcessing?: boolean;
   /** True while ChatComposer's floating activity/stop tab is rendered above the input. */
@@ -66,6 +69,8 @@ function ChatMessagesPane({
   onWheel,
   onTouchMove,
   isLoadingSessionMessages,
+  sessionLoadFailed = false,
+  onRetryLoadSession,
   isProcessing = false,
   hasActivityIndicator = false,
   chatMessages,
@@ -103,6 +108,12 @@ function ChatMessagesPane({
   selectedProject,
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
+  const paneView = resolveMessagesPaneView({
+    isLoadingSessionMessages,
+    isProcessing,
+    messageCount: chatMessages.length,
+    loadFailed: sessionLoadFailed,
+  });
   const groupedVisibleMessages = useMemo(
     () => groupConsecutiveTools(visibleMessages, Boolean(showThinking)),
     [visibleMessages, showThinking],
@@ -153,14 +164,35 @@ function ChatMessagesPane({
       }`}
     >
       <div className="mx-auto w-full max-w-[54.25rem] space-y-3 px-4 sm:space-y-4">
-      {(isLoadingSessionMessages || isProcessing) && chatMessages.length === 0 ? (
+      {paneView === 'loading' ? (
         <div className="mt-8 text-center text-gray-500 dark:text-gray-400">
           <div className="flex items-center justify-center space-x-2">
             <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-gray-400" />
             <p>{t('session.loading.sessionMessages')}</p>
           </div>
         </div>
-      ) : chatMessages.length === 0 ? (
+      ) : paneView === 'error' ? (
+        // Distinct from the empty state on purpose: falling through to
+        // "start a new conversation" after a failed load reads as though the
+        // thread was deleted, which is the whole bug this guards against.
+        <div className="mt-8 text-center">
+          <p className="font-medium text-gray-700 dark:text-gray-200">
+            {t('session.errors.loadFailedTitle')}
+          </p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">
+            {t('session.errors.loadFailedBody')}
+          </p>
+          {onRetryLoadSession && (
+            <button
+              type="button"
+              onClick={onRetryLoadSession}
+              className="mt-4 rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+            >
+              {t('session.errors.loadFailedRetry')}
+            </button>
+          )}
+        </div>
+      ) : paneView === 'empty' ? (
         <ProviderSelectionEmptyState
           selectedSession={selectedSession}
           currentSessionId={currentSessionId}

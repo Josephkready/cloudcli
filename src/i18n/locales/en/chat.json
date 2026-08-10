@@ -182,6 +182,11 @@
       "loadingAll": "Loading all messages...",
       "allLoaded": "All messages loaded",
       "perfWarning": "All messages loaded — scrolling may be slower. Click \"Scroll to bottom\" to restore performance."
+    },
+    "errors": {
+      "loadFailedTitle": "Couldn't load this conversation",
+      "loadFailedBody": "The transcript could not be read. Your messages are still on disk — this is usually temporary.",
+      "loadFailedRetry": "Try again"
     }
   },
   "shell": {
