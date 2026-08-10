@@ -116,7 +116,14 @@ export function useChatRealtimeHandlers({
           if (!sid) return;
 
           if (msg.isProcessing) {
-            onSessionProcessing?.(sid);
+            // Symmetric with the idle branch below: a subscribe ack is only
+            // authoritative for state that has not moved on since we asked. If
+            // the run completed after the subscribe went out, this ack is
+            // describing the finished run, and re-marking it processing would
+            // strand the flag — queueing every subsequent send forever (#318).
+            onSessionProcessing?.(sid, undefined, {
+              ifNotIdledSince: statusCheckSentAtRef.current.get(sid),
+            });
           } else {
             // Idle ack: ignore it if a newer request started after the
             // subscribe was sent — the ack describes the older state.

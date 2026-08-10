@@ -10,6 +10,7 @@ import { createCachedDiffCalculator, type DiffCalculator } from '../utils/messag
 import { sendSubscribeBatch } from '../utils/subscribeTargets';
 import { stabilizeMessageIdentities } from '../utils/messageIdentity';
 import { reconcileTokenBudget } from '../utils/tokenBudget';
+import { resolveRestoreScrollTop, type ScrollRestoreState } from '../utils/scrollRestore';
 
 import { normalizedToChatMessages } from './useChatMessages';
 
@@ -33,10 +34,8 @@ interface UseChatSessionStateArgs {
   sessionStore: SessionStore;
 }
 
-interface ScrollRestoreState {
-  height: number;
-  top: number;
-}
+// Shape and placement arithmetic live in ./utils/scrollRestore so they can be
+// unit-tested without a DOM.
 
 /* ------------------------------------------------------------------ */
 /*  Helper: Convert a ChatMessage to a NormalizedMessage for the store */
@@ -377,7 +376,12 @@ export function useChatSessionState({
           return false;
         }
 
-        pendingScrollRestoreRef.current = { height: previousScrollHeight, top: previousScrollTop };
+        // Incremental page: hold the reader's place across the prepend.
+        pendingScrollRestoreRef.current = {
+          mode: 'preserve',
+          height: previousScrollHeight,
+          top: previousScrollTop,
+        };
         setHasMoreMessages(slot.hasMore);
         setTotalMessages(slot.total);
         setVisibleMessageCount((prev) => prev + MESSAGES_PER_PAGE);
@@ -436,10 +440,9 @@ export function useChatSessionState({
 
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) return;
-    const { height, top } = pendingScrollRestoreRef.current;
+    const restore = pendingScrollRestoreRef.current;
     const container = scrollContainerRef.current;
-    const newScrollHeight = container.scrollHeight;
-    container.scrollTop = top + Math.max(newScrollHeight - height, 0);
+    container.scrollTop = resolveRestoreScrollTop(restore, container.scrollHeight);
     pendingScrollRestoreRef.current = null;
   }, [chatMessages.length]);
 
@@ -839,7 +842,14 @@ export function useChatSessionState({
 
       if (slot) {
         if (container) {
-          pendingScrollRestoreRef.current = { height: previousScrollHeight, top: previousScrollTop };
+          // The user explicitly asked for the whole thread, so land them at its
+          // beginning rather than pinning the message they were already on —
+          // preserving here is what read as "it only scrolls up a little" (#317).
+          pendingScrollRestoreRef.current = {
+            mode: 'toStart',
+            height: previousScrollHeight,
+            top: previousScrollTop,
+          };
         }
 
         setHasMoreMessages(false);

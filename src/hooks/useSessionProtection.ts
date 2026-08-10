@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 export interface SessionActivity {
   /** Provider-supplied status line; null renders the default activity label. */
@@ -30,6 +30,7 @@ export type SessionActivitySnapshot = {
 export type MarkSessionProcessing = (
   sessionId?: string | null,
   activity?: { statusText?: string | null; canInterrupt?: boolean },
+  opts?: { ifNotIdledSince?: number },
 ) => void;
 
 export type MarkSessionIdle = (
@@ -80,10 +81,33 @@ export function useSessionProtection() {
     new Map(),
   );
 
-  const markSessionProcessing = useCallback<MarkSessionProcessing>((sessionId, activity) => {
+  /**
+   * When each session was last observed going idle. Only a guarded caller (the
+   * `chat_subscribed` ack) reads it, so it stays a ref: it must not itself
+   * trigger a render, and it is only ever consulted alongside a state update.
+   */
+  const lastIdleAtRef = useRef<Map<string, number>>(new Map());
+
+  const markSessionProcessing = useCallback<MarkSessionProcessing>((sessionId, activity, opts) => {
     if (!sessionId) {
       return;
     }
+
+    // Guard against a stale `chat_subscribed` ack (#318): if the session went
+    // idle after the subscribe that produced this ack was sent, the ack
+    // describes the run that has since completed. Marking it processing again
+    // would strand the flag forever — nothing else clears it, and every send
+    // silently queues behind it. Mirrors `ifStartedBefore` on the idle branch.
+    if (opts?.ifNotIdledSince !== undefined) {
+      const lastIdleAt = lastIdleAtRef.current.get(sessionId);
+      if (lastIdleAt !== undefined && lastIdleAt >= opts.ifNotIdledSince) {
+        return;
+      }
+    }
+
+    // A live run supersedes any recorded completion, so later guarded acks are
+    // judged against this run rather than the previous one's idle stamp.
+    lastIdleAtRef.current.delete(sessionId);
 
     setProcessingSessions((prev) => {
       const existing = prev.get(sessionId);
@@ -114,9 +138,16 @@ export function useSessionProtection() {
       return;
     }
 
+    // Sampled once outside the updater so a double-invoked (StrictMode) render
+    // records the same instant rather than drifting.
+    const idledAt = Date.now();
+
     setProcessingSessions((prev) => {
       const existing = prev.get(sessionId);
       if (!existing) {
+        // Already idle. Still stamp it: a `complete` can beat the subscribe ack
+        // it should invalidate, and without the stamp that ack looks fresh.
+        lastIdleAtRef.current.set(sessionId, idledAt);
         return prev;
       }
 
@@ -127,6 +158,7 @@ export function useSessionProtection() {
         return prev;
       }
 
+      lastIdleAtRef.current.set(sessionId, idledAt);
       const updated = new Map(prev);
       updated.delete(sessionId);
       return updated;
