@@ -234,6 +234,21 @@ router.post(
   }),
 );
 
+// Backs `/session/:sessionId` deep links: resolves an id the client may not
+// have in its paginated payloads to its owning project.
+//
+// Must stay registered after the static `/sessions/running` and
+// `/sessions/archived` routes above, so those literals are never captured by
+// `:sessionId`.
+router.get(
+  '/sessions/:sessionId',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const result = sessionsService.getSessionDetailsById(sessionId);
+    res.json(createApiSuccessResponse(result));
+  }),
+);
+
 router.delete(
   '/sessions/:sessionId',
   asyncHandler(async (req: Request, res: Response) => {
