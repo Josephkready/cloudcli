@@ -165,6 +165,7 @@ export default tseslint.config(
             "server/shared/router-basename.ts",
             "server/shared/file-tree-excludes.ts",
             "server/shared/image-attachments.ts",
+            "server/shared/session-id-guards.ts",
           ], // classify shared utility files so modules can depend on them explicitly
           mode: "file",
         },

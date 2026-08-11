@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import { getClaudeSessionTokenUsage } from '@/modules/providers/list/claude/claude-token-usage.provider.js';
+import { isReservedDotOnlyId } from '@/shared/session-id-guards.js';
 import type { LLMProvider } from '@/shared/types.js';
 
 /**
@@ -29,8 +30,16 @@ const SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
 const CODEX_DEFAULT_CONTEXT_WINDOW = 200000;
 
+/**
+ * Rejects ids that could steer the lookups below. The allow-list pattern keeps
+ * out separators and shell metacharacters; the dot-only guard covers the case
+ * the pattern can't, because `.` is a legal body character. It matters
+ * concretely here: `findCodexSessionFile` matches on `entry.name.includes(id)`,
+ * and every `*.jsonl` filename contains a `.`, so a bare `.` would match the
+ * first session file it walks past and report an unrelated session's usage.
+ */
 function isSafeSessionId(value: string): boolean {
-  return SESSION_ID_PATTERN.test(value);
+  return SESSION_ID_PATTERN.test(value) && !isReservedDotOnlyId(value);
 }
 
 function buildUnsupportedResponse(message: string): SessionTokenUsageResponse {

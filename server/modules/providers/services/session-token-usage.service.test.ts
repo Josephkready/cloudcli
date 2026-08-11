@@ -62,6 +62,62 @@ test('getSessionTokenUsage rejects unsafe session ids with an unsupported respon
   assert.equal(result.unsupported, true);
 });
 
+// Same class as #181: `.` is a legal body character, so an all-dots id passed
+// SESSION_ID_PATTERN. That is not merely theoretical here — the Codex finder
+// matches on `entry.name.includes(sessionId)`, and every `*.jsonl` name
+// contains a `.`, so `.` would match the first file walked and report a
+// stranger's token usage. This asserts the guard runs before that walk.
+test('getSessionTokenUsage rejects reserved dot-only ids before they can match an unrelated Codex file', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'codex-token-usage-test-'));
+  try {
+    await fsp.writeFile(
+      path.join(root, 'rollout-2026-05-17-someone-elses-session.jsonl'),
+      JSON.stringify({
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: { total_token_usage: { total_tokens: 4242 }, model_context_window: 128000 },
+        },
+      }) + '\n',
+    );
+
+    for (const reserved of ['.', '..', '...']) {
+      const result = await getSessionTokenUsage(reserved, {
+        getSessionById: () => {
+          throw new Error('getSessionById should not be called for reserved ids');
+        },
+        getClaudeUsage: async () => {
+          throw new Error('claude path should not be reached');
+        },
+        resolveCodexSessionsDir: () => root,
+      });
+
+      assert.equal(result.unsupported, true, reserved);
+      // Without the guard this is where the unrelated file's 4242 leaks through.
+      assert.equal(result.used, 0, reserved);
+    }
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('getSessionTokenUsage still accepts ids that merely contain dots', async () => {
+  // The guard is narrow by design — dotted ids are legitimate and must route
+  // normally.
+  const result = await getSessionTokenUsage('session.v2.0', {
+    getSessionById: () => ({ provider: 'claude' }),
+    getClaudeUsage: async () => ({
+      used: 7,
+      total: 160000,
+      breakdown: { input: 7, cacheCreation: 0, cacheRead: 0 },
+    }),
+    resolveCodexSessionsDir: () => '/never-touched',
+  });
+
+  assert.equal(result.unsupported, undefined);
+  assert.equal(result.used, 7);
+});
+
 test('getSessionTokenUsage walks the Codex sessions dir to find the JSONL file and parses the latest token_count event', async () => {
   const sessionId = 'codex-session-77';
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'codex-token-usage-test-'));
