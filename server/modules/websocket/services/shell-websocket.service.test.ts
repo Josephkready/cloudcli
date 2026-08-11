@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
   buildShellCommand,
+  handleShellConnection,
   quoteShellExecutable,
   resolveResumeSessionId,
 } from './shell-websocket.service.js';
@@ -117,4 +120,69 @@ test('resolveResumeSessionId still accepts ids that merely contain dots', () => 
 test('resolveResumeSessionId rejects a dot-only app id when the resolver has no mapping', () => {
   const d = deps(() => undefined);
   assert.equal(resolveResumeSessionId(message({ sessionId: '..' }), d), '');
+});
+
+/* ── handleShellConnection's init gate ───────────────────────────────────── */
+
+// The `init` handler screens the RAW incoming id before spawning a pty — a
+// second, separate gate from resolveResumeSessionId above. It carried its own
+// copy of the allow-list and so had the same dot-only gap; both now share
+// isSafeShellSessionId. These drive the real handler so the two gates can't
+// drift apart again unnoticed.
+
+/** Minimal ws double: records sent frames and exposes the registered handlers. */
+function fakeSocket() {
+  const sent: Array<Record<string, unknown>> = [];
+  const handlers = new Map<string, (payload: unknown) => unknown>();
+  const ws = {
+    on(event: string, handler: (payload: unknown) => unknown) {
+      handlers.set(event, handler);
+    },
+    send(raw: string) {
+      sent.push(JSON.parse(raw));
+    },
+    readyState: 1,
+  };
+  return { ws, sent, handlers };
+}
+
+async function initShell(sessionId: string, projectPath: string) {
+  const { ws, sent, handlers } = fakeSocket();
+  // The handler logs a connection banner; keep it out of the suite's stdout.
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    handleShellConnection(ws as never, deps(() => null));
+    await handlers.get('message')?.(
+      Buffer.from(JSON.stringify({ type: 'init', projectPath, sessionId, hasSession: true })),
+    );
+  } finally {
+    console.log = originalLog;
+  }
+  return sent;
+}
+
+test('handleShellConnection rejects a dot-only session id before spawning a pty', async () => {
+  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'shell-ws-test-'));
+  try {
+    for (const reserved of ['.', '..', '...']) {
+      const sent = await initShell(reserved, projectPath);
+      const errors = sent.filter((frame) => frame.type === 'error');
+      assert.equal(errors.length, 1, reserved);
+      assert.equal(errors[0]?.message, 'Invalid session ID', reserved);
+    }
+  } finally {
+    fs.rmSync(projectPath, { recursive: true, force: true });
+  }
+});
+
+test('handleShellConnection still rejects ids carrying shell metacharacters', async () => {
+  // Guards the half of the gate that predates this change.
+  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'shell-ws-test-'));
+  try {
+    const sent = await initShell('bad id; rm -rf /', projectPath);
+    assert.equal(sent.filter((frame) => frame.type === 'error').length, 1);
+  } finally {
+    fs.rmSync(projectPath, { recursive: true, force: true });
+  }
 });
