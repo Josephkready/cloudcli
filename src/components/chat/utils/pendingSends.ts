@@ -38,6 +38,19 @@ export type PendingSend = {
   /** ISO-8601, matching `NormalizedMessage.timestamp` so echo matching lines up. */
   timestamp: string;
   options?: Record<string, unknown>;
+  /**
+   * Whether the frame was ever written to a socket.
+   *
+   * This is the difference between "definitely never sent" and "might be in
+   * flight", and it decides how aggressively the entry may be resent. `false`
+   * carries no duplicate risk at all — the socket refused it — so it can go out
+   * the moment a connection exists. `true` is ambiguous (delivered, or lost in a
+   * half-open socket), and a resend has to wait out the window in which the
+   * server may simply not have indexed it yet.
+   *
+   * Absent is treated as `true`, the conservative reading.
+   */
+  dispatched?: boolean;
 };
 
 export const pendingSendKey = (sessionId: string) => `pending_send_${sessionId}`;
@@ -57,7 +70,7 @@ function normalizePendingSend(value: unknown): PendingSend | null {
   if (!value || typeof value !== 'object') {
     return null;
   }
-  const { id, content, timestamp, options } = value as Partial<PendingSend>;
+  const { id, content, timestamp, options, dispatched } = value as Partial<PendingSend>;
   if (typeof id !== 'string' || !id || typeof content !== 'string' || !content.trim()) {
     return null;
   }
@@ -67,9 +80,14 @@ function normalizePendingSend(value: unknown): PendingSend | null {
   if (typeof timestamp !== 'string' || Number.isNaN(Date.parse(timestamp))) {
     return null;
   }
-  return options !== undefined && options !== null && typeof options === 'object'
-    ? { id, content, timestamp, options: options as Record<string, unknown> }
-    : { id, content, timestamp };
+  const base: PendingSend = { id, content, timestamp };
+  if (options !== undefined && options !== null && typeof options === 'object') {
+    base.options = options as Record<string, unknown>;
+  }
+  if (dispatched === false) {
+    base.dispatched = false;
+  }
+  return base;
 }
 
 /** Parses the persisted list. Pure, so the storage layer needn't be stubbed. */
@@ -116,6 +134,21 @@ export function writePendingSends(sessionId: string, entries: PendingSend[]): vo
 /** Records an outgoing message. Call BEFORE handing it to the socket. */
 export function appendPendingSend(sessionId: string, entry: PendingSend): void {
   writePendingSends(sessionId, [...readPendingSends(sessionId), entry]);
+}
+
+/**
+ * Records that the frame reached a socket, so the entry is no longer treated as
+ * "definitely never sent". Called immediately after a successful write; the
+ * entry itself was persisted BEFORE the write, which is what makes the durable
+ * record survive a failure in between.
+ */
+export function markPendingSendDispatched(sessionId: string, id: string): void {
+  writePendingSends(
+    sessionId,
+    readPendingSends(sessionId).map((entry) =>
+      entry.id === id ? { ...entry, dispatched: true } : entry,
+    ),
+  );
 }
 
 /** Drops one entry by id — used once the server transcript proves it landed. */

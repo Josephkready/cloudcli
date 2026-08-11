@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type { NormalizedMessage } from '../../../stores/useSessionStore.pure';
 
-import { retryPendingSends } from './pendingSendRetry';
+import { DISPATCHED_RESEND_GRACE_MS, retryPendingSends } from './pendingSendRetry';
 import type { PendingSend } from './pendingSends';
 
 const SESSION = 's1';
@@ -140,6 +140,78 @@ test('a mid-drain socket failure stops dispatching and keeps the tail queued', (
   assert.deepEqual(persisted?.map((e) => e.id), ['a', 'b', 'c']);
   assert.equal(persisted?.[1]?.timestamp, entries[1]?.timestamp, 'the failed one is not restamped');
   assert.equal(persisted?.[2]?.timestamp, entries[2]?.timestamp, 'the undispatched one is untouched');
+});
+
+/* ── the resend grace period: not duplicating a delivered message ────────── */
+
+// The transcript indexer lags, so a message that DID arrive is briefly absent
+// from serverMessages. Resending on that absence would ask the model the same
+// thing twice — the server queues a duplicate chat.send rather than rejecting
+// it, so this is a real user-visible duplicate, not a no-op.
+test('a message that reached the socket moments ago is not resent yet', () => {
+  const { result, sent, persisted } = harness(
+    [pending({ dispatched: true, timestamp: new Date(NOW - 1_000).toISOString() })],
+    [],
+  );
+  assert.equal(result.resent, 0);
+  assert.equal(sent.length, 0);
+  assert.equal(result.stillPending, 1, 'kept for a later pass, not dropped');
+  assert.equal(persisted?.[0]?.timestamp, new Date(NOW - 1_000).toISOString());
+});
+
+test('once the grace period has passed, a dispatched-but-unechoed message is resent', () => {
+  const { result, sent } = harness(
+    [pending({ dispatched: true, timestamp: new Date(NOW - DISPATCHED_RESEND_GRACE_MS - 1).toISOString() })],
+    [],
+  );
+  assert.equal(result.resent, 1);
+  assert.equal(sent.length, 1);
+});
+
+// The clean-offline case carries no ambiguity: the socket refused the frame, so
+// there is nothing in flight to duplicate and the user should not wait.
+test('a message the socket refused is resent immediately, without waiting', () => {
+  const { result, sent } = harness(
+    [pending({ dispatched: false, timestamp: new Date(NOW - 500).toISOString() })],
+    [],
+  );
+  assert.equal(result.resent, 1);
+  assert.deepEqual(sent[0].content, 'hello');
+});
+
+test('a missing dispatched flag is read conservatively as dispatched', () => {
+  const { result } = harness([pending({ timestamp: new Date(NOW - 1_000).toISOString() })], []);
+  assert.equal(result.resent, 0, 'waits rather than risking a duplicate');
+});
+
+// Confirmation is independent of the grace period — if the transcript has it,
+// it is done, however recently it was sent.
+test('a recently dispatched message that IS echoed is confirmed, not held', () => {
+  const timestamp = new Date(NOW - 1_000).toISOString();
+  const { result, persisted } = harness(
+    [pending({ content: 'landed', dispatched: true, timestamp })],
+    [serverUserMessage('landed', new Date(NOW - 900).toISOString())],
+  );
+  assert.equal(result.confirmed, 1);
+  assert.deepEqual(persisted, []);
+});
+
+test('a resent entry is marked dispatched so it starts its own grace period', () => {
+  const { persisted } = harness(
+    [pending({ dispatched: false, timestamp: new Date(NOW - 500).toISOString() })],
+    [],
+  );
+  assert.equal(persisted?.[0]?.dispatched, true);
+  assert.equal(persisted?.[0]?.timestamp, new Date(NOW).toISOString());
+});
+
+test('an entry whose resend failed stays flagged as never delivered', () => {
+  const { persisted } = harness(
+    [pending({ dispatched: false, timestamp: new Date(NOW - 500).toISOString() })],
+    [],
+    [false],
+  );
+  assert.equal(persisted?.[0]?.dispatched, false, 'still safe to retry without waiting');
 });
 
 // Guards the matcher's own boundary: a same-text server row far outside the

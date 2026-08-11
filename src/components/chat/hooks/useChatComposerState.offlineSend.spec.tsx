@@ -135,6 +135,19 @@ describe('useChatComposerState — a send that never reached the server (#325)',
     const pending = readPendingSends(SESSION_ID);
     expect(pending).toHaveLength(1);
     expect(pending[0]?.content).toBe('lost message');
+    // Flagged as never delivered, which is what lets it be resent immediately
+    // rather than waiting out the in-flight grace period.
+    expect(pending[0]?.dispatched).toBe(false);
+  });
+
+  it('stops flagging a message as undelivered once the socket accepts it', async () => {
+    const { rendered } = setup(() => true);
+    await submit(rendered, 'delivered');
+
+    // Still pending (only a server echo confirms it), but no longer the
+    // known-never-sent case — so a resend waits out the grace period instead of
+    // racing the transcript indexer and duplicating the message.
+    expect(readPendingSends(SESSION_ID)[0]?.dispatched).not.toBe(false);
   });
 
   it('tells the user it has not been sent rather than showing it as delivered', async () => {

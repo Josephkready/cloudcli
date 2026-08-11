@@ -8,6 +8,23 @@ import type { NormalizedMessage } from '../../../stores/useSessionStore.pure';
 import { resolvePendingSends } from './pendingSendEcho';
 import { retimePendingSend, type PendingSend } from './pendingSends';
 
+/**
+ * How long a message that DID reach a socket is presumed in flight before a
+ * resend is considered.
+ *
+ * The transcript is written by the provider and picked up by the JSONL indexer,
+ * which lags — the store comments on this directly ("common right after
+ * `complete`, while JSONL indexing lags"). Inside that lag a delivered message
+ * is genuinely absent from `serverMessages`, so resending on its absence alone
+ * would duplicate it. That is not a harmless duplicate either: the server
+ * appends a second `chat.send` to a per-session FIFO and dispatches it once the
+ * current run finishes, so the user gets the same message asked twice.
+ *
+ * Only the ambiguous case waits. An entry the socket refused is known not to
+ * have arrived and is resent immediately.
+ */
+export const DISPATCHED_RESEND_GRACE_MS = 30_000;
+
 export type RetryPendingSendsArgs = {
   sessionId: string;
   /** The transcript as of the refresh that just completed. */
@@ -53,11 +70,23 @@ export function retryPendingSends({
   const remaining: PendingSend[] = [];
   let resent = 0;
   let socketLost = false;
+  const at = now();
 
   for (const entry of unconfirmed) {
     if (socketLost) {
       // Stop dispatching once the socket has failed: continuing would reorder
       // the queue relative to what actually got through.
+      remaining.push(entry);
+      continue;
+    }
+
+    // Absent `dispatched` is read as true — the conservative case, which waits.
+    const wasDispatched = entry.dispatched !== false;
+    const age = at - Date.parse(entry.timestamp);
+    if (wasDispatched && age < DISPATCHED_RESEND_GRACE_MS) {
+      // Still plausibly in flight or merely un-indexed. Keep it pending and let
+      // a later pass decide, rather than risk asking the model the same thing
+      // twice.
       remaining.push(entry);
       continue;
     }
@@ -71,10 +100,14 @@ export function retryPendingSends({
 
     if (dispatched) {
       resent += 1;
-      remaining.push(retimePendingSend(entry, new Date(now()).toISOString()));
+      // Restamped AND marked dispatched: this attempt is now the one whose echo
+      // we are waiting for, and it starts its own grace period.
+      remaining.push({ ...retimePendingSend(entry, new Date(at).toISOString()), dispatched: true });
     } else {
       socketLost = true;
-      remaining.push(entry);
+      // Keep `dispatched: false` — still known not to have arrived, so the next
+      // pass may retry it without waiting.
+      remaining.push({ ...entry, dispatched: false });
     }
   }
 

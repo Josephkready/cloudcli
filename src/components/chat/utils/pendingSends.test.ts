@@ -6,6 +6,7 @@ import { withLocalStorage } from '../../../test/nodeStubs';
 import {
   appendPendingSend,
   makePendingSendId,
+  markPendingSendDispatched,
   parsePendingSends,
   partitionPendingSends,
   pendingSendKey,
@@ -133,6 +134,47 @@ test('removing an id that is not present is a no-op', () => {
     appendPendingSend('s1', entry({ id: 'a' }));
     removePendingSend('s1', 'nope');
     assert.deepEqual(readPendingSends('s1').map((e) => e.id), ['a']);
+  });
+});
+
+/* ── the dispatched flag: "never sent" vs "might be in flight" ───────────── */
+
+test('dispatched: false survives a storage round-trip', () => {
+  withLocalStorage({}, () => {
+    appendPendingSend('s1', entry({ id: 'a', dispatched: false }));
+    assert.equal(readPendingSends('s1')[0]?.dispatched, false);
+  });
+});
+
+// Absent must read as "might be in flight" — the conservative case that waits
+// before resending — so it is deliberately not persisted as an explicit true.
+test('an entry with no dispatched flag round-trips as absent, not false', () => {
+  withLocalStorage({}, () => {
+    appendPendingSend('s1', entry({ id: 'a' }));
+    assert.equal(readPendingSends('s1')[0]?.dispatched, undefined);
+  });
+});
+
+// Promotion is the absence of the flag, not an explicit `true`: only `false`
+// is persisted, and anything else already reads as "might be in flight". What
+// matters is that 'a' stops being the known-never-delivered case and 'b' does
+// not.
+test('markPendingSendDispatched promotes only the named entry', () => {
+  withLocalStorage({}, () => {
+    appendPendingSend('s1', entry({ id: 'a', dispatched: false }));
+    appendPendingSend('s1', entry({ id: 'b', dispatched: false }));
+    markPendingSendDispatched('s1', 'a');
+    const stored = readPendingSends('s1');
+    assert.notEqual(stored.find((e) => e.id === 'a')?.dispatched, false);
+    assert.equal(stored.find((e) => e.id === 'b')?.dispatched, false);
+  });
+});
+
+test('markPendingSendDispatched on an unknown id changes nothing', () => {
+  withLocalStorage({}, () => {
+    appendPendingSend('s1', entry({ id: 'a', dispatched: false }));
+    markPendingSendDispatched('s1', 'nope');
+    assert.equal(readPendingSends('s1')[0]?.dispatched, false);
   });
 });
 

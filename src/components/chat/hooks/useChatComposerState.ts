@@ -21,7 +21,7 @@ import {
   writeQueuedMessages,
   type QueuedSendOptions,
 } from '../utils/chatStorage';
-import { appendPendingSend, makePendingSendId } from '../utils/pendingSends';
+import { appendPendingSend, makePendingSendId, markPendingSendDispatched } from '../utils/pendingSends';
 import { decideQueueFlush } from '../utils/queueFlush';
 import { resolveEnterKeyAction } from '../utils/enterKeyAction';
 import type {
@@ -842,11 +842,16 @@ export function useChatComposerState({
       // echoes it back this is the only durable copy: the optimistic bubble is
       // in-memory only and the draft key is cleared below, so a frame lost in
       // transit used to take the message with it (#325).
+      const pendingSendId = makePendingSendId();
       appendPendingSend(targetSessionId, {
-        id: makePendingSendId(),
+        id: pendingSendId,
         content: messageContent,
         timestamp: sentAt.toISOString(),
         options: sendOptions,
+        // Written as undelivered and promoted only once the socket accepts it,
+        // so a failure between these two points errs toward "never sent" — the
+        // reading that is safe to retry.
+        dispatched: false,
       });
 
       // One message shape for every provider. The backend resolves the
@@ -885,6 +890,8 @@ export function useChatComposerState({
         safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
         return false;
       }
+
+      markPendingSendDispatched(targetSessionId, pendingSendId);
 
       addMessage(userMessage);
       // Mark this request as processing in the per-session activity map (the
