@@ -96,3 +96,25 @@ test('resolveResumeSessionId rejects an unsafe resolved id', () => {
   const d = deps(() => 'bad id; rm -rf /');
   assert.equal(resolveResumeSessionId(message(), d), '');
 });
+
+// `.` is in the allow-list because real ids contain dots, so an all-dots id
+// passed the pattern and reached `--resume ".."`. Same class as #181.
+test('resolveResumeSessionId rejects a reserved dot-only resolved id', () => {
+  for (const reserved of ['.', '..', '...']) {
+    assert.equal(resolveResumeSessionId(message(), deps(() => reserved)), '', reserved);
+  }
+});
+
+test('resolveResumeSessionId still accepts ids that merely contain dots', () => {
+  // Guards the narrow half of the fix: rejecting these would break resume for
+  // any provider issuing dotted ids.
+  assert.equal(resolveResumeSessionId(message(), deps(() => 'v2.0')), 'v2.0');
+  assert.equal(resolveResumeSessionId(message(), deps(() => '.hidden')), '.hidden');
+});
+
+// The unresolved app id takes the same path when the resolver returns
+// undefined, so the guard has to hold on the fallback branch too.
+test('resolveResumeSessionId rejects a dot-only app id when the resolver has no mapping', () => {
+  const d = deps(() => undefined);
+  assert.equal(resolveResumeSessionId(message({ sessionId: '..' }), d), '');
+});

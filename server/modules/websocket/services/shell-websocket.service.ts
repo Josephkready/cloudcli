@@ -5,6 +5,7 @@ import path from 'node:path';
 import pty, { type IPty } from 'node-pty';
 import { WebSocket, type RawData } from 'ws';
 
+import { isReservedDotOnlyId } from '@/shared/session-id-guards.js';
 import {
   buildProviderCliEnv,
   parseIncomingJsonObject,
@@ -98,6 +99,18 @@ function parseShellMessage(rawMessage: RawData): ShellIncomingMessage | null {
 
 const SAFE_SESSION_ID_PATTERN = /^[a-zA-Z0-9_.\-:]+$/;
 
+/**
+ * The resolved id is interpolated into the resume flag of a shell command, so
+ * the allow-list above is what keeps metacharacters out. It can't screen a
+ * dot-only id, though — `.` is a legal body character — and `--resume ".."`
+ * hands a provider CLI a reserved name to look up rather than a session. No
+ * traversal is reachable from here today, but the id crosses a process
+ * boundary, so it fails closed alongside the other validators. See #181.
+ */
+function isSafeResolvedSessionId(value: string): boolean {
+  return SAFE_SESSION_ID_PATTERN.test(value) && !isReservedDotOnlyId(value);
+}
+
 export function resolveResumeSessionId(
   message: ShellIncomingMessage,
   dependencies: ShellWebSocketDependencies
@@ -119,7 +132,7 @@ export function resolveResumeSessionId(
   }
 
   const resolvedSessionId = resumeSessionId === undefined ? sessionId : resumeSessionId;
-  if (!resolvedSessionId || !SAFE_SESSION_ID_PATTERN.test(resolvedSessionId)) {
+  if (!resolvedSessionId || !isSafeResolvedSessionId(resolvedSessionId)) {
     return '';
   }
 
