@@ -35,6 +35,13 @@ export type MainContentProps = {
   onNewSession: (project: Project) => void;
   // Soft-archive the active session from the chat view's header.
   onArchiveSession: (sessionId: string) => void | Promise<void>;
+  /**
+   * The sidebar's project list, forwarded to the mobile empty state so the
+   * landing page can offer a choice instead of pointing at a sidebar that is
+   * hidden behind the burger menu (#326).
+   */
+  projects?: Project[];
+  onProjectSelect?: (project: Project) => void;
 };
 
 export type MainContentHeaderProps = {
@@ -55,6 +62,13 @@ export type MainContentStateViewProps = {
   mode: 'loading' | 'empty';
   isMobile: boolean;
   onMenuClick: () => void;
+  /**
+   * Projects offered inline on the mobile empty state (#326), in the order the
+   * sidebar would show them. Optional so the view still renders standalone —
+   * without them it falls back to the onboarding copy.
+   */
+  projects?: Project[];
+  onProjectSelect?: (project: Project) => void;
 };
 
 export type MobileMenuButtonProps = {

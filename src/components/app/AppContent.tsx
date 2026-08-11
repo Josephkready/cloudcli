@@ -242,6 +242,10 @@ function AppContentInner() {
           onSessionSelect={handleSessionSelect}
           onNewSession={handleNewSession}
           onArchiveSession={archiveSession}
+          // Same list and handler the sidebar uses, so the mobile landing
+          // picker cannot drift from the sidebar's ordering (#326).
+          projects={sidebarSharedProps.projects}
+          onProjectSelect={sidebarSharedProps.onProjectSelect}
         />
       </div>
 

@@ -215,3 +215,61 @@ describe('MainContent — state views', () => {
     expect(screen.queryByTestId('chat-interface')).toBeNull();
   });
 });
+
+/*
+ * #326: the mobile empty state is the app's landing page whenever no project is
+ * selected, and it used to be a dead end. MainContent owns the decision to
+ * render that state, so it also has to hand it the list — otherwise the view
+ * can offer a picker and never receive anything to pick.
+ */
+describe('MainContent — mobile landing project picker (#326)', () => {
+  const projects = [project('/home/dev/alpha'), project('/home/dev/beta')];
+
+  it('gives the mobile empty state the projects it needs to offer a choice', () => {
+    render(<MainContent {...baseProps({
+      selectedProject: null,
+      isMobile: true,
+      projects,
+      onProjectSelect: vi.fn(),
+    })} />);
+
+    expect(screen.getAllByTestId('mobile-project-option')).toHaveLength(2);
+  });
+
+  it('selecting one reaches the handler MainContent was given', async () => {
+    const onProjectSelect = vi.fn();
+    render(<MainContent {...baseProps({
+      selectedProject: null,
+      isMobile: true,
+      projects,
+      onProjectSelect,
+    })} />);
+
+    screen.getAllByTestId('mobile-project-option')[1]?.click();
+
+    expect(onProjectSelect).toHaveBeenCalledWith(projects[1]);
+  });
+
+  it('leaves the desktop empty state alone', () => {
+    render(<MainContent {...baseProps({
+      selectedProject: null,
+      isMobile: false,
+      projects,
+      onProjectSelect: vi.fn(),
+    })} />);
+
+    expect(screen.queryAllByTestId('mobile-project-option')).toHaveLength(0);
+  });
+
+  it('offers nothing to pick while projects are still loading', () => {
+    render(<MainContent {...baseProps({
+      selectedProject: null,
+      isMobile: true,
+      isLoading: true,
+      projects,
+      onProjectSelect: vi.fn(),
+    })} />);
+
+    expect(screen.queryAllByTestId('mobile-project-option')).toHaveLength(0);
+  });
+});
