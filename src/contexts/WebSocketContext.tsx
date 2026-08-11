@@ -21,7 +21,16 @@ type ServerEventListener = (event: ServerEvent) => void;
 
 type WebSocketContextType = {
   ws: WebSocket | null;
-  sendMessage: (message: unknown) => void;
+  /**
+   * Hands a frame to the socket. Returns whether it was actually written.
+   *
+   * `false` means the frame went nowhere and the caller still owns it. Note the
+   * converse is weaker than it looks: `true` only means the socket accepted the
+   * bytes, NOT that the server received them — a half-open connection (common
+   * on iOS) reports OPEN and swallows the frame silently. Callers that must not
+   * lose data need server confirmation as well; see `pendingSends.ts` (#325).
+   */
+  sendMessage: (message: unknown) => boolean;
   /**
    * Subscribes to every websocket frame. Returns an unsubscribe function.
    *
@@ -141,12 +150,24 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     }
   }, [token, dispatch]); // everytime token changes, we reconnect
 
-  const sendMessage = useCallback((message: unknown) => {
+  const sendMessage = useCallback((message: unknown): boolean => {
     const socket = wsRef.current;
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(message));
-    } else {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      // Returning false rather than only warning: this used to be a silent
+      // drop, which is how a sent chat message could vanish with the UI still
+      // showing it as delivered (#325).
       console.warn('WebSocket not connected');
+      return false;
+    }
+    try {
+      socket.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      // `send()` still throws if the socket closed between the readyState check
+      // and the write, and a serialization failure would otherwise surface as an
+      // unhandled error mid-submit.
+      console.error('WebSocket send failed:', error);
+      return false;
     }
   }, []);
 

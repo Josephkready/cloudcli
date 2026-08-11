@@ -13,6 +13,8 @@ import { useChatComposerState } from '../hooks/useChatComposerState';
 import { useInterruptedResume } from '../hooks/useInterruptedResume';
 import { useSessionStore } from '../../../stores/useSessionStore';
 import { shouldOfferResume } from '../utils/interruptedResume';
+import { retryPendingSends } from '../utils/pendingSendRetry';
+import { readPendingSends, writePendingSends } from '../utils/pendingSends';
 import { sendSubscribeBatch } from '../utils/subscribeTargets';
 
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
@@ -237,6 +239,23 @@ function ChatInterface({
     // at reconnect time would never re-attach (the second half of issue #204).
     if (selectedProject && selectedSession) {
       await sessionStore.refreshFromServer(selectedSession.id);
+
+      // The refresh above is the evidence needed to tell a message the server
+      // received from one that was lost in a dropped or half-open socket, so
+      // this runs immediately after it: confirm what the transcript now has and
+      // resend the rest (#325). Anything still unconfirmed stays persisted for
+      // the next reconnect.
+      const pending = readPendingSends(selectedSession.id);
+      if (pending.length > 0) {
+        retryPendingSends({
+          sessionId: selectedSession.id,
+          serverMessages: sessionStore.getSessionSlot(selectedSession.id)?.serverMessages ?? [],
+          entries: pending,
+          send: sendMessage,
+          persist: (entries) => writePendingSends(selectedSession.id, entries),
+          now: () => Date.now(),
+        });
+      }
     }
 
     sendSubscribeBatch({

@@ -21,6 +21,7 @@ import {
   writeQueuedMessages,
   type QueuedSendOptions,
 } from '../utils/chatStorage';
+import { appendPendingSend, makePendingSendId, markPendingSendDispatched } from '../utils/pendingSends';
 import { decideQueueFlush } from '../utils/queueFlush';
 import { resolveEnterKeyAction } from '../utils/enterKeyAction';
 import type {
@@ -50,7 +51,7 @@ interface UseChatComposerStateArgs {
   isLoading: boolean;
   canAbortSession: boolean;
   tokenBudget: Record<string, unknown> | null;
-  sendMessage: (message: unknown) => void;
+  sendMessage: (message: unknown) => boolean;
   sendByCtrlEnter?: boolean;
   /**
    * Mobile/touch layout. When set, plain Enter inserts a newline instead of
@@ -824,12 +825,73 @@ export function useChatComposerState({
         });
       }
 
+      const sentAt = new Date();
       const userMessage: ChatMessage = {
         type: 'user',
         content: currentInput,
         images: uploadedImages as any,
-        timestamp: new Date(),
+        timestamp: sentAt,
       };
+
+      const sendOptions = {
+        ...buildSendOptions(messageContent),
+        images: uploadedImages,
+      };
+
+      // Record the message BEFORE handing it to the socket. Until the server
+      // echoes it back this is the only durable copy: the optimistic bubble is
+      // in-memory only and the draft key is cleared below, so a frame lost in
+      // transit used to take the message with it (#325).
+      const pendingSendId = makePendingSendId();
+      appendPendingSend(targetSessionId, {
+        id: pendingSendId,
+        content: messageContent,
+        timestamp: sentAt.toISOString(),
+        options: sendOptions,
+        // Written as undelivered and promoted only once the socket accepts it,
+        // so a failure between these two points errs toward "never sent" — the
+        // reading that is safe to retry.
+        dispatched: false,
+      });
+
+      // One message shape for every provider. The backend resolves the
+      // provider, project path, and provider-native resume id from the
+      // session row; `options` only carries composer-level preferences.
+      recordFeatureUse('chat.send');
+      const dispatched = sendMessage({
+        type: 'chat.send',
+        sessionId: targetSessionId,
+        content: messageContent,
+        options: sendOptions,
+      });
+
+      if (!dispatched) {
+        // No run started, so do NOT flip the activity indicator — that is what
+        // made an undelivered message look like one awaiting a reply. The text
+        // is safe in the pending store and goes out on the next reconnect.
+        addMessage(userMessage);
+        addMessage({
+          type: 'error',
+          content:
+            "You appear to be offline, so this message hasn't been sent yet. "
+            + "It's saved and will be sent automatically when the connection comes back.",
+          timestamp: new Date(),
+        });
+        setInput('');
+        inputValueRef.current = '';
+        resetCommandMenuState();
+        setAttachedImages([]);
+        setUploadingImages(new Map());
+        setImageErrors(new Map());
+        setIsTextareaExpanded(false);
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+        safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
+        return false;
+      }
+
+      markPendingSendDispatched(targetSessionId, pendingSendId);
 
       addMessage(userMessage);
       // Mark this request as processing in the per-session activity map (the
@@ -842,20 +904,6 @@ export function useChatComposerState({
 
       setIsUserScrolledUp(false);
       setTimeout(() => scrollToBottom(), 100);
-
-      // One message shape for every provider. The backend resolves the
-      // provider, project path, and provider-native resume id from the
-      // session row; `options` only carries composer-level preferences.
-      recordFeatureUse('chat.send');
-      sendMessage({
-        type: 'chat.send',
-        sessionId: targetSessionId,
-        content: messageContent,
-        options: {
-          ...buildSendOptions(messageContent),
-          images: uploadedImages,
-        },
-      });
 
       setInput('');
       inputValueRef.current = '';

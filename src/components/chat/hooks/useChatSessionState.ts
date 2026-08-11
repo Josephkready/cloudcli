@@ -7,6 +7,8 @@ import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 import type { SessionStore, NormalizedMessage } from '../../../stores/useSessionStore';
 import type { ChatMessage } from '../types/types';
 import { createCachedDiffCalculator, type DiffCalculator } from '../utils/messageTransforms';
+import { retryPendingSends } from '../utils/pendingSendRetry';
+import { readPendingSends, writePendingSends } from '../utils/pendingSends';
 import { sendSubscribeBatch } from '../utils/subscribeTargets';
 import { stabilizeMessageIdentities } from '../utils/messageIdentity';
 import { reconcileTokenBudget } from '../utils/tokenBudget';
@@ -21,7 +23,7 @@ interface UseChatSessionStateArgs {
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
   ws: WebSocket | null;
-  sendMessage: (message: unknown) => void;
+  sendMessage: (message: unknown) => boolean;
   externalMessageUpdate?: number;
   newSessionTrigger?: number;
   processingSessions?: SessionActivityMap;
@@ -617,6 +619,23 @@ export function useChatSessionState({
           setTokenBudget((current) =>
             reconcileTokenBudget(current, slot.tokenUsage as Record<string, unknown>),
           );
+        }
+
+        // A send can be lost while the app is CLOSED, not just while it is open
+        // — that is the reported shape of #325 ("close the app and reopen it,
+        // your message disappears"). The reconnect pass cannot cover that case,
+        // so recovery also runs here, against the transcript just fetched:
+        // anything the server never got is resent, anything it has is dropped.
+        const pendingForSession = readPendingSends(selectedSessionId);
+        if (pendingForSession.length > 0) {
+          retryPendingSends({
+            sessionId: selectedSessionId,
+            serverMessages: slot.serverMessages,
+            entries: pendingForSession,
+            send: sendMessage,
+            persist: (entries) => writePendingSends(selectedSessionId, entries),
+            now: () => Date.now(),
+          });
         }
       }
       setIsLoadingSessionMessages(false);
