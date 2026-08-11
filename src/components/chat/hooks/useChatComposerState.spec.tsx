@@ -49,7 +49,10 @@ beforeEach(() => {
 
 describe('useChatComposerState — Antigravity send options', () => {
   it('forwards the selected Antigravity model in chat.send', async () => {
-    const sendMessage = vi.fn();
+    // Returns true: `sendMessage` reports whether the frame was written, and a
+    // bare `vi.fn()` would return undefined and route this through the
+    // not-delivered branch instead of the send path under test (#325).
+    const sendMessage = vi.fn(() => true);
     const { result } = renderHook(() => useChatComposerState({
       selectedProject: {
         projectId: 'project-1',
