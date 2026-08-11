@@ -31,6 +31,16 @@ const DEMAND_LOADED_PACKAGES = [
   { prefix: '@replit/codemirror-minimap', reason: 'the editor minimap belongs to the code editor' },
   { prefix: 'jszip', reason: 'zip export belongs to the files tab' },
   { prefix: 'dompurify', reason: 'SVG sanitising belongs to the plugin icon fetch path' },
+  // #287. Both were reachable from the chat composer, so they loaded on boot
+  // for every session — including ones with no code block and no attachment.
+  {
+    prefix: 'react-syntax-highlighter',
+    reason: 'the highlighter + grammars (~100 KB) belong to rendered code blocks',
+  },
+  {
+    prefix: 'react-dropzone',
+    reason: 'still used by the skills upload surface, which is behind a lazy boundary',
+  },
 ];
 
 const graph = walkStaticGraph(ENTRY, ROOT);
@@ -74,6 +84,11 @@ describe('entry chunk static import graph (#267)', () => {
       'src/components/command-palette/CommandPalette.tsx',
       'src/components/project-creation-wizard/ProjectCreationWizard.tsx',
       'src/components/onboarding/view/Onboarding.tsx',
+      // #287: the highlighted code block. Its unhighlighted stand-in
+      // (`PlainCodeBlock`) IS eager by design — that is the point of the split,
+      // and it must never import from this module or Prism comes back with it.
+      'src/shared/markdown/PrismCodeBlock.tsx',
+      'src/shared/markdown/prismLanguages.ts',
     ];
 
     const eager = mustBeLazy.filter((path) => graph.files.includes(join(ROOT, path)));

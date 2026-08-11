@@ -9,7 +9,6 @@ import type {
   SetStateAction,
   TouchEvent,
 } from 'react';
-import { useDropzone } from 'react-dropzone';
 
 import { authenticatedFetch } from '../../../utils/api';
 import { recordFeatureUse } from '../../../utils/featureUsage';
@@ -34,6 +33,7 @@ import type { Project, ProjectSession, LLMProvider, ProviderModelsCacheInfo } fr
 import { escapeRegExp } from '../utils/chatFormatting';
 
 import { useFileMentions } from './useFileMentions';
+import { useImageDropzone } from './useImageDropzone';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
 
 interface UseChatComposerStateArgs {
@@ -599,16 +599,11 @@ export function useChatComposerState({
     [handleImageFiles],
   );
 
-  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
-    accept: {
-      'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'],
-    },
-    maxSize: 5 * 1024 * 1024,
-    maxFiles: 5,
-    onDrop: handleImageFiles,
-    noClick: true,
-    noKeyboard: true,
-  });
+  // Native drag/drop + file picker. `accept`, `maxSize` and `maxFiles` used to
+  // be configured on react-dropzone, but `handleImageFiles` already enforces the
+  // image type and the 5 MB ceiling, and the attachment list is capped at 5 — so
+  // removing the library removed duplication, not validation (#287).
+  const { getRootProps, getInputProps, isDragActive, open } = useImageDropzone(handleImageFiles);
 
   // Snapshot of everything `chat.send` needs beyond the text itself. Built at
   // send time for immediate sends and at queue time for queued ones, so a

@@ -15,15 +15,6 @@ import { useChatComposerState } from './useChatComposerState';
  * reported as one that did.
  */
 
-vi.mock('react-dropzone', () => ({
-  useDropzone: () => ({
-    getRootProps: () => ({}),
-    getInputProps: () => ({}),
-    isDragActive: false,
-    open: vi.fn(),
-  }),
-}));
-
 vi.mock('./useSlashCommands', () => ({
   useSlashCommands: () => ({
     slashCommands: [],

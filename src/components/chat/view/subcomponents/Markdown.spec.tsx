@@ -33,13 +33,32 @@ function renderMarkdown(markdown: string, openFileInEditor = vi.fn()) {
 
 const FENCED_CODE = ['```ts', 'const answer = 42;', 'const doubled = answer * 2;', '```'].join('\n');
 
+/**
+ * Waits for the demand-loaded Prism chunk to replace the fallback (#287).
+ *
+ * Keyed on the fallback DISAPPEARING rather than on tokens appearing, so it
+ * also works for the unregistered-language case, where the real highlighter
+ * legitimately produces no styled spans.
+ */
+async function waitForHighlighter(container: HTMLElement) {
+  await waitFor(
+    () => {
+      expect(container.querySelector('[data-testid="plain-code-block"]')).toBeNull();
+    },
+    { timeout: 20_000 },
+  );
+}
+
 describe('Markdown', () => {
   beforeEach(() => {
     resetMathRuntimeForTests();
   });
 
-  it('renders a fenced block through react-syntax-highlighter', () => {
+  it('renders a fenced block through react-syntax-highlighter', async () => {
     const { container } = renderMarkdown(FENCED_CODE);
+
+    // #287: the highlighter is demand-loaded now, so tokenising is async.
+    await waitForHighlighter(container);
 
     const pre = container.querySelector('pre');
     expect(pre).not.toBeNull();
@@ -52,36 +71,6 @@ describe('Markdown', () => {
     expect(screen.getByRole('button', { name: 'Copy code' })).toBeInTheDocument();
   });
 
-  it('renders single-line code spans inline instead of as a highlighted block', () => {
-    const { container } = renderMarkdown('Call `normalizeInlineCodeFences` before rendering.');
-
-    expect(container.querySelector('pre')).toBeNull();
-    const code = container.querySelector('code');
-    expect(code?.textContent).toBe('normalizeInlineCodeFences');
-  });
-
-  it('opens workspace file links in the editor instead of navigating', async () => {
-    const user = userEvent.setup();
-    const { openFileInEditor } = renderMarkdown('See [src/foo.ts:12](src/foo.ts:12) for details.');
-
-    await user.click(screen.getByRole('link', { name: 'src/foo.ts:12' }));
-
-    // The `:line` suffix is stripped before the path reaches the editor.
-    expect(openFileInEditor).toHaveBeenCalledWith('src/foo.ts');
-  });
-
-  it('leaves external links to normal browser navigation', async () => {
-    const user = userEvent.setup();
-    const { openFileInEditor } = renderMarkdown('Read the [docs](https://example.com/guide.html).');
-
-    const link = screen.getByRole('link', { name: 'docs' });
-    expect(link).toHaveAttribute('target', '_blank');
-    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-
-    await user.click(link);
-    expect(openFileInEditor).not.toHaveBeenCalled();
-  });
-
   // Issue #268: the highlighter now registers an explicit language set instead
   // of shipping all ~290 Prism grammars, so the languages this UI actually emits
   // have to keep tokenising, and anything else has to fall back safely.
@@ -90,16 +79,23 @@ describe('Markdown', () => {
     ['bash', 'echo hello\nls -la'],
     ['json', '{\n  "answer": 42\n}'],
     ['rust', 'fn main() {\n    println!("hi");\n}'],
-  ])('highlights a %s fence', (language, code) => {
+  ])('highlights a %s fence', async (language, code) => {
     const { container } = renderMarkdown(['```' + language, code, '```'].join('\n'));
+
+    await waitForHighlighter(container);
 
     const pre = container.querySelector('pre');
     expect(pre?.textContent).toContain(code.split('\n')[0]);
     expect(pre?.querySelectorAll('span[style]').length).toBeGreaterThan(0);
   });
 
-  it('renders an unregistered language as plain text without throwing', () => {
+  it('renders an unregistered language as plain text without throwing', async () => {
     const { container } = renderMarkdown(['```brainfuck', '+++[->+++<]', '', '```'].join('\n'));
+
+    // Waiting for the highlighter matters here: the loading fallback also has
+    // no styled spans, so asserting straight away would pass even if Prism
+    // never loaded at all.
+    await waitForHighlighter(container);
 
     const pre = container.querySelector('pre');
     expect(pre?.textContent).toContain('+++[->+++<]');

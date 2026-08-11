@@ -6,15 +6,6 @@ import type { Project, ProjectSession } from '../../../types/app';
 
 import { useChatComposerState } from './useChatComposerState';
 
-vi.mock('react-dropzone', () => ({
-  useDropzone: () => ({
-    getRootProps: () => ({}),
-    getInputProps: () => ({}),
-    isDragActive: false,
-    open: vi.fn(),
-  }),
-}));
-
 vi.mock('./useSlashCommands', () => ({
   useSlashCommands: () => ({
     slashCommands: [],
