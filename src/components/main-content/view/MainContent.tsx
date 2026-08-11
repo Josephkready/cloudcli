@@ -101,7 +101,9 @@ function MainContent({
         isMobile={isMobile}
         onMenuClick={onMenuClick}
         projects={projects}
+        activeSessions={processingSessions}
         onProjectSelect={onProjectSelect}
+        onSessionSelect={onSessionSelect}
       />
     );
   }

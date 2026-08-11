@@ -216,60 +216,61 @@ describe('MainContent — state views', () => {
   });
 });
 
+
 /*
  * #326: the mobile empty state is the app's landing page whenever no project is
- * selected, and it used to be a dead end. MainContent owns the decision to
- * render that state, so it also has to hand it the list — otherwise the view
- * can offer a picker and never receive anything to pick.
+ * selected. MainContent owns the decision to render that state, so it also has
+ * to hand it the data — otherwise the view can offer a picker and never receive
+ * anything to pick.
  */
-describe('MainContent — mobile landing project picker (#326)', () => {
-  const projects = [project('/home/dev/alpha'), project('/home/dev/beta')];
+describe('MainContent — mobile landing conversation picker (#326)', () => {
+  const withSessions = [
+    {
+      ...project('/home/dev/alpha'),
+      sessions: [{ id: 's1', summary: 'Alpha work', lastActivity: '2026-08-11T12:00:00.000Z' }],
+    },
+    {
+      ...project('/home/dev/beta'),
+      sessions: [{ id: 's2', summary: 'Beta work', lastActivity: '2026-08-11T13:00:00.000Z' }],
+    },
+  ] as Project[];
 
-  it('gives the mobile empty state the projects it needs to offer a choice', () => {
-    render(<MainContent {...baseProps({
-      selectedProject: null,
-      isMobile: true,
-      projects,
-      onProjectSelect: vi.fn(),
-    })} />);
-
-    expect(screen.getAllByTestId('mobile-project-option')).toHaveLength(2);
+  const landingProps = (over: Partial<MainContentProps> = {}) => baseProps({
+    selectedProject: null,
+    isMobile: true,
+    projects: withSessions,
+    processingSessions: new Map(),
+    onProjectSelect: vi.fn(),
+    onSessionSelect: vi.fn(),
+    ...over,
   });
 
-  it('selecting one reaches the handler MainContent was given', async () => {
+  it('gives the mobile empty state the conversations it needs to offer a choice', () => {
+    render(<MainContent {...landingProps()} />);
+
+    expect(screen.getAllByTestId('mobile-conversation-option')).toHaveLength(2);
+  });
+
+  it('a tap reaches both handlers MainContent was given', () => {
     const onProjectSelect = vi.fn();
-    render(<MainContent {...baseProps({
-      selectedProject: null,
-      isMobile: true,
-      projects,
-      onProjectSelect,
-    })} />);
+    const onSessionSelect = vi.fn();
+    render(<MainContent {...landingProps({ onProjectSelect, onSessionSelect })} />);
 
-    screen.getAllByTestId('mobile-project-option')[1]?.click();
+    screen.getByText('Beta work').click();
 
-    expect(onProjectSelect).toHaveBeenCalledWith(projects[1]);
+    expect(onProjectSelect).toHaveBeenCalledWith(withSessions[1]);
+    expect(onSessionSelect.mock.calls[0][0].id).toBe('s2');
   });
 
   it('leaves the desktop empty state alone', () => {
-    render(<MainContent {...baseProps({
-      selectedProject: null,
-      isMobile: false,
-      projects,
-      onProjectSelect: vi.fn(),
-    })} />);
+    render(<MainContent {...landingProps({ isMobile: false })} />);
 
-    expect(screen.queryAllByTestId('mobile-project-option')).toHaveLength(0);
+    expect(screen.queryAllByTestId('mobile-conversation-option')).toHaveLength(0);
   });
 
   it('offers nothing to pick while projects are still loading', () => {
-    render(<MainContent {...baseProps({
-      selectedProject: null,
-      isMobile: true,
-      isLoading: true,
-      projects,
-      onProjectSelect: vi.fn(),
-    })} />);
+    render(<MainContent {...landingProps({ isLoading: true })} />);
 
-    expect(screen.queryAllByTestId('mobile-project-option')).toHaveLength(0);
+    expect(screen.queryAllByTestId('mobile-conversation-option')).toHaveLength(0);
   });
 });

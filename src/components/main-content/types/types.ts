@@ -63,12 +63,15 @@ export type MainContentStateViewProps = {
   isMobile: boolean;
   onMenuClick: () => void;
   /**
-   * Projects offered inline on the mobile empty state (#326), in the order the
-   * sidebar would show them. Optional so the view still renders standalone —
-   * without them it falls back to the onboarding copy.
+   * Source data for the mobile landing picker (#326). The conversation list is
+   * derived from these with the sidebar's own `buildConversationList`, so the
+   * two cannot drift. Optional so the view still renders standalone — without
+   * them it falls back to the onboarding copy.
    */
   projects?: Project[];
+  activeSessions?: SessionActivityMap;
   onProjectSelect?: (project: Project) => void;
+  onSessionSelect?: (session: ProjectSession) => void;
 };
 
 export type MobileMenuButtonProps = {
