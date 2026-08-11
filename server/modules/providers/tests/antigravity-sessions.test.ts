@@ -21,11 +21,22 @@ const patchHomeDir = (nextHomeDir: string) => {
   };
 };
 
-async function withIsolatedDatabase(run: () => void | Promise<void>): Promise<void> {
+async function withIsolatedDatabase(
+  run: () => void | Promise<void>,
+  // Fork feature (#6): the session synchronizers skip ephemeral project paths.
+  // Setting the env var (even to '') fully replaces the defaults, so '' disables
+  // the filter — which most tests here want, because the default `/tmp/**`
+  // pattern would exclude these os.tmpdir()-based fixtures wholesale. Pass a
+  // pattern to exercise the filter itself; see the exclude-gate test below.
+  // Mirrors the codex/claude synchronizer suites.
+  excludedProjectPaths: string = '',
+): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
+  const previousExcludes = process.env.CLOUDCLI_EXCLUDED_PROJECT_PATHS;
   const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'antigravity-provider-db-'));
   closeConnection();
   process.env.DATABASE_PATH = path.join(tempDirectory, 'cloudcli.db');
+  process.env.CLOUDCLI_EXCLUDED_PROJECT_PATHS = excludedProjectPaths;
   await initializeDatabase();
   try {
     await run();
@@ -33,6 +44,8 @@ async function withIsolatedDatabase(run: () => void | Promise<void>): Promise<vo
     closeConnection();
     if (previousDatabasePath === undefined) delete process.env.DATABASE_PATH;
     else process.env.DATABASE_PATH = previousDatabasePath;
+    if (previousExcludes === undefined) delete process.env.CLOUDCLI_EXCLUDED_PROJECT_PATHS;
+    else process.env.CLOUDCLI_EXCLUDED_PROJECT_PATHS = previousExcludes;
     await rm(tempDirectory, { recursive: true, force: true });
   }
 }
@@ -104,9 +117,7 @@ test('Antigravity synchronizer indexes transcript rows from history metadata', {
   const workspacePath = path.join(tempRoot, 'workspace');
   const sessionId = 'agy-session-1';
   const restoreHomeDir = patchHomeDir(tempRoot);
-  const previousExcludes = process.env.CLOUDCLI_EXCLUDED_PROJECT_PATHS;
   try {
-    process.env.CLOUDCLI_EXCLUDED_PROJECT_PATHS = '';
     await mkdir(workspacePath, { recursive: true });
     const transcriptPath = await writeTranscript(tempRoot, sessionId);
     const historyPath = path.join(tempRoot, '.gemini', 'antigravity-cli', 'history.jsonl');
@@ -125,8 +136,54 @@ test('Antigravity synchronizer indexes transcript rows from history metadata', {
       assert.equal(session?.custom_name, 'Fix Antigravity history');
     });
   } finally {
-    if (previousExcludes === undefined) delete process.env.CLOUDCLI_EXCLUDED_PROJECT_PATHS;
-    else process.env.CLOUDCLI_EXCLUDED_PROJECT_PATHS = previousExcludes;
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('Antigravity synchronizer skips sessions whose project path is excluded', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'antigravity-session-sync-excluded-'));
+  const keptPath = path.join(tempRoot, 'workspace');
+  const excludedPath = path.join(tempRoot, 'worktrees', 'feature-branch');
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    // Fork feature (#6): a session whose workspace is an ephemeral worktree must
+    // not be auto-discovered into the sidebar. Codex and Claude each pin this
+    // gate in their own suite; Antigravity was the one synchronizer calling
+    // shouldExcludeProjectPath with nothing asserting it. Every other test here
+    // disables the filter, so deleting the gate from synchronizeFile() would
+    // otherwise leave this file green.
+    await mkdir(keptPath, { recursive: true });
+    await mkdir(excludedPath, { recursive: true });
+    await writeTranscript(tempRoot, 'agy-kept-1');
+    await writeTranscript(tempRoot, 'agy-excluded-1');
+
+    // The synchronizer reads the workspace for each session from history.jsonl,
+    // so the two sessions are what map onto the kept/excluded paths.
+    const historyPath = path.join(tempRoot, '.gemini', 'antigravity-cli', 'history.jsonl');
+    await writeFile(
+      historyPath,
+      [
+        JSON.stringify({ display: 'Kept', workspace: keptPath, conversationId: 'agy-kept-1' }),
+        JSON.stringify({
+          display: 'Excluded',
+          workspace: excludedPath,
+          conversationId: 'agy-excluded-1',
+        }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+
+    await withIsolatedDatabase(async () => {
+      const processed = await new AntigravitySessionSynchronizer().synchronize();
+
+      // Only the non-excluded transcript is indexed.
+      assert.equal(processed, 1);
+      assert.ok(sessionsDb.getSessionById('agy-kept-1'));
+      assert.equal(sessionsDb.getSessionById('agy-excluded-1'), null);
+    }, '**/worktrees/**');
+  } finally {
     restoreHomeDir();
     await rm(tempRoot, { recursive: true, force: true });
   }
