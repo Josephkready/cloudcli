@@ -14,6 +14,7 @@ import { stabilizeMessageIdentities } from '../utils/messageIdentity';
 import { reconcileTokenBudget } from '../utils/tokenBudget';
 import { resolveRestoreScrollTop, type ScrollRestoreState } from '../utils/scrollRestore';
 import {
+  isGestureActive,
   isNearBottom as metricsAreNearBottom,
   shouldFollowNewMessages,
   shouldResumeAutoFollow,
@@ -158,6 +159,7 @@ export function useChatSessionState({
    */
   const isUserScrolledUpRef = useRef(false);
   const pointerDownRef = useRef(false);
+  const pointerDownAtRef = useRef(0);
   const autoFollowSuspendedRef = useRef(false);
   const autoFollowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastScrollTopRef = useRef(0);
@@ -357,6 +359,16 @@ export function useChatSessionState({
     clientHeight: container.clientHeight,
   }), []);
 
+  /**
+   * Reads the pointer gate through its expiry, so a touch sequence that never
+   * delivered `touchend`/`touchcancel` cannot wedge auto-follow off for good.
+   */
+  const pointerIsActive = useCallback(() => isGestureActive({
+    pointerDown: pointerDownRef.current,
+    startedAt: pointerDownAtRef.current,
+    now: Date.now(),
+  }), []);
+
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -458,7 +470,7 @@ export function useChatSessionState({
     if (shouldSuspendAutoFollow({
       previousScrollTop: lastScrollTopRef.current,
       metrics,
-      pointerDown: pointerDownRef.current,
+      pointerDown: pointerIsActive(),
     })) {
       autoFollowSuspendedRef.current = true;
     } else if (shouldResumeAutoFollow(metrics)) {
@@ -493,7 +505,7 @@ export function useChatSessionState({
       const didLoad = await loadOlderMessages(container);
       if (didLoad) topLoadLockRef.current = true;
     }
-  }, [hasMoreMessages, loadOlderMessages, readScrollMetrics]);
+  }, [hasMoreMessages, loadOlderMessages, pointerIsActive, readScrollMetrics]);
 
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) return;
@@ -515,6 +527,7 @@ export function useChatSessionState({
     setIsUserScrolledUp(false);
     isUserScrolledUpRef.current = false;
     autoFollowSuspendedRef.current = false;
+    pointerDownRef.current = false;
     lastScrollTopRef.current = 0;
     // Drop the outgoing session's messages so the first stabilization pass for
     // the new session starts clean instead of comparing across sessions.
@@ -547,7 +560,7 @@ export function useChatSessionState({
       // The loop re-pins the bottom every frame for up to a second. If the
       // reader starts scrolling inside that window it would fight them once
       // per frame, so a touch ends the landing early and hands the pane over.
-      if (pointerDownRef.current) {
+      if (pointerIsActive()) {
         pendingInitialScrollRef.current = false;
         return;
       }
@@ -893,7 +906,7 @@ export function useChatSessionState({
       const container = scrollContainerRef.current;
       if (!container) return;
       if (!shouldFollowNewMessages({
-        pointerDown: pointerDownRef.current,
+        pointerDown: pointerIsActive(),
         autoFollowSuspended: autoFollowSuspendedRef.current,
         userScrolledUp: isUserScrolledUpRef.current,
       })) return;
@@ -937,7 +950,7 @@ export function useChatSessionState({
       if (pendingScrollRestoreRef.current) return;
       if (isLoadingMoreRef.current || searchScrollActiveRef.current) return;
       if (!shouldFollowNewMessages({
-        pointerDown: pointerDownRef.current,
+        pointerDown: pointerIsActive(),
         autoFollowSuspended: autoFollowSuspendedRef.current,
         userScrolledUp: isUserScrolledUpRef.current,
       })) return;
@@ -961,6 +974,7 @@ export function useChatSessionState({
      */
     const onPointerDown = () => {
       pointerDownRef.current = true;
+      pointerDownAtRef.current = Date.now();
     };
     const onPointerUp = () => {
       pointerDownRef.current = false;

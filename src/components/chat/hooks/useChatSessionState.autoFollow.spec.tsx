@@ -6,6 +6,8 @@ import type { Project, ProjectSession } from '@/types/app';
 import type { SessionStore } from '@/stores/useSessionStore';
 import type { NormalizedMessage } from '@/stores/useSessionStore.pure';
 
+import { MAX_GESTURE_MS } from '../utils/autoFollow';
+
 import { useChatSessionState } from './useChatSessionState';
 
 /*
@@ -165,7 +167,7 @@ function settleInitialScroll(container: HTMLDivElement) {
   });
 }
 
-function touch(container: HTMLDivElement, type: 'touchstart' | 'touchend') {
+function touch(container: HTMLDivElement, type: 'touchstart' | 'touchend' | 'touchcancel') {
   act(() => {
     container.dispatchEvent(new Event(type, { bubbles: true }));
   });
@@ -353,6 +355,42 @@ describe('useChatSessionState — mobile auto-follow (#333)', () => {
     growContent();
 
     expect(container.scrollTop).toBe(AT_BOTTOM - 10);
+  });
+
+  it('releases the pointer gate on touchcancel, not just touchend', () => {
+    const { deliverMessage } = renderChat(container);
+    settleInitialScroll(container);
+
+    // iOS cancels the sequence when a system gesture takes over. If only
+    // touchend released the gate, following would stay off for good.
+    touch(container, 'touchstart');
+    touch(container, 'touchcancel');
+
+    deliverMessage();
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+
+    expect(container.scrollTop).toBe(SCROLL_HEIGHT);
+  });
+
+  it('expires a gesture that never reported an end, instead of wedging follow off', () => {
+    const { deliverMessage } = renderChat(container);
+    settleInitialScroll(container);
+
+    // A touch sequence that delivers neither touchend nor touchcancel would
+    // otherwise pin the gate on and silently disable following for the session.
+    touch(container, 'touchstart');
+    act(() => {
+      vi.advanceTimersByTime(MAX_GESTURE_MS + 1000);
+    });
+
+    deliverMessage();
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+
+    expect(container.scrollTop).toBe(SCROLL_HEIGHT);
   });
 
   it('re-arms following when the reader asks for the bottom explicitly', () => {

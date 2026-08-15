@@ -36,10 +36,31 @@ export const PINNED_TO_BOTTOM_PX = 4;
  */
 export const UPWARD_INTENT_PX = 2;
 
+/**
+ * Longest a single touch gesture is credited before the pointer gate expires.
+ *
+ * The gate is released by `touchend`/`touchcancel`, and a sequence that somehow
+ * delivers neither — an OS gesture or a system dialog stealing the touch — would
+ * otherwise leave it stuck on, silently disabling auto-follow for the rest of
+ * the session. Well beyond any real drag, so it only ever fires on a gesture
+ * that never ended.
+ */
+export const MAX_GESTURE_MS = 10_000;
+
 export interface ScrollMetrics {
   scrollTop: number;
   scrollHeight: number;
   clientHeight: number;
+}
+
+/** Is a touch still credibly in progress? Guards against a gate that never got released. */
+export function isGestureActive(input: {
+  pointerDown: boolean;
+  startedAt: number;
+  now: number;
+}): boolean {
+  if (!input.pointerDown) return false;
+  return input.now - input.startedAt < MAX_GESTURE_MS;
 }
 
 /** Pixels of content still below the viewport. Never negative (iOS overscrolls). */

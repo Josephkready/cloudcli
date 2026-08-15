@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  MAX_GESTURE_MS,
   NEAR_BOTTOM_THRESHOLD_PX,
+  PINNED_TO_BOTTOM_PX,
+  UPWARD_INTENT_PX,
   distanceFromBottom,
+  isGestureActive,
   isNearBottom,
   shouldFollowNewMessages,
   shouldResumeAutoFollow,
@@ -142,4 +146,40 @@ test('an untouched pane pinned at the bottom still follows the run', () => {
     shouldFollowNewMessages({ pointerDown: false, autoFollowSuspended: false, userScrolledUp: false }),
     true,
   );
+});
+
+// Exact boundaries — an off-by-one in the comparisons above would otherwise slip
+// through, since every other case sits comfortably to one side.
+
+test('upward intent is measured strictly beyond the noise floor', () => {
+  const drag = (delta: number) => shouldSuspendAutoFollow({
+    previousScrollTop: AT_BOTTOM,
+    metrics: metrics(AT_BOTTOM - delta),
+    pointerDown: true,
+  });
+  assert.equal(drag(UPWARD_INTENT_PX), false);
+  assert.equal(drag(UPWARD_INTENT_PX + 1), true);
+});
+
+test('following re-arms exactly at the pinned threshold and not a pixel past it', () => {
+  assert.equal(shouldResumeAutoFollow(metrics(AT_BOTTOM - PINNED_TO_BOTTOM_PX)), true);
+  assert.equal(shouldResumeAutoFollow(metrics(AT_BOTTOM - (PINNED_TO_BOTTOM_PX + 1))), false);
+});
+
+test('a released pointer is never an active gesture', () => {
+  assert.equal(isGestureActive({ pointerDown: false, startedAt: 0, now: 0 }), false);
+  assert.equal(isGestureActive({ pointerDown: false, startedAt: 0, now: MAX_GESTURE_MS * 10 }), false);
+});
+
+test('a gesture in progress holds the gate', () => {
+  assert.equal(isGestureActive({ pointerDown: true, startedAt: 1000, now: 1000 }), true);
+  assert.equal(isGestureActive({ pointerDown: true, startedAt: 1000, now: 1000 + MAX_GESTURE_MS - 1 }), true);
+});
+
+test('a gesture that never ended expires instead of wedging the gate on forever', () => {
+  // touchend/touchcancel releases the gate in practice. If a sequence delivers
+  // neither — an OS gesture stealing the touch — the gate must not disable
+  // auto-follow for the rest of the session.
+  assert.equal(isGestureActive({ pointerDown: true, startedAt: 1000, now: 1000 + MAX_GESTURE_MS }), false);
+  assert.equal(isGestureActive({ pointerDown: true, startedAt: 0, now: MAX_GESTURE_MS * 100 }), false);
 });
