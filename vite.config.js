@@ -20,9 +20,10 @@ import { getConnectableHost, normalizeLoopbackHost } from './shared/networkHosts
  */
 const VENDOR_CHUNK_PATTERNS = [
   // `@babel/runtime` rides along with React: its helpers are a couple of KB
-  // shared between the entry chunk (react-syntax-highlighter) and the editor
-  // bundle, and left unassigned Rollup folded them into `vendor-codemirror` —
-  // which is enough on its own to make the editor a static entry dependency.
+  // shared between the highlighter chunk (react-syntax-highlighter, demand-loaded
+  // since #287) and the editor bundle, and left unassigned Rollup folded them
+  // into `vendor-codemirror` — which is enough on its own to make the editor a
+  // static entry dependency.
   [
     'vendor-react',
     /[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler|@babel[\\/]runtime)[\\/]/,

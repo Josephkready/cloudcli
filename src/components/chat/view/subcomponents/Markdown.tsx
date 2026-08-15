@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { Suspense, lazy, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 
-import SyntaxHighlighter, { getPrismTheme } from '../../../../shared/markdown/prismLanguages';
+import PlainCodeBlock from '../../../../shared/markdown/PlainCodeBlock';
+// Demand-loaded: this is the only edge that kept Prism in the entry chunk.
+const PrismCodeBlock = lazy(() => import('../../../../shared/markdown/PrismCodeBlock'));
 import { useMathPlugins } from '../../../../shared/markdown/useMathPlugins';
 import { normalizeInlineCodeFences } from '../../utils/chatFormatting';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
@@ -131,27 +133,14 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
         )}
       </button>
 
-      <SyntaxHighlighter
-        language={language}
-        style={getPrismTheme(isDarkMode)}
-        customStyle={{
-          margin: 0,
-          borderRadius: '0.75rem',
-          fontSize: '0.875rem',
-          padding: language && language !== 'text' ? '2rem 1rem 1rem 1rem' : '1rem',
-          // ChatGPT-style soft grey block in light mode; keep oneDark's own bg in dark.
-          ...(isDarkMode ? {} : { background: 'hsl(var(--muted))' }),
-        }}
-        codeTagProps={{
-          style: {
-            fontFamily:
-              'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-            ...(isDarkMode ? {} : { background: 'transparent' }),
-          },
-        }}
-      >
-        {raw}
-      </SyntaxHighlighter>
+      {/*
+        The highlighter and its grammars are ~103 KB and were loading on boot
+        for every session, code or not (#287). The fallback renders the same
+        text at the same metrics, so what arrives is colour rather than layout.
+      */}
+      <Suspense fallback={<PlainCodeBlock code={raw} language={language} isDarkMode={isDarkMode} />}>
+        <PrismCodeBlock code={raw} language={language} isDarkMode={isDarkMode} />
+      </Suspense>
     </div>
   );
 };

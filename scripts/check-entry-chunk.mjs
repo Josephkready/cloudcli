@@ -105,29 +105,58 @@ function checkBundle(distDir) {
   const failures = [];
   const notes = [];
 
-  // 1. Unused grammars must not be in the entry chunk (#268).
-  const leakedGrammars = FORBIDDEN_GRAMMARS.filter((name) => containsGrammar(entryJs, name));
-  if (leakedGrammars.length > 0) {
+  // Since #287 the highlighter is demand-loaded, so the grammars legitimately
+  // live in a chunk of their own rather than in the entry chunk. Checks 1 and 2
+  // therefore read every emitted chunk: shipping all ~290 grammars is just as
+  // wasteful behind a lazy boundary as it was in front of one, and the positive
+  // control has to look where the grammars actually are or it goes vacuous the
+  // moment they move.
+  const chunkNames = readdirSync(assetsDir).filter((name) => name.endsWith('.js'));
+  const chunks = chunkNames.map((name) => ({
+    name,
+    source: readFileSync(join(assetsDir, name), 'utf8'),
+  }));
+  const someChunkHas = (grammar) => chunks.filter((chunk) => containsGrammar(chunk.source, grammar));
+
+  // 1. Unused grammars must not ship at all (#268).
+  const leaked = FORBIDDEN_GRAMMARS.flatMap((name) =>
+    someChunkHas(name).map((chunk) => `${name} in ${chunk.name}`),
+  );
+  if (leaked.length > 0) {
     failures.push(
-      `${entryJsName} contains unregistered Prism grammars: ${leakedGrammars.join(', ')}. ` +
+      `unregistered Prism grammars are being shipped: ${leaked.join(', ')}. ` +
         'Something is importing `react-syntax-highlighter` (the package root) again instead of ' +
         'src/shared/markdown/prismLanguages.ts (issue #268).',
     );
   } else {
-    notes.push(`no unregistered grammars in ${entryJsName} (checked ${FORBIDDEN_GRAMMARS.length})`);
+    notes.push(`no unregistered grammars in any chunk (checked ${FORBIDDEN_GRAMMARS.length})`);
   }
 
-  // 2. Positive control: the grammars we DO register must be there, otherwise
+  // 2. Positive control: the grammars we DO register must be somewhere, or
   //    check 1 is passing for the wrong reason.
-  const presentGrammars = EXPECTED_GRAMMARS.filter((name) => containsGrammar(entryJs, name));
+  const presentGrammars = EXPECTED_GRAMMARS.filter((name) => someChunkHas(name).length > 0);
   if (presentGrammars.length === 0) {
     failures.push(
-      `${entryJsName} contains none of the registered grammars (${EXPECTED_GRAMMARS.join(', ')}). ` +
+      `no chunk contains any registered grammar (${EXPECTED_GRAMMARS.join(', ')}). ` +
         'The `displayName` marker this gate matches on has probably changed — fix the gate ' +
         'rather than assuming the bundle is clean.',
     );
   } else {
-    notes.push(`registered grammars still present: ${presentGrammars.join(', ')}`);
+    notes.push(`registered grammars still shipped: ${presentGrammars.join(', ')}`);
+  }
+
+  // 2b. …but NOT in the entry chunk (#287). This is the saving itself: the
+  //     highlighter used to load on boot for every session, code or not.
+  const eagerGrammars = EXPECTED_GRAMMARS.filter((name) => containsGrammar(entryJs, name));
+  if (eagerGrammars.length > 0) {
+    failures.push(
+      `${entryJsName} contains Prism grammars (${eagerGrammars.join(', ')}). ` +
+        'The highlighter must stay behind the lazy boundary in Markdown.tsx — check that ' +
+        'nothing eager imports PrismCodeBlock or prismLanguages, including the loading ' +
+        'fallback (issue #287).',
+    );
+  } else {
+    notes.push(`no Prism grammars in ${entryJsName} — highlighter is demand-loaded`);
   }
 
   // 3. KaTeX must not be on the render-blocking path (#269).
