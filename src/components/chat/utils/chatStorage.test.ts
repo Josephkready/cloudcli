@@ -111,9 +111,13 @@ test('round-trip: parse(serialize(list)) preserves FIFO order and cleans empties
 
 /* ── safeLocalStorage: the storage wrapper that never throws ─────────────── */
 
+// The defensive wrapper logs caught errors via console.error/warn; silence it
+// here (the assertions are the swallowed throw + return value, not the log).
+const silentConsole = { ...console, error: () => {}, warn: () => {} };
+
 test('safeLocalStorage get/set/remove round-trip through the backing store', () => {
   withLocalStorage({}, (store) => {
-    safeLocalStorage.setItem('k', 'v');
+    assert.equal(safeLocalStorage.setItem('k', 'v'), true);
     assert.equal(store.getItem('k'), 'v');
     assert.equal(safeLocalStorage.getItem('k'), 'v');
     assert.equal(safeLocalStorage.getItem('missing'), null);
@@ -122,19 +126,25 @@ test('safeLocalStorage get/set/remove round-trip through the backing store', () 
   });
 });
 
-test('safeLocalStorage.setItem evicts draft/queued keys and retries on QuotaExceededError', () => {
-  const kept = new Map<string, string>([
-    ['draft_input_s1', 'old draft'],
-    ['queued_message_s2', 'old queue'],
-    ['keepme', 'important'],
-  ]);
-  let failNextSet = true;
-  const quotaStore = {
+/**
+ * A store with a real byte budget: a write throws `QuotaExceededError` unless
+ * it fits, and `removeItem` is the only thing that buys room. That makes the
+ * question these tests exist to answer — which keys the recovery sweep is
+ * willing to delete — decide whether the retry succeeds.
+ */
+function makeQuotaStore(seed: Record<string, string>, capBytes: number) {
+  const kept = new Map<string, string>(Object.entries(seed));
+  const size = (k: string, v: string) => k.length + v.length;
+  const usedExcluding = (key: string) =>
+    [...kept].reduce((total, [k, v]) => (k === key ? total : total + size(k, v)), 0);
+
+  const api = {
     getItem: (k: string) => (kept.has(k) ? (kept.get(k) as string) : null),
-    removeItem: (k: string) => { kept.delete(k); },
+    removeItem: (k: string) => {
+      kept.delete(k);
+    },
     setItem: (k: string, v: string) => {
-      if (failNextSet) {
-        failNextSet = false;
+      if (usedExcluding(k) + size(k, v) > capBytes) {
         const err = new Error('quota');
         err.name = 'QuotaExceededError';
         throw err;
@@ -142,27 +152,78 @@ test('safeLocalStorage.setItem evicts draft/queued keys and retries on QuotaExce
       kept.set(k, v);
     },
   };
-  // `safeLocalStorage` reads `Object.keys(localStorage)` during cleanup, so the
-  // stub must expose its entries as own enumerable properties too.
-  for (const [k, v] of kept) {
-    Object.defineProperty(quotaStore, k, { value: v, enumerable: true, configurable: true });
-  }
 
-  withGlobals({ localStorage: quotaStore }, () => {
-    safeLocalStorage.setItem('claude-settings', '{"x":1}');
+  // `safeLocalStorage` enumerates the store with `Object.keys(localStorage)` to
+  // find eviction candidates, so entries must read back as own enumerable
+  // properties — and must disappear from that enumeration once removed.
+  const store = new Proxy(api, {
+    ownKeys: () => [...Reflect.ownKeys(api), ...kept.keys()],
+    getOwnPropertyDescriptor: (target, prop) =>
+      typeof prop === 'string' && kept.has(prop)
+        ? { value: kept.get(prop), enumerable: true, configurable: true }
+        : Reflect.getOwnPropertyDescriptor(target, prop),
+    get: (target, prop) =>
+      prop in target
+        ? Reflect.get(target, prop)
+        : typeof prop === 'string'
+          ? kept.get(prop)
+          : undefined,
   });
 
-  // The retry succeeded, the disposable draft/queue keys were purged, and the
-  // unrelated key survived.
+  return { store, kept };
+}
+
+test('quota recovery evicts drafts but never the messages the user queued (#330)', () => {
+  // Drafts alone are worth ~40 bytes more than the headroom the new write
+  // needs, so the retry can only succeed by evicting them.
+  const { store, kept } = makeQuotaStore(
+    {
+      draft_input_projectA: 'a draft being typed elsewhere',
+      draft_input_projectB: 'another project draft',
+      queued_message_s2: '[{"content":"please refactor the parser"}]',
+      pending_send_s3: '[{"content":"sent but unconfirmed"}]',
+      keepme: 'important',
+    },
+    180,
+  );
+
+  let result: boolean | undefined;
+  withGlobals({ localStorage: store, console: silentConsole }, () => {
+    result = safeLocalStorage.setItem('claude-settings', '{"x":1}');
+  });
+
+  assert.equal(result, true);
   assert.equal(kept.get('claude-settings'), '{"x":1}');
-  assert.equal(kept.has('draft_input_s1'), false);
-  assert.equal(kept.has('queued_message_s2'), false);
+  // Drafts are re-derivable from the composer's live input, so they pay.
+  assert.equal(kept.has('draft_input_projectA'), false);
+  assert.equal(kept.has('draft_input_projectB'), false);
+  // These are the only durable copy of text the user wrote. #330 (queued) and
+  // #327 (pending) both turn on them surviving.
+  assert.equal(kept.get('queued_message_s2'), '[{"content":"please refactor the parser"}]');
+  assert.equal(kept.get('pending_send_s3'), '[{"content":"sent but unconfirmed"}]');
   assert.equal(kept.get('keepme'), 'important');
 });
 
-// The defensive wrapper logs caught errors via console.error; silence it here
-// (the assertion is the swallowed throw + return value, not the log).
-const silentConsole = { ...console, error: () => {}, warn: () => {} };
+test('a write that cannot be satisfied fails loudly instead of eating queued messages', () => {
+  // The queue alone fills the budget: no amount of draft eviction makes room.
+  const { store, kept } = makeQuotaStore(
+    {
+      draft_input_projectA: 'a draft',
+      queued_message_s2: '[{"content":"the message that must not be dropped"}]',
+    },
+    70,
+  );
+
+  let result: boolean | undefined;
+  withGlobals({ localStorage: store, console: silentConsole }, () => {
+    result = safeLocalStorage.setItem('claude-settings', '{"x":1}');
+  });
+
+  // Reported as failed rather than swallowed, and the user's text is still here.
+  assert.equal(result, false);
+  assert.equal(kept.has('claude-settings'), false);
+  assert.equal(kept.get('queued_message_s2'), '[{"content":"the message that must not be dropped"}]');
+});
 
 test('safeLocalStorage.getItem swallows a throwing store and returns null', () => {
   const throwingStore = {
@@ -183,6 +244,8 @@ test('safeLocalStorage.setItem swallows a non-quota error without throwing', () 
   };
   withGlobals({ localStorage: throwingStore, console: silentConsole }, () => {
     assert.doesNotThrow(() => safeLocalStorage.setItem('k', 'v'));
+    // Doesn't throw, but doesn't claim to have stored anything either.
+    assert.equal(safeLocalStorage.setItem('k', 'v'), false);
   });
 });
 
@@ -201,9 +264,28 @@ test('write then read a queue round-trips through the session-scoped key', () =>
 
 test('writeQueuedMessages removes the key when the queue serializes to nothing', () => {
   withLocalStorage({ [queuedMessageKey('sess-9')]: 'stale' }, (store) => {
-    writeQueuedMessages('sess-9', [{ content: '   ' }]);
+    // Clearing always leaves the queue durable — there is nothing left to lose.
+    assert.equal(writeQueuedMessages('sess-9', [{ content: '   ' }]), true);
     assert.equal(store.getItem(queuedMessageKey('sess-9')), null);
   });
+});
+
+test('writeQueuedMessages reports whether the queue actually survived the write', () => {
+  withLocalStorage({}, () => {
+    assert.equal(writeQueuedMessages('sess-9', [{ content: 'hello' }]), true);
+  });
+
+  // A full store: the caller is told the queue is memory-only, which is what
+  // lets the composer warn instead of losing the message on the next reload.
+  const { store, kept } = makeQuotaStore({ queued_message_sess9: '[{"content":"older"}]' }, 25);
+  let result: boolean | undefined;
+  withGlobals({ localStorage: store, console: silentConsole }, () => {
+    result = writeQueuedMessages('sess-9', [{ content: 'a much longer message' }]);
+  });
+
+  assert.equal(result, false);
+  // A refused write leaves whatever was already stored untouched.
+  assert.equal(kept.get('queued_message_sess9'), '[{"content":"older"}]');
 });
 
 test('readQueuedMessages migrates a legacy raw-text draft on read', () => {
