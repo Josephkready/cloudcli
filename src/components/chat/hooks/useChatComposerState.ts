@@ -282,6 +282,18 @@ export function useChatComposerState({
   // while `queuedDrafts` still holds the old session's queue; the persistence
   // effect must not write across that gap.
   const queuedDraftSessionRef = useRef<string | null>(sessionKey);
+  // Held in a ref so the queue-persistence effect can report a refused write
+  // without depending on `addMessage` — an unmemoized caller would otherwise
+  // make that effect re-run, and rewrite the queue, on every render.
+  const addMessageRef = useRef(addMessage);
+  useEffect(() => {
+    addMessageRef.current = addMessage;
+  }, [addMessage]);
+  // Whether the persisted queue is a trustworthy mirror of `queuedDrafts`.
+  // Goes false when storage refuses the write (#330), which is what tells the
+  // drain below that an empty key means "never written" rather than "already
+  // claimed by the other flusher".
+  const queuePersistedRef = useRef(true);
 
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
@@ -979,12 +991,22 @@ export function useChatComposerState({
       // The persisted queue is the claim ticket shared with the app-level
       // auto-send (which handles sessions that finish while not viewed). Re-read
       // it; if it's been drained elsewhere, just resync the in-memory queue.
+      //
+      // The exception is a queue storage refused to hold (#330): the key is
+      // then empty because the write never landed, not because anyone claimed
+      // it, and resyncing to it would silently drop the message the user was
+      // just told would still be sent. Nothing else can have claimed it either
+      // — the other flusher reads the same absent key — so replaying from the
+      // in-memory copy cannot double-send.
       const persisted = sessionKey ? readQueuedMessages(sessionKey) : [];
-      if (persisted.length === 0) {
+      if (persisted.length === 0 && queuePersistedRef.current) {
         setQueuedDrafts([]);
         return;
       }
       const head = queuedDrafts[0];
+      if (!head) {
+        return;
+      }
       // Claim the head by removing it from storage BEFORE replaying the send, so
       // a racing flusher can't also dispatch it; the tail stays queued.
       if (sessionKey) {
@@ -1096,10 +1118,25 @@ export function useChatComposerState({
       return;
     }
     // writeQueuedMessages removes the key when the list is empty.
-    writeQueuedMessages(
+    const persisted = writeQueuedMessages(
       sessionKey,
       queuedDrafts.map((draft) => ({ content: draft.content, options: draft.options })),
     );
+    queuePersistedRef.current = persisted;
+    if (!persisted) {
+      // Storage refused the queue, and quota recovery no longer buys room by
+      // deleting it (#330), so this text now exists only in memory. Say so:
+      // the whole point of the queue is that it survives a reload, and a user
+      // who is told can copy the message out before losing it.
+      addMessageRef.current({
+        type: 'error',
+        content:
+          "This browser's storage is full, so your queued messages could not be saved. "
+          + "They'll still be sent when the current response finishes, but they will be "
+          + 'lost if you reload before then.',
+        timestamp: new Date(),
+      });
+    }
   }, [queuedDrafts, sessionKey]);
 
   // Switching sessions swaps in that session's queued messages (image

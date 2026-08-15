@@ -5,28 +5,62 @@ import type { ClaudeSettings } from '../types/types';
 // itself lives next to the change-notification helpers every writer must call.
 export { CLAUDE_SETTINGS_KEY };
 
+/**
+ * The only key class quota recovery is allowed to delete.
+ *
+ * A `draft_input_*` value mirrors the composer's live in-memory `input` for a
+ * project and is rewritten on the very next keystroke, so dropping it is a
+ * cache eviction rather than a loss.
+ *
+ * Two key classes are deliberately NOT swept, because each is the *sole*
+ * durable copy of something the user wrote:
+ *   - `queued_message_*` — messages typed and queued while a turn was in
+ *     flight. This key is exactly what makes the queue survive a reload, so
+ *     deleting it to make room discards user writing (#330).
+ *   - `pending_send_*` — messages sent but not yet echoed back by the server,
+ *     kept out of the sweep when they were introduced (#327).
+ *
+ * Freeing less means the retry is likelier to fail. That is the intended
+ * trade: a failed write is reported to the caller (and, for the queue, to the
+ * user) instead of being paid for with text they cannot get back.
+ */
+const EVICTABLE_KEY_PREFIX = 'draft_input_';
+
 export const safeLocalStorage = {
-  setItem: (key: string, value: string) => {
+  /**
+   * Writes a value without throwing, returning whether the value is actually
+   * in storage afterwards. Callers holding the only durable copy of user text
+   * check the result rather than assuming the write landed.
+   */
+  setItem: (key: string, value: string): boolean => {
     try {
       localStorage.setItem(key, value);
+      return true;
     } catch (error: any) {
       if (error?.name === 'QuotaExceededError') {
-        console.warn('localStorage quota exceeded, clearing old data');
-
         const keys = Object.keys(localStorage);
-        const draftKeys = keys.filter((k) => k.startsWith('draft_input_') || k.startsWith('queued_message_'));
+        const draftKeys = keys.filter((k) => k.startsWith(EVICTABLE_KEY_PREFIX));
+        // Counted before the sweep so the log can't claim an eviction that
+        // never happened — "0 drafts" is the interesting case when triaging a
+        // retry that failed anyway.
+        console.warn(
+          `localStorage quota exceeded writing "${key}", evicting `
+          + `${draftKeys.length} ${EVICTABLE_KEY_PREFIX}* draft(s)`,
+        );
         draftKeys.forEach((k) => {
           localStorage.removeItem(k);
         });
 
         try {
           localStorage.setItem(key, value);
+          return true;
         } catch (retryError) {
-          console.error('Failed to save to localStorage even after cleanup:', retryError);
+          console.error(`Failed to save "${key}" to localStorage even after evicting drafts:`, retryError);
+          return false;
         }
-      } else {
-        console.error('localStorage error:', error);
       }
+      console.error('localStorage error:', error);
+      return false;
     }
   },
   getItem: (key: string): string | null => {
@@ -126,13 +160,19 @@ export function readQueuedMessages(sessionId: string): StoredQueuedMessage[] {
   return parseQueuedMessages(safeLocalStorage.getItem(queuedMessageKey(sessionId)));
 }
 
-export function writeQueuedMessages(sessionId: string, messages: StoredQueuedMessage[]): void {
+/**
+ * Persists a session's queue, returning whether it is durable afterwards.
+ * `false` means the queue now lives only in memory and will not survive a
+ * reload — the caller is expected to say so rather than let it disappear
+ * quietly (#330). Clearing the key always counts as durable.
+ */
+export function writeQueuedMessages(sessionId: string, messages: StoredQueuedMessage[]): boolean {
   const serialized = serializeQueuedMessages(messages);
   if (serialized === null) {
     safeLocalStorage.removeItem(queuedMessageKey(sessionId));
-  } else {
-    safeLocalStorage.setItem(queuedMessageKey(sessionId), serialized);
+    return true;
   }
+  return safeLocalStorage.setItem(queuedMessageKey(sessionId), serialized);
 }
 
 export function getClaudeSettings(): ClaudeSettings {
