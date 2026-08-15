@@ -17,6 +17,8 @@ import { useRunningSessionsPoll } from '../../hooks/useRunningSessionsPoll';
 import { useArchiveSession } from '../../hooks/useArchiveSession';
 import { api } from '../../utils/api';
 
+import { installKeyboardViewportSync } from './keyboardViewport';
+
 export default function AppContent() {
   return (
     <PaletteOpsProvider>
@@ -159,25 +161,12 @@ function AppContentInner() {
   // the `chat_subscribed` ack carries them on session open and on reconnect,
   // so no separate permission-recovery message is needed here.
 
-  // Adjust the app container to stay above the virtual keyboard on iOS Safari.
-  // On Chrome for Android the layout viewport already shrinks when the keyboard opens,
-  // so inset-0 adjusts automatically. On iOS the layout viewport stays full-height and
-  // the keyboard overlays it — we use the Visual Viewport API to track keyboard height
-  // and apply it as a CSS variable that shifts the container's bottom edge up.
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const update = () => {
-      // Only resize matters — keyboard open/close changes vv.height.
-      // Do NOT listen to scroll: on iOS Safari, scrolling content changes
-      // vv.offsetTop which would make --keyboard-height fluctuate during
-      // normal scrolling, causing the container to bounce up and down.
-      const kb = Math.max(0, window.innerHeight - vv.height);
-      document.documentElement.style.setProperty('--keyboard-height', `${kb}px`);
-    };
-    vv.addEventListener('resize', update);
-    return () => vv.removeEventListener('resize', update);
-  }, []);
+  // Keep the fixed app shell aligned with the visible area while the iOS soft
+  // keyboard is up: publish the keyboard height for the shell's bottom edge,
+  // and undo the viewport displacement WebKit applies when it scrolls a focused
+  // field into view (#334). Both rules live in ./keyboardViewport so they can be
+  // tested against a fake viewport.
+  useEffect(() => installKeyboardViewportSync(window, document), []);
 
   return (
     <div className="fixed inset-0 flex bg-background" style={{ bottom: 'var(--keyboard-height, 0px)' }}>
