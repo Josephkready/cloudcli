@@ -173,6 +173,8 @@
     "newConversationNewProject": "New project…",
     "newConversationSearchPlaceholder": "Search folders…",
     "newConversationNoResults": "No folders found",
+    "newConversationShowAllFolders": "Show all folders ({{hidden}} more)",
+    "newConversationShowRepositoriesOnly": "Show repositories only",
     "cliOrigin": "Session not driven by cloudcli",
     "cliOriginBadge": "CLI",
     "cliOriginTooltip": "Not driven by cloudcli — started from a terminal/CLI (or created before session tracking), so its live status is unknown",
