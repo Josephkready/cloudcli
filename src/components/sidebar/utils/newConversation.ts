@@ -19,9 +19,10 @@ type BuildNewConversationItemsArgs = {
 };
 
 /**
- * Builds the "New conversation" picker menu for the Conversations view.
+ * Builds the "New conversation" picker menu for project-agnostic surfaces — the
+ * Conversations view and the mobile landing page (#331).
  *
- * The Conversations view is project-agnostic (it often has no selected project),
+ * Such a surface is project-agnostic (it often has no selected project),
  * so a new conversation must first be pointed at a folder. We list the existing
  * projects in a stable, scannable order — starred first, then alphabetically by
  * name (via {@link sortProjects} with `'name'`) so the menu reads predictably

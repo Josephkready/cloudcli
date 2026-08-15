@@ -2,10 +2,13 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import type { Project, ProjectSession } from '../../../../types/app';
 
 import MainContentStateView from './MainContentStateView';
+
+import i18n from '@/i18n/config.js';
 
 /*
  * Empty-state onboarding copy (#241). The desktop tip used to tell people to
@@ -298,6 +301,21 @@ describe('MainContentStateView — mobile new conversation (#331)', () => {
     expect(screen.getAllByTestId('mobile-conversation-option')).toHaveLength(2);
   });
 
+  it('stays out of the project-picker fallback, where a tap already starts a fresh chat', () => {
+    // Projects but nothing to resume — the first-run case, which falls through
+    // to the project list. Its rows call `onProjectSelect`, and that handler
+    // clears the selected session and navigates to `/`, i.e. it lands the user
+    // in a new chat for that project. Adding this button there would put a
+    // second project picker on a screen that is already a project picker, as a
+    // slower route to the same place. Asserted rather than left implicit so the
+    // omission reads as a decision, not an oversight.
+    const empty = [project({ projectId: 'p1', displayName: 'mind', sessions: [] })];
+    render(<MainContentStateView {...newConversationProps({ projects: empty })} />);
+
+    expect(screen.getAllByTestId('mobile-project-option')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /new conversation/i })).toBeNull();
+  });
+
   it('stays off desktop, where the sidebar already has this button', () => {
     render(<MainContentStateView {...newConversationProps({ isMobile: false })} />);
 
@@ -308,6 +326,28 @@ describe('MainContentStateView — mobile new conversation (#331)', () => {
     render(<MainContentStateView {...newConversationProps({ mode: 'loading' })} />);
 
     expect(screen.queryByRole('button', { name: /new conversation/i })).toBeNull();
+  });
+
+  it('resolves its label from the sidebar namespace, not the inline fallback', () => {
+    // The button's `conversations.*` keys live in the `sidebar` namespace while
+    // this view's own copy lives in `common`, and there is no `fallbackNS`. Hand
+    // it the default `t` and every lookup misses, silently rendering the inline
+    // English default — invisible today, because the fallback string and the
+    // locale string are identical, and permanent drift the moment the locale
+    // file is edited.
+    //
+    // Overriding the key is what makes this detectable: a `t` scoped to the
+    // wrong namespace keeps rendering the hardcoded default and fails here.
+    const original = i18n.getResource('en', 'sidebar', 'conversations.newConversation');
+    i18n.addResource('en', 'sidebar', 'conversations.newConversation', 'Start something new');
+
+    try {
+      render(<MainContentStateView {...newConversationProps()} />);
+
+      expect(screen.getByRole('button', { name: 'Start something new' })).toBeTruthy();
+    } finally {
+      i18n.addResource('en', 'sidebar', 'conversations.newConversation', original);
+    }
   });
 
   it('renders without the button when no handler was supplied', () => {
