@@ -8,7 +8,10 @@ import { closeConnection, initializeDatabase, projectsDb, sessionsDb } from '@/m
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
 
-import { getProjectsWithSessions } from './projects-with-sessions-fetch.service.js';
+import {
+  getArchivedProjectsWithSessions,
+  getProjectsWithSessions,
+} from './projects-with-sessions-fetch.service.js';
 
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
@@ -251,6 +254,37 @@ test('getProjectsWithSessions flags which spaces are git repository roots', asyn
     assert.equal(byPath.get(worktreePath), true, 'a linked worktree is a repository root');
     assert.equal(byPath.get(subfolderPath), false, 'a folder inside a repo is not a root');
     assert.equal(byPath.get(missingPath), false, 'a space whose folder is gone is not a root');
+
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
+// The archive view builds its rows through a different function, so the flag has
+// to be set there too — an archived space that gets restored goes straight back
+// into the picker, and an unset flag would quietly bury it behind the toggle.
+test('getArchivedProjectsWithSessions flags repository roots too', async () => {
+  await withIsolatedDatabase(async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), 'archived-repo-flag-'));
+    const clonePath = path.join(workspace, 'archived-clone');
+    const subfolderPath = path.join(clonePath, 'docs');
+
+    await mkdir(path.join(clonePath, '.git'), { recursive: true });
+    await mkdir(subfolderPath, { recursive: true });
+
+    for (const projectPath of [clonePath, subfolderPath]) {
+      projectsDb.createProjectPath(projectPath, null);
+      projectsDb.updateProjectIsArchived(projectPath, true);
+    }
+
+    const byPath = new Map(
+      (await getArchivedProjectsWithSessions({ skipSynchronization: true })).map((project) => [
+        project.fullPath,
+        project.isRepository,
+      ]),
+    );
+
+    assert.equal(byPath.get(clonePath), true, 'an archived clone is still a repository root');
+    assert.equal(byPath.get(subfolderPath), false, 'an archived subfolder is still not a root');
 
     await rm(workspace, { recursive: true, force: true });
   });
