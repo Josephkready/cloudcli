@@ -21,16 +21,19 @@ type SidebarNewConversationButtonProps = {
   // Launches the chat composer for a chosen project (wired to handleNewSession).
   onNewConversation: (project: Project) => void;
   // Opens the create-project flow for when the target folder isn't a project yet.
-  onCreateProject: () => void;
+  // Optional: that flow is the sidebar's own state, so surfaces outside it (the
+  // mobile landing page, #331) drop the item instead of showing a dead control.
+  onCreateProject?: () => void;
   className?: string;
   t: TFunction;
 };
 
 /**
- * "New conversation" action for the Conversations view. Since that view has no
- * inherent project, the button opens a searchable, scrollable picker of existing
- * projects (plus a "New project…" escape hatch); selecting one launches a fresh
- * chat there.
+ * "New conversation" action for project-agnostic surfaces — the sidebar's
+ * Conversations view and the mobile landing page (#331). Neither has an inherent
+ * project, so the button opens a searchable, scrollable picker of existing
+ * projects (plus a "New project…" escape hatch where the caller has that flow);
+ * selecting one launches a fresh chat there.
  *
  * Built on the cmdk `Command` primitives (issue #186) rather than the old
  * `ActionMenu`, which had no filter input and no scroll container — so a long

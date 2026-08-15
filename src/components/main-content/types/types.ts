@@ -72,6 +72,13 @@ export type MainContentStateViewProps = {
   activeSessions?: SessionActivityMap;
   onProjectSelect?: (project: Project) => void;
   onSessionSelect?: (session: ProjectSession) => void;
+  /**
+   * Starts a fresh conversation in the chosen project (#331). The landing page
+   * let you resume a conversation but never begin one, which left a first
+   * action with no control behind it. Wired to the same `onNewSession` the
+   * sidebar's "New conversation" button uses.
+   */
+  onNewConversation?: (project: Project) => void;
 };
 
 export type MobileMenuButtonProps = {
