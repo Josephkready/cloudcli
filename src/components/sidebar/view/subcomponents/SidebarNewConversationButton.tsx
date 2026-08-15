@@ -35,6 +35,12 @@ type SidebarNewConversationButtonProps = {
  * Built on the cmdk `Command` primitives (issue #186) rather than the old
  * `ActionMenu`, which had no filter input and no scroll container — so a long
  * folder list is now type-to-filter instead of an unbounded scroll.
+ *
+ * Both the list and that filter cover repository roots only (#332). cmdk matches
+ * whatever is rendered, so listing every space meant searching every space —
+ * including the subfolder each agent run inside a repo leaves behind. The
+ * "show all folders" toggle below the list is the escape hatch for a space that
+ * isn't a repository, mirroring the folder picker's own toggle (#309).
  */
 export default function SidebarNewConversationButton({
   projects,
@@ -44,6 +50,9 @@ export default function SidebarNewConversationButton({
   t,
 }: SidebarNewConversationButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
+  // Repository roots are the default listing; this reveals the plain folders
+  // beside them (a scratchpad dir, a not-yet-initialised project).
+  const [showAllFolders, setShowAllFolders] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -71,10 +80,11 @@ export default function SidebarNewConversationButton({
     };
   }, [isOpen]);
 
-  const items = buildNewConversationItems({
+  const { items, hiddenProjectCount } = buildNewConversationItems({
     projects,
     onPickProject: onNewConversation,
     onCreateProject,
+    includeNonRepositories: showAllFolders,
     t,
   });
 
@@ -130,6 +140,25 @@ export default function SidebarNewConversationButton({
               </CommandGroup>
             </CommandList>
           </Command>
+
+          {/*
+            Outside <Command> on purpose: inside it, cmdk would register this as
+            a searchable item and the toggle would filter itself away exactly
+            when a search is what surfaced the need for it.
+          */}
+          {hiddenProjectCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAllFolders((showAll) => !showAll)}
+              className="w-full border-t border-border px-3 py-2 text-left text-xs text-muted-foreground underline"
+            >
+              {showAllFolders
+                ? t('conversations.newConversationShowRepositoriesOnly', 'Show repositories only')
+                : t('conversations.newConversationShowAllFolders', 'Show all folders ({{hidden}} more)', {
+                    hidden: hiddenProjectCount,
+                  })}
+            </button>
+          )}
         </div>
       )}
     </div>

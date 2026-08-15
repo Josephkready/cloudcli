@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { mock } from 'node:test';
@@ -213,5 +213,45 @@ test('getProjectsWithSessions propagates a failing project instead of dropping i
     } finally {
       mock.restoreAll();
     }
+  });
+});
+
+// #332: the new-conversation picker searches spaces, and a space row is minted
+// for every session cwd — so agent runs inside a repo made its own subfolders
+// searchable. The picker filters on this flag, so the payload has to carry it,
+// and it has to distinguish a repository root from a folder inside one.
+test('getProjectsWithSessions flags which spaces are git repository roots', async () => {
+  await withIsolatedDatabase(async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), 'projects-repo-flag-'));
+    const clonePath = path.join(workspace, 'clone');
+    const subfolderPath = path.join(clonePath, 'tools');
+    const worktreePath = path.join(workspace, 'worktree');
+
+    await mkdir(path.join(clonePath, '.git'), { recursive: true });
+    await mkdir(subfolderPath, { recursive: true });
+    await mkdir(worktreePath, { recursive: true });
+    // A linked worktree marks its root with a `.git` *file*, and it is just as
+    // much a checkout to start a conversation in as a clone is.
+    await writeFile(path.join(worktreePath, '.git'), 'gitdir: /elsewhere/.git/worktrees/wt\n');
+
+    const missingPath = path.join(workspace, 'deleted-long-ago');
+
+    for (const projectPath of [clonePath, subfolderPath, worktreePath, missingPath]) {
+      projectsDb.createProjectPath(projectPath, null);
+    }
+
+    const byPath = new Map(
+      (await getProjectsWithSessions({ skipSynchronization: true })).map((project) => [
+        project.fullPath,
+        project.isRepository,
+      ]),
+    );
+
+    assert.equal(byPath.get(clonePath), true, 'a clone is a repository root');
+    assert.equal(byPath.get(worktreePath), true, 'a linked worktree is a repository root');
+    assert.equal(byPath.get(subfolderPath), false, 'a folder inside a repo is not a root');
+    assert.equal(byPath.get(missingPath), false, 'a space whose folder is gone is not a root');
+
+    await rm(workspace, { recursive: true, force: true });
   });
 });

@@ -73,6 +73,12 @@ export interface Project {
   fullPath: string;
   path?: string;
   isStarred?: boolean;
+  /**
+   * True when the space's folder is a git repository root (`.git` directory or
+   * file). Served by `/api/projects`; absent only when talking to a server that
+   * predates the flag, which callers must treat as "unknown", not "not a repo".
+   */
+  isRepository?: boolean;
   sessions?: ProjectSession[];
   sessionMeta?: ProjectSessionMeta;
   [key: string]: unknown;

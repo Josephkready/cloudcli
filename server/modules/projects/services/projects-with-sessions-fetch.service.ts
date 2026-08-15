@@ -10,7 +10,7 @@ import {
 } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
-import { AppError, mapWithConcurrency } from '@/shared/utils.js';
+import { AppError, isGitRepositoryRoot, mapWithConcurrency } from '@/shared/utils.js';
 
 type SessionSummary = {
   id: string;
@@ -56,6 +56,19 @@ export type ProjectListItem = {
   displayName: string;
   fullPath: string;
   isStarred: boolean;
+  /**
+   * True when the space's folder is a git repository root — the same test the
+   * folder picker lists on (#309): a `.git` directory (clone) or a `.git` file
+   * (linked worktree / submodule).
+   *
+   * A space row is created for every session's cwd, so running an agent inside
+   * `<repo>/tools/foo` mints a space for that subfolder forever. The
+   * new-conversation picker searches spaces, which is how subfolders kept
+   * turning up there (#332); this bit is what lets it list repository roots
+   * only. It costs one `stat` per space, which is noise next to the
+   * package.json read and session page each space already pays for here.
+   */
+  isRepository: boolean;
   sessions: SessionSummary[];
   sessionMeta: {
     hasMore: boolean;
@@ -277,7 +290,7 @@ export async function getProjectsWithSessions(
   const projects = await mapWithConcurrency(projectRows, PROJECT_BUILD_CONCURRENCY, async (row) => {
     const projectPath = row.project_path;
 
-    const [displayName, sessionsPage] = await Promise.all([
+    const [displayName, sessionsPage, isRepository] = await Promise.all([
       row.custom_project_name && row.custom_project_name.trim().length > 0
         ? Promise.resolve(row.custom_project_name)
         : generateDisplayName(path.basename(projectPath) || projectPath, projectPath),
@@ -285,6 +298,7 @@ export async function getProjectsWithSessions(
         limit: options.sessionsLimit,
         offset: options.sessionsOffset,
       }),
+      isGitRepositoryRoot(projectPath),
     ]);
 
     processedProjects += 1;
@@ -301,6 +315,7 @@ export async function getProjectsWithSessions(
       displayName,
       fullPath: projectPath,
       isStarred: Boolean(row.isStarred),
+      isRepository,
       sessions: sessionsPage.sessions,
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
@@ -353,6 +368,7 @@ export async function getArchivedProjectsWithSessions(
       displayName,
       fullPath: row.project_path,
       isStarred: Boolean(row.isStarred),
+      isRepository: await isGitRepositoryRoot(row.project_path),
       isArchived: true,
       sessions: sessionsPage.sessions,
       sessionMeta: {
