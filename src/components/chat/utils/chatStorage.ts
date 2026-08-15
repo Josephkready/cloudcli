@@ -38,10 +38,15 @@ export const safeLocalStorage = {
       return true;
     } catch (error: any) {
       if (error?.name === 'QuotaExceededError') {
-        console.warn(`localStorage quota exceeded writing "${key}", evicting ${EVICTABLE_KEY_PREFIX}* drafts`);
-
         const keys = Object.keys(localStorage);
         const draftKeys = keys.filter((k) => k.startsWith(EVICTABLE_KEY_PREFIX));
+        // Counted before the sweep so the log can't claim an eviction that
+        // never happened — "0 drafts" is the interesting case when triaging a
+        // retry that failed anyway.
+        console.warn(
+          `localStorage quota exceeded writing "${key}", evicting `
+          + `${draftKeys.length} ${EVICTABLE_KEY_PREFIX}* draft(s)`,
+        );
         draftKeys.forEach((k) => {
           localStorage.removeItem(k);
         });

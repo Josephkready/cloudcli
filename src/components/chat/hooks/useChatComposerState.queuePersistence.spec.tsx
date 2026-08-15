@@ -74,9 +74,14 @@ function refuseWritesTo(prefix: string) {
   });
 }
 
-function setup() {
-  const addMessage = vi.fn();
-  const rendered = renderHook(() => useChatComposerState({
+type ComposerArgs = Parameters<typeof useChatComposerState>[0];
+
+function makeProps(
+  overrides: { isLoading: boolean },
+  addMessage: ReturnType<typeof vi.fn>,
+  sendMessage: ReturnType<typeof vi.fn>,
+): ComposerArgs {
+  return {
     selectedProject: {
       projectId: 'project-1',
       displayName: 'Demo',
@@ -93,19 +98,28 @@ function setup() {
     codexModel: 'gpt-test',
     antigravityModel: 'gemini-test',
     currentProviderEffort: 'default',
-    // A turn is in flight, so a submit queues rather than sends — the path
+    // While a turn is in flight a submit queues rather than sends — the path
     // whose only durable copy is the storage key under test.
-    isLoading: true,
-    canAbortSession: true,
+    isLoading: overrides.isLoading,
+    canAbortSession: overrides.isLoading,
     tokenBudget: null,
-    sendMessage: vi.fn(() => true),
+    sendMessage,
     onSessionProcessing: vi.fn(),
     scrollToBottom: vi.fn(),
     addMessage,
     setIsUserScrolledUp: vi.fn(),
     setPendingPermissionRequests: vi.fn(),
-  }));
-  return { rendered, addMessage };
+  };
+}
+
+function setup() {
+  const addMessage = vi.fn();
+  const sendMessage = vi.fn((_frame: unknown) => true);
+  const rendered = renderHook(
+    (props: { isLoading: boolean }) => useChatComposerState(makeProps(props, addMessage, sendMessage)),
+    { initialProps: { isLoading: true } },
+  );
+  return { rendered, addMessage, sendMessage };
 }
 
 async function queueMessage(rendered: ReturnType<typeof setup>['rendered'], text: string) {
@@ -153,6 +167,32 @@ describe('useChatComposerState — queue persistence (#330)', () => {
     // The message is still queued in memory and will go out on this turn's end.
     expect(rendered.result.current.queuedDrafts.map((d) => d.content))
       .toEqual(['the message that must not vanish']);
+  });
+
+  it('still sends an unpersistable queued message when the turn ends', async () => {
+    // The notice promises delivery on this turn's completion. The drain used to
+    // re-read the queue from storage and treat an empty key as "another flusher
+    // already claimed it", so a refused write made the message disappear when
+    // the run finished — no reload needed, and no longer even a warning.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    refuseWritesTo('queued_message_');
+
+    const { rendered, sendMessage } = setup();
+    await queueMessage(rendered, 'do not lose me');
+    expect(localStorage.getItem(queuedMessageKey(SESSION_ID))).toBeNull();
+
+    // The run completes: isLoading true -> false is the drain's trigger edge.
+    await act(async () => {
+      rendered.rerender({ isLoading: false });
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    const sent = sendMessage.mock.calls.map(([frame]) => frame as { content?: string });
+    expect(sent.some((frame) => frame?.content === 'do not lose me')).toBe(true);
+    expect(rendered.result.current.queuedDrafts).toHaveLength(0);
   });
 
   it('keeps an existing queue when a later write is refused', async () => {

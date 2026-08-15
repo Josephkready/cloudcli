@@ -289,6 +289,11 @@ export function useChatComposerState({
   useEffect(() => {
     addMessageRef.current = addMessage;
   }, [addMessage]);
+  // Whether the persisted queue is a trustworthy mirror of `queuedDrafts`.
+  // Goes false when storage refuses the write (#330), which is what tells the
+  // drain below that an empty key means "never written" rather than "already
+  // claimed by the other flusher".
+  const queuePersistedRef = useRef(true);
 
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
@@ -986,12 +991,22 @@ export function useChatComposerState({
       // The persisted queue is the claim ticket shared with the app-level
       // auto-send (which handles sessions that finish while not viewed). Re-read
       // it; if it's been drained elsewhere, just resync the in-memory queue.
+      //
+      // The exception is a queue storage refused to hold (#330): the key is
+      // then empty because the write never landed, not because anyone claimed
+      // it, and resyncing to it would silently drop the message the user was
+      // just told would still be sent. Nothing else can have claimed it either
+      // — the other flusher reads the same absent key — so replaying from the
+      // in-memory copy cannot double-send.
       const persisted = sessionKey ? readQueuedMessages(sessionKey) : [];
-      if (persisted.length === 0) {
+      if (persisted.length === 0 && queuePersistedRef.current) {
         setQueuedDrafts([]);
         return;
       }
       const head = queuedDrafts[0];
+      if (!head) {
+        return;
+      }
       // Claim the head by removing it from storage BEFORE replaying the send, so
       // a racing flusher can't also dispatch it; the tail stays queued.
       if (sessionKey) {
@@ -1107,6 +1122,7 @@ export function useChatComposerState({
       sessionKey,
       queuedDrafts.map((draft) => ({ content: draft.content, options: draft.options })),
     );
+    queuePersistedRef.current = persisted;
     if (!persisted) {
       // Storage refused the queue, and quota recovery no longer buys room by
       // deleting it (#330), so this text now exists only in memory. Say so:

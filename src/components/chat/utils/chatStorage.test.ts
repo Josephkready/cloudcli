@@ -277,7 +277,7 @@ test('writeQueuedMessages reports whether the queue actually survived the write'
 
   // A full store: the caller is told the queue is memory-only, which is what
   // lets the composer warn instead of losing the message on the next reload.
-  const { store, kept } = makeQuotaStore({ queued_message_sess9: '[{"content":"older"}]' }, 25);
+  const { store, kept } = makeQuotaStore({ [queuedMessageKey('sess-9')]: '[{"content":"older"}]' }, 25);
   let result: boolean | undefined;
   withGlobals({ localStorage: store, console: silentConsole }, () => {
     result = writeQueuedMessages('sess-9', [{ content: 'a much longer message' }]);
@@ -285,7 +285,7 @@ test('writeQueuedMessages reports whether the queue actually survived the write'
 
   assert.equal(result, false);
   // A refused write leaves whatever was already stored untouched.
-  assert.equal(kept.get('queued_message_sess9'), '[{"content":"older"}]');
+  assert.equal(kept.get(queuedMessageKey('sess-9')), '[{"content":"older"}]');
 });
 
 test('readQueuedMessages migrates a legacy raw-text draft on read', () => {
