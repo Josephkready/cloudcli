@@ -351,9 +351,13 @@ export function isTaskNotificationContent(content: string): boolean {
 export function isAgentAuthoredUserTurn(raw: AnyRecord): boolean {
   if (raw.isMeta === true) return true;
   if (raw.isSynthetic === true) return true;
-  // Subagent (Task) turns: the prompt is written by the parent agent.
+  // Subagent (Task) turns, whose prompt is written by the parent agent. This is
+  // a persisted-transcript flag only — the SDK stream has no `isSidechain`, so
+  // a live subagent turn is caught by `isSynthetic`/`origin` above instead.
   if (raw.isSidechain === true) return true;
 
+  // Anything that is not a plain object (or has a non-string `kind`) fails
+  // closed to "human", so a malformed row is never silently hidden.
   const originKind = readObjectRecord(raw.origin)?.kind;
   return typeof originKind === 'string' && originKind !== 'human';
 }
