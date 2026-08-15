@@ -13,6 +13,13 @@ import { sendSubscribeBatch } from '../utils/subscribeTargets';
 import { stabilizeMessageIdentities } from '../utils/messageIdentity';
 import { reconcileTokenBudget } from '../utils/tokenBudget';
 import { resolveRestoreScrollTop, type ScrollRestoreState } from '../utils/scrollRestore';
+import {
+  isNearBottom as metricsAreNearBottom,
+  shouldFollowNewMessages,
+  shouldResumeAutoFollow,
+  shouldSuspendAutoFollow,
+  type ScrollMetrics,
+} from '../utils/autoFollow';
 
 import { normalizedToChatMessages } from './useChatMessages';
 
@@ -142,7 +149,18 @@ export function useChatSessionState({
   const pendingScrollRestoreRef = useRef<ScrollRestoreState | null>(null);
   const pendingInitialScrollRef = useRef(true);
   const messagesOffsetRef = useRef(0);
-  const scrollPositionRef = useRef({ height: 0, top: 0 });
+  /*
+   * Auto-follow bookkeeping (#333).
+   *
+   * All refs rather than state on purpose: the scheduled follow has to read
+   * these at the moment it fires, and a `useState` value captured in the
+   * timer's closure is exactly the stale read that caused the jump.
+   */
+  const isUserScrolledUpRef = useRef(false);
+  const pointerDownRef = useRef(false);
+  const autoFollowSuspendedRef = useRef(false);
+  const autoFollowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastScrollTopRef = useRef(0);
   const loadAllFinishedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadAllOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedSessionKeyRef = useRef<string | null>(null);
@@ -333,10 +351,25 @@ export function useChatSessionState({
 
   const rewindMessages = useCallback((count: number) => setViewHiddenCount(count), []);
 
+  const readScrollMetrics = useCallback((container: HTMLDivElement): ScrollMetrics => ({
+    scrollTop: container.scrollTop,
+    scrollHeight: container.scrollHeight,
+    clientHeight: container.clientHeight,
+  }), []);
+
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
+    // An *explicit* jump to the bottom — the button, or sending a message —
+    // re-arms following: the reader has asked to be pinned there again. The
+    // state is cleared here rather than left to the scroll event this write
+    // provokes, so the button's own effect does not depend on that event
+    // arriving (it never fires if the pane was already at the bottom).
+    autoFollowSuspendedRef.current = false;
+    isUserScrolledUpRef.current = false;
+    setIsUserScrolledUp(false);
     container.scrollTop = container.scrollHeight;
+    lastScrollTopRef.current = container.scrollTop;
   }, []);
 
   const scrollToBottomAndReset = useCallback(() => {
@@ -351,9 +384,8 @@ export function useChatSessionState({
   const isNearBottom = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return false;
-    const { scrollTop, scrollHeight, clientHeight } = container;
-    return scrollHeight - scrollTop - clientHeight < 50;
-  }, []);
+    return metricsAreNearBottom(readScrollMetrics(container));
+  }, [readScrollMetrics]);
 
   const loadOlderMessages = useCallback(
     async (container: HTMLDivElement) => {
@@ -414,8 +446,25 @@ export function useChatSessionState({
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    const nearBottom = isNearBottom();
+    const metrics = readScrollMetrics(container);
+    const nearBottom = metricsAreNearBottom(metrics);
     setIsUserScrolledUp(!nearBottom);
+    isUserScrolledUpRef.current = !nearBottom;
+
+    // Auto-follow suspension is tracked separately from `isUserScrolledUp`
+    // because the two answer different questions. `isUserScrolledUp` drives the
+    // scroll-to-bottom button and wants a generous 50px band; following wants
+    // to stop the instant the reader drags upward, even inside that band.
+    if (shouldSuspendAutoFollow({
+      previousScrollTop: lastScrollTopRef.current,
+      metrics,
+      pointerDown: pointerDownRef.current,
+    })) {
+      autoFollowSuspendedRef.current = true;
+    } else if (shouldResumeAutoFollow(metrics)) {
+      autoFollowSuspendedRef.current = false;
+    }
+    lastScrollTopRef.current = metrics.scrollTop;
 
     const scrolledNearTop = container.scrollTop < 100;
 
@@ -444,7 +493,7 @@ export function useChatSessionState({
       const didLoad = await loadOlderMessages(container);
       if (didLoad) topLoadLockRef.current = true;
     }
-  }, [hasMoreMessages, isNearBottom, loadOlderMessages]);
+  }, [hasMoreMessages, loadOlderMessages, readScrollMetrics]);
 
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) return;
@@ -464,6 +513,9 @@ export function useChatSessionState({
     pendingScrollRestoreRef.current = null;
     wasNearTopRef.current = false;
     setIsUserScrolledUp(false);
+    isUserScrolledUpRef.current = false;
+    autoFollowSuspendedRef.current = false;
+    lastScrollTopRef.current = 0;
     // Drop the outgoing session's messages so the first stabilization pass for
     // the new session starts clean instead of comparing across sessions.
     previousChatMessagesRef.current = [];
@@ -492,6 +544,13 @@ export function useChatSessionState({
 
     const tick = () => {
       if (!pendingInitialScrollRef.current || !scrollContainerRef.current) return;
+      // The loop re-pins the bottom every frame for up to a second. If the
+      // reader starts scrolling inside that window it would fight them once
+      // per frame, so a touch ends the landing early and hands the pane over.
+      if (pointerDownRef.current) {
+        pendingInitialScrollRef.current = false;
+        return;
+      }
       container.scrollTop = container.scrollHeight;
       if (container.scrollHeight === lastHeight) {
         stableCount++;
@@ -812,34 +871,111 @@ export function useChatSessionState({
   }, [chatMessages, visibleMessageCount]);
 
   useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    scrollPositionRef.current = { height: container.scrollHeight, top: container.scrollTop };
-  });
+    if (!scrollContainerRef.current || chatMessages.length === 0) return undefined;
+    if (isLoadingMoreRef.current || isLoadingMoreMessages || pendingScrollRestoreRef.current) return undefined;
+    if (searchScrollActiveRef.current) return undefined;
 
-  useEffect(() => {
-    if (!scrollContainerRef.current || chatMessages.length === 0) return;
-    if (isLoadingMoreRef.current || isLoadingMoreMessages || pendingScrollRestoreRef.current) return;
-    if (searchScrollActiveRef.current) return;
-
-    if (!isUserScrolledUp) {
-      setTimeout(() => scrollToBottom(), 50);
-      return;
+    if (isUserScrolledUp) {
+      // Nothing to do. New messages are appended *below* the viewport, so a
+      // reader who has scrolled away keeps their position for free — and the
+      // one case that does move content above them, a load-more prepend, is
+      // handled by `pendingScrollRestoreRef` and bailed on above.
+      return undefined;
     }
 
+    // Deferred one tick so the freshly appended message has been laid out and
+    // `scrollHeight` includes it. That delay is also the race in #333: the
+    // reader can start dragging before it elapses, so every condition is
+    // re-read here, at fire time, instead of being captured above.
+    if (autoFollowTimerRef.current) clearTimeout(autoFollowTimerRef.current);
+    autoFollowTimerRef.current = setTimeout(() => {
+      autoFollowTimerRef.current = null;
+      const container = scrollContainerRef.current;
+      if (!container) return;
+      if (!shouldFollowNewMessages({
+        pointerDown: pointerDownRef.current,
+        autoFollowSuspended: autoFollowSuspendedRef.current,
+        userScrolledUp: isUserScrolledUpRef.current,
+      })) return;
+      container.scrollTop = container.scrollHeight;
+      lastScrollTopRef.current = container.scrollTop;
+    }, 50);
+
+    return () => {
+      if (autoFollowTimerRef.current) {
+        clearTimeout(autoFollowTimerRef.current);
+        autoFollowTimerRef.current = null;
+      }
+    };
+  }, [chatMessages.length, isLoadingMoreMessages, isUserScrolledUp]);
+
+  /*
+   * Follow the *content*, not just the message count (#333).
+   *
+   * The effect above fires on `chatMessages.length`, which only changes when a
+   * message is added. A long assistant answer is one message whose body grows
+   * for as long as the run streams, so the pane stopped tracking it: the reader
+   * watched a static view while thousands of pixels accumulated below, and then
+   * the next message to land fired a follow that leapt the whole distance at
+   * once — the "it jumps, maybe when message is finished streaming" half of the
+   * report. Observing the content box turns that leap into continuous tracking.
+   *
+   * Same predicate as the scheduled follow, so this cannot fight the reader
+   * either: a finger on the glass or a suspended follow stops it dead.
+   */
+  useEffect(() => {
     const container = scrollContainerRef.current;
-    const prevHeight = scrollPositionRef.current.height;
-    const prevTop = scrollPositionRef.current.top;
-    const newHeight = container.scrollHeight;
-    const heightDiff = newHeight - prevHeight;
-    if (heightDiff > 0 && prevTop > 0) container.scrollTop = prevTop + heightDiff;
-  }, [chatMessages.length, isLoadingMoreMessages, isUserScrolledUp, scrollToBottom]);
+    const content = container?.firstElementChild;
+    if (!container || !content) return undefined;
+    if (typeof ResizeObserver === 'undefined') return undefined;
+
+    const observer = new ResizeObserver(() => {
+      // A pending prepend owns the scroll position — overriding it would undo
+      // the "hold the reader's place across a load-more" placement. The initial
+      // landing pass needs no such guard: it wants the bottom too, and it
+      // already stands down for a touch.
+      if (pendingScrollRestoreRef.current) return;
+      if (isLoadingMoreRef.current || searchScrollActiveRef.current) return;
+      if (!shouldFollowNewMessages({
+        pointerDown: pointerDownRef.current,
+        autoFollowSuspended: autoFollowSuspendedRef.current,
+        userScrolledUp: isUserScrolledUpRef.current,
+      })) return;
+      container.scrollTop = container.scrollHeight;
+      lastScrollTopRef.current = container.scrollTop;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [currentSessionId]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container) return;
+    if (!container) return undefined;
+
+    /*
+     * Touch state gates auto-follow (#333). Without it the only signal was
+     * `scrollTop`, which lags a drag by a frame or more on iOS — long enough
+     * for a scheduled follow to fire mid-gesture and yank the pane back down.
+     * Passive listeners: these never call `preventDefault`, and saying so keeps
+     * the scroll on the compositor.
+     */
+    const onPointerDown = () => {
+      pointerDownRef.current = true;
+    };
+    const onPointerUp = () => {
+      pointerDownRef.current = false;
+    };
+
     container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
+    container.addEventListener('touchstart', onPointerDown, { passive: true });
+    container.addEventListener('touchend', onPointerUp, { passive: true });
+    container.addEventListener('touchcancel', onPointerUp, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      container.removeEventListener('touchstart', onPointerDown);
+      container.removeEventListener('touchend', onPointerUp);
+      container.removeEventListener('touchcancel', onPointerUp);
+    };
   }, [handleScroll]);
 
   // "Load all" overlay visibility is driven by scroll-to-top in handleScroll;
