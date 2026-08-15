@@ -102,6 +102,36 @@ test('the create item invokes onCreateProject, not onPickProject', () => {
   assert.equal(picks, 0);
 });
 
+test('omits the create escape hatch entirely when the caller has no such flow (#331)', () => {
+  // The mobile landing page reuses this menu but cannot open the create-project
+  // modal — that lives in the sidebar's own state. Rendering the item there
+  // would be a control that does nothing, so it is dropped instead.
+  const items = buildNewConversationItems({
+    projects: [project('a', 'Alpha'), project('b', 'Bravo')],
+    onPickProject: () => {},
+    t,
+  });
+
+  assert.deepEqual(
+    items.map((item) => item.label),
+    ['Alpha', 'Bravo'],
+  );
+  assert.equal(
+    items.some((item) => item.key === 'new-project'),
+    false,
+  );
+});
+
+test('with no projects and no create flow, the menu is empty rather than a lone dead item', () => {
+  const items = buildNewConversationItems({
+    projects: [],
+    onPickProject: () => {},
+    t,
+  });
+
+  assert.deepEqual(items, []);
+});
+
 test('with no projects, the menu is just the create escape hatch (no divider)', () => {
   const items = buildNewConversationItems({
     projects: [],

@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useHideCliOriginChats } from '../../../../hooks/useHideCliOriginChats';
 import { buildConversationList, formatCompactAge } from '../../../sidebar/utils/conversationList';
 import { filterCliOriginConversations, getSessionName } from '../../../sidebar/utils/utils';
+import SidebarNewConversationButton from '../../../sidebar/view/subcomponents/SidebarNewConversationButton';
 import type { MainContentStateViewProps } from '../../types/types';
 import MobileMenuButton from './MobileMenuButton';
 
@@ -16,6 +17,7 @@ export default function MainContentStateView({
   activeSessions,
   onProjectSelect,
   onSessionSelect,
+  onNewConversation,
 }: MainContentStateViewProps) {
   const { t } = useTranslation();
   const hideCliOriginChats = useHideCliOriginChats();
@@ -77,6 +79,26 @@ export default function MainContentStateView({
           <div className="mx-auto w-full max-w-md">
             <h2 className="mb-1 text-lg font-semibold text-foreground">{t('mainContent.chooseConversation')}</h2>
             <p className="mb-4 text-sm text-muted-foreground">{t('mainContent.tapConversationToOpen')}</p>
+            {/*
+              #331: the list only let you RESUME a conversation. Starting one
+              meant opening the burger menu and finding the sidebar's button, so
+              the landing page was missing its other half. This is that same
+              button, not a second implementation, so the picker it opens keeps
+              the sidebar's ordering and its "New project…" behaviour.
+
+              No create-project handler is passed: that flow is the sidebar's own
+              state and is unreachable from here, so the item is dropped rather
+              than rendered dead. Every branch that shows this button already has
+              at least one project to start in.
+            */}
+            {onNewConversation && (
+              <SidebarNewConversationButton
+                projects={projects ?? []}
+                onNewConversation={onNewConversation}
+                className="mb-4"
+                t={t}
+              />
+            )}
             <ul className="space-y-2">
               {conversations.map(({ project, session, activityTime }) => {
                 const age = formatCompactAge(activityTime, new Date());

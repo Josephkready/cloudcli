@@ -104,6 +104,7 @@ function MainContent({
         activeSessions={processingSessions}
         onProjectSelect={onProjectSelect}
         onSessionSelect={onSessionSelect}
+        onNewConversation={onNewSession}
       />
     );
   }
