@@ -299,6 +299,9 @@ async function getSessionMessages(
 const INTERNAL_CONTENT_PREFIXES = [
   '<system-reminder>',
   'Caveat:',
+  // Newer Claude builds wrap the caveat banner in a tag, so the bare `Caveat:`
+  // prefix above no longer matches on its own.
+  '<local-command-caveat>',
   '[Request interrupted',
   // Skill invocations inject a user-role preamble starting with this line. When
   // it isn't flagged `isMeta`, it would otherwise render as a plain user bubble.
@@ -306,7 +309,57 @@ const INTERNAL_CONTENT_PREFIXES = [
 ] as const;
 
 export function isInternalContent(content: string): boolean {
-  return INTERNAL_CONTENT_PREFIXES.some((prefix) => content.startsWith(prefix));
+  // Match after leading whitespace: the same banner is sometimes emitted with a
+  // leading newline, which would otherwise defeat every prefix below.
+  const text = content.trimStart();
+  return INTERNAL_CONTENT_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
+
+/**
+ * Background-task notifications are user-role rows that the frontend
+ * re-attributes to the assistant (see `parseTaskNotification`). They must
+ * survive the agent-authored filter below so that re-attribution still runs.
+ */
+export function isTaskNotificationContent(content: string): boolean {
+  return content.trimStart().startsWith('<task-notification>');
+}
+
+/**
+ * True when a `role: 'user'` row was produced by the agent or the harness
+ * rather than typed by the person using the app.
+ *
+ * Attribution used to be inferred from message *content* — a hardcoded list of
+ * prefixes. That can never keep up: every new harness string (stop-hook
+ * feedback, skill re-invocation banners, peer/coordinator relays,
+ * auto-continuation nudges, `[Image: ...]` placeholders) shows up as a blue
+ * user bubble until someone adds one more prefix.
+ *
+ * Both transports actually label these rows explicitly, just with different
+ * field names, and neither was being read for the live case:
+ * - persisted JSONL sets `isMeta: true`
+ * - the live SDK stream sets `isSynthetic: true` and/or `origin.kind`
+ *   (`origin` absent or `human` means real keyboard input)
+ *
+ * `isMeta` does not exist on the live stream, so a running session rendered
+ * every synthetic turn as if the user had sent it, and the same turn vanished
+ * on reload once the `isMeta`-tagged transcript was read back.
+ *
+ * Every check here is a positive assertion of non-human origin: a genuine user
+ * message (and a tool_result row, which carries none of these fields) is never
+ * matched, so local-echo reconciliation is unaffected.
+ */
+export function isAgentAuthoredUserTurn(raw: AnyRecord): boolean {
+  if (raw.isMeta === true) return true;
+  if (raw.isSynthetic === true) return true;
+  // Subagent (Task) turns, whose prompt is written by the parent agent. This is
+  // a persisted-transcript flag only — the SDK stream has no `isSidechain`, so
+  // a live subagent turn is caught by `isSynthetic`/`origin` above instead.
+  if (raw.isSidechain === true) return true;
+
+  // Anything that is not a plain object (or has a non-string `kind`) fails
+  // closed to "human", so a malformed row is never silently hidden.
+  const originKind = readObjectRecord(raw.origin)?.kind;
+  return typeof originKind === 'string' && originKind !== 'human';
 }
 
 /**
@@ -398,7 +451,16 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     const ts = raw.timestamp || new Date().toISOString();
     const baseId = raw.uuid || generateMessageId('claude');
 
-    if (raw.message?.role === 'user' && raw.message?.content && raw.isMeta !== true) {
+    if (raw.message?.role === 'user' && raw.message?.content) {
+      // Agent/harness-authored turns keep their tool results and their
+      // re-attributed assistant text, but must never produce a user bubble.
+      const agentAuthored = isAgentAuthoredUserTurn(raw);
+      const rendersAsUserText = (text: string): boolean => {
+        if (!text || isInternalContent(text)) return false;
+        if (isTaskNotificationContent(text)) return true;
+        return !agentAuthored;
+      };
+
       if (Array.isArray(raw.message.content)) {
         // Image attachments sent through the SDK are persisted as base64
         // `image` blocks next to the prompt text. Collect them so the UI can
@@ -429,7 +491,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
             }));
           } else if (part.type === 'text') {
             const text = part.text || '';
-            if (text && !isInternalContent(text)) {
+            if (rendersAsUserText(text)) {
               messages.push(createNormalizedMessage({
                 id: `${baseId}_text_${partIndex}`,
                 sessionId,
@@ -451,7 +513,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
             .map((part: AnyRecord) => part.text)
             .filter(Boolean)
             .join('\n');
-          if (textParts && !isInternalContent(textParts)) {
+          if (rendersAsUserText(textParts)) {
             messages.push(createNormalizedMessage({
               id: `${baseId}_text`,
               sessionId,
@@ -467,7 +529,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
         }
 
         // Image-only turns still deserve a user bubble even without text.
-        if (!imagesAttached && imageAttachments.length > 0) {
+        if (!imagesAttached && imageAttachments.length > 0 && !agentAuthored) {
           messages.push(createNormalizedMessage({
             id: `${baseId}_images`,
             sessionId,
@@ -555,7 +617,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
           return messages;
         }
 
-        if (text && !isInternalContent(text)) {
+        if (rendersAsUserText(text)) {
           messages.push(createNormalizedMessage({
             id: baseId,
             sessionId,
