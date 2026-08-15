@@ -113,6 +113,53 @@ test('the create item invokes onCreateProject, not onPickProject', () => {
   assert.equal(picks, 0);
 });
 
+test('omits the create escape hatch entirely when the caller has no such flow (#331)', () => {
+  // The mobile landing page reuses this menu but cannot open the create-project
+  // modal — that lives in the sidebar's own state. Rendering the item there
+  // would be a control that does nothing, so it is dropped instead.
+  const { items } = buildNewConversationItems({
+    projects: [project('a', 'Alpha'), project('b', 'Bravo')],
+    onPickProject: () => {},
+    t,
+  });
+
+  assert.deepEqual(
+    items.map((item) => item.label),
+    ['Alpha', 'Bravo'],
+  );
+  assert.equal(
+    items.some((item) => item.key === 'new-project'),
+    false,
+  );
+});
+
+test('with no projects and no create flow, the menu is empty rather than a lone dead item', () => {
+  const { items } = buildNewConversationItems({
+    projects: [],
+    onPickProject: () => {},
+    t,
+  });
+
+  assert.deepEqual(items, []);
+});
+
+// The mobile landing page (#331) mounts the same picker, and it is the surface
+// #332 was reported from — so the repository filter has to hold there too, where
+// there is no create-project item to fall back on.
+test('filters to repository roots on a surface with no create flow (#331 + #332)', () => {
+  const { items, hiddenProjectCount } = buildNewConversationItems({
+    projects: [repo('mind', 'mind'), subfolder('sub', 'tools', '/repos/mind/tools')],
+    onPickProject: () => {},
+    t,
+  });
+
+  assert.deepEqual(
+    items.map((item) => item.label),
+    ['mind'],
+  );
+  assert.equal(hiddenProjectCount, 1);
+});
+
 test('with no projects, the menu is just the create escape hatch (no divider)', () => {
   const { items, hiddenProjectCount } = buildNewConversationItems({
     projects: [],

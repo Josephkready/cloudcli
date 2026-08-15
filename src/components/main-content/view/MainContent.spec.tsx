@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Project, ProjectSession } from '../../../types/app';
@@ -272,5 +273,55 @@ describe('MainContent — mobile landing conversation picker (#326)', () => {
     render(<MainContent {...landingProps({ isLoading: true })} />);
 
     expect(screen.queryAllByTestId('mobile-conversation-option')).toHaveLength(0);
+  });
+});
+
+
+/*
+ * #331: the landing page could resume a conversation but not start one.
+ * MainContent is what hands the empty state its handlers, so a button wired to
+ * nothing here is a button that does nothing on screen — the same class of gap
+ * as #326 itself. `onNewSession` is the handler the sidebar's own "New
+ * conversation" button uses, so both surfaces start a chat the same way.
+ */
+describe('MainContent — mobile landing new conversation (#331)', () => {
+  const withSessions = [
+    {
+      ...project('/home/dev/alpha'),
+      sessions: [{ id: 's1', summary: 'Alpha work', lastActivity: '2026-08-11T12:00:00.000Z' }],
+    },
+    {
+      ...project('/home/dev/beta'),
+      sessions: [{ id: 's2', summary: 'Beta work', lastActivity: '2026-08-11T13:00:00.000Z' }],
+    },
+  ] as Project[];
+
+  const landingProps = (over: Partial<MainContentProps> = {}) => baseProps({
+    selectedProject: null,
+    isMobile: true,
+    projects: withSessions,
+    processingSessions: new Map(),
+    onProjectSelect: vi.fn(),
+    onSessionSelect: vi.fn(),
+    ...over,
+  });
+
+  it('gives the landing page a working way to start a conversation', async () => {
+    const onNewSession = vi.fn();
+    render(<MainContent {...landingProps({ onNewSession })} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /new conversation/i }));
+    const option = screen
+      .getAllByRole('option')
+      .find((node) => /beta/.test(node.textContent ?? ''));
+    await userEvent.click(option as HTMLElement);
+
+    expect(onNewSession).toHaveBeenCalledWith(withSessions[1]);
+  });
+
+  it('does not put the button on the desktop empty state', () => {
+    render(<MainContent {...landingProps({ isMobile: false })} />);
+
+    expect(screen.queryByRole('button', { name: /new conversation/i })).toBeNull();
   });
 });

@@ -2,10 +2,13 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import type { Project, ProjectSession } from '../../../../types/app';
 
 import MainContentStateView from './MainContentStateView';
+
+import i18n from '@/i18n/config.js';
 
 /*
  * Empty-state onboarding copy (#241). The desktop tip used to tell people to
@@ -208,5 +211,149 @@ describe('MainContentStateView — mobile conversation picker (#326)', () => {
     render(<MainContentStateView {...conversationProps({ projects })} />);
 
     expect(screen.getByLabelText(/menu/i)).toBeTruthy();
+  });
+});
+
+
+/*
+ * #331: the landing page from #326 could only RESUME a conversation. Starting a
+ * new one meant knowing to open the burger menu and find the sidebar's button,
+ * so the app's first screen was missing the one action a returning user is most
+ * likely to want.
+ *
+ * The fix reuses the sidebar's own SidebarNewConversationButton rather than
+ * adding a second affordance, so the project picker it opens keeps the sidebar's
+ * ordering and behaviour. The deliberate difference: no "New project…" item,
+ * because the create-project flow is the sidebar's local state and is not
+ * reachable from here — a visible item that did nothing would be worse than its
+ * absence, and every branch showing this button already has a project to start
+ * in.
+ */
+
+describe('MainContentStateView — mobile new conversation (#331)', () => {
+  const projects = [
+    project({
+      projectId: 'p1',
+      displayName: 'mind',
+      sessions: [session({ id: 's1', summary: 'Fix the login bug' })],
+    }),
+    project({
+      projectId: 'p2',
+      displayName: 'cloudcli',
+      fullPath: '/home/jkready/repos/cloudcli',
+      sessions: [session({ id: 's2', summary: 'Ship the mobile picker' })],
+    }),
+  ];
+
+  const newConversationProps = (over: Record<string, unknown> = {}) =>
+    conversationProps({ projects, onNewConversation: vi.fn(), ...over });
+
+  const newConversationButton = () => screen.getByRole('button', { name: /new conversation/i });
+
+  it('offers a way to start a conversation, not only to resume one', () => {
+    render(<MainContentStateView {...newConversationProps()} />);
+
+    expect(newConversationButton()).toBeTruthy();
+  });
+
+  it('opens a picker of the projects a conversation could start in', async () => {
+    render(<MainContentStateView {...newConversationProps()} />);
+
+    // Closed until asked for, so it never covers the conversation list.
+    expect(screen.queryAllByRole('option')).toHaveLength(0);
+
+    await userEvent.click(newConversationButton());
+
+    const options = screen.getAllByRole('option').map((node) => node.textContent ?? '');
+    expect(options).toHaveLength(2);
+    expect(options.some((text) => /mind/.test(text))).toBe(true);
+    expect(options.some((text) => /cloudcli/.test(text))).toBe(true);
+  });
+
+  it('starts the conversation in the project that was picked', async () => {
+    const onNewConversation = vi.fn();
+    const onSessionSelect = vi.fn();
+    render(<MainContentStateView {...newConversationProps({ onNewConversation, onSessionSelect })} />);
+
+    await userEvent.click(newConversationButton());
+    const option = screen
+      .getAllByRole('option')
+      .find((node) => /cloudcli/.test(node.textContent ?? ''));
+    await userEvent.click(option as HTMLElement);
+
+    expect(onNewConversation).toHaveBeenCalledTimes(1);
+    expect(onNewConversation).toHaveBeenCalledWith(projects[1]);
+    // Starting fresh is not resuming — the session handler must stay untouched.
+    expect(onSessionSelect).not.toHaveBeenCalled();
+  });
+
+  it('does not offer a "New project…" item it cannot actually open', async () => {
+    render(<MainContentStateView {...newConversationProps()} />);
+
+    await userEvent.click(newConversationButton());
+
+    expect(screen.queryByText(/new project/i)).toBeNull();
+  });
+
+  it('leaves the conversation list intact alongside it', () => {
+    render(<MainContentStateView {...newConversationProps()} />);
+
+    expect(screen.getAllByTestId('mobile-conversation-option')).toHaveLength(2);
+  });
+
+  it('stays out of the project-picker fallback, where a tap already starts a fresh chat', () => {
+    // Projects but nothing to resume — the first-run case, which falls through
+    // to the project list. Its rows call `onProjectSelect`, and that handler
+    // clears the selected session and navigates to `/`, i.e. it lands the user
+    // in a new chat for that project. Adding this button there would put a
+    // second project picker on a screen that is already a project picker, as a
+    // slower route to the same place. Asserted rather than left implicit so the
+    // omission reads as a decision, not an oversight.
+    const empty = [project({ projectId: 'p1', displayName: 'mind', sessions: [] })];
+    render(<MainContentStateView {...newConversationProps({ projects: empty })} />);
+
+    expect(screen.getAllByTestId('mobile-project-option')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /new conversation/i })).toBeNull();
+  });
+
+  it('stays off desktop, where the sidebar already has this button', () => {
+    render(<MainContentStateView {...newConversationProps({ isMobile: false })} />);
+
+    expect(screen.queryByRole('button', { name: /new conversation/i })).toBeNull();
+  });
+
+  it('offers nothing while projects are still loading', () => {
+    render(<MainContentStateView {...newConversationProps({ mode: 'loading' })} />);
+
+    expect(screen.queryByRole('button', { name: /new conversation/i })).toBeNull();
+  });
+
+  it('resolves its label from the sidebar namespace, not the inline fallback', () => {
+    // The button's `conversations.*` keys live in the `sidebar` namespace while
+    // this view's own copy lives in `common`, and there is no `fallbackNS`. Hand
+    // it the default `t` and every lookup misses, silently rendering the inline
+    // English default — invisible today, because the fallback string and the
+    // locale string are identical, and permanent drift the moment the locale
+    // file is edited.
+    //
+    // Overriding the key is what makes this detectable: a `t` scoped to the
+    // wrong namespace keeps rendering the hardcoded default and fails here.
+    const original = i18n.getResource('en', 'sidebar', 'conversations.newConversation');
+    i18n.addResource('en', 'sidebar', 'conversations.newConversation', 'Start something new');
+
+    try {
+      render(<MainContentStateView {...newConversationProps()} />);
+
+      expect(screen.getByRole('button', { name: 'Start something new' })).toBeTruthy();
+    } finally {
+      i18n.addResource('en', 'sidebar', 'conversations.newConversation', original);
+    }
+  });
+
+  it('renders without the button when no handler was supplied', () => {
+    render(<MainContentStateView {...conversationProps({ projects })} />);
+
+    expect(screen.queryByRole('button', { name: /new conversation/i })).toBeNull();
+    expect(screen.getAllByTestId('mobile-conversation-option')).toHaveLength(2);
   });
 });

@@ -25,9 +25,11 @@
 // Deliberately a separate key from `queued_message_<id>`: that queue holds
 // messages knowingly NOT yet sent (a turn was already in flight), whereas these
 // may or may not have reached the server, which is a different retry decision.
-// Keeping them apart also keeps them out of the `QuotaExceededError` sweep in
-// `safeLocalStorage`, which drops `draft_input_`/`queued_message_` keys — these
-// entries are unconfirmed user writing and are the last thing worth discarding.
+// Keeping them apart also kept them out of the `QuotaExceededError` sweep in
+// `safeLocalStorage`, which at the time dropped `draft_input_`/`queued_message_`
+// keys — these entries are unconfirmed user writing and are the last thing worth
+// discarding. That sweep now spares `queued_message_` for the same reason and
+// evicts only `draft_input_` (#330), so both queues are protected.
 
 import { safeLocalStorage } from './chatStorage';
 

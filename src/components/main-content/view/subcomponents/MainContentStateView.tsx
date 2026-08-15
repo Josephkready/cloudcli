@@ -5,7 +5,9 @@ import { useTranslation } from 'react-i18next';
 import { useHideCliOriginChats } from '../../../../hooks/useHideCliOriginChats';
 import { buildConversationList, formatCompactAge } from '../../../sidebar/utils/conversationList';
 import { filterCliOriginConversations, getSessionName } from '../../../sidebar/utils/utils';
+import SidebarNewConversationButton from '../../../sidebar/view/subcomponents/SidebarNewConversationButton';
 import type { MainContentStateViewProps } from '../../types/types';
+
 import MobileMenuButton from './MobileMenuButton';
 
 export default function MainContentStateView({
@@ -16,8 +18,18 @@ export default function MainContentStateView({
   activeSessions,
   onProjectSelect,
   onSessionSelect,
+  onNewConversation,
 }: MainContentStateViewProps) {
   const { t } = useTranslation();
+  // A second, sidebar-scoped `t` purely for SidebarNewConversationButton, whose
+  // `conversations.*` keys live in the `sidebar` namespace while this view's own
+  // `mainContent.*` copy lives in `common`. The default `t` resolves `common`
+  // only — there is no `fallbackNS` — so handing it to that button would miss
+  // every one of its keys and silently render the inline English defaults,
+  // decoupling its copy from the locale file that owns it. Two scoped `t`s
+  // rather than `useTranslation(['sidebar', 'common'])`: a bare key resolves
+  // against the FIRST namespace only, so the array form breaks `mainContent.*`.
+  const { t: tSidebar } = useTranslation('sidebar');
   const hideCliOriginChats = useHideCliOriginChats();
 
   const isLoading = mode === 'loading';
@@ -77,6 +89,27 @@ export default function MainContentStateView({
           <div className="mx-auto w-full max-w-md">
             <h2 className="mb-1 text-lg font-semibold text-foreground">{t('mainContent.chooseConversation')}</h2>
             <p className="mb-4 text-sm text-muted-foreground">{t('mainContent.tapConversationToOpen')}</p>
+            {/*
+              #331: the list only let you RESUME a conversation. Starting one
+              meant opening the burger menu and finding the sidebar's button, so
+              the landing page was missing its other half. This is that same
+              button, not a second implementation, so the picker it opens keeps
+              the sidebar's ordering of the folders you can start in.
+
+              It is deliberately given no create-project handler: that flow is
+              the sidebar's own state and is unreachable from here, so the
+              component drops its "New project…" item rather than rendering one
+              that does nothing. Nothing is lost — this branch only renders when
+              there is already at least one project to start in.
+            */}
+            {onNewConversation && (
+              <SidebarNewConversationButton
+                projects={projects ?? []}
+                onNewConversation={onNewConversation}
+                className="mb-4"
+                t={tSidebar}
+              />
+            )}
             <ul className="space-y-2">
               {conversations.map(({ project, session, activityTime }) => {
                 const age = formatCompactAge(activityTime, new Date());
