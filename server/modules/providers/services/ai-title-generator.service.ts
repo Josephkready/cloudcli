@@ -1,8 +1,9 @@
 /**
  * Turns a raw "first-prompt" session title into a short sidebar label using a
- * local Ollama model. Pure and side-effect free (no DB, no scheduling) so it can
- * be unit-tested with a stubbed `fetch`; the scheduling worker lives in
- * ai-session-titler.service.ts.
+ * hosted OpenAI-compatible chat model — OpenRouter by default, with routing
+ * pinned to zero-data-retention endpoints. Pure and side-effect free (no DB, no
+ * scheduling) so it can be unit-tested with a stubbed `fetch`; the scheduling
+ * worker lives in ai-session-titler.service.ts.
  */
 
 const SYSTEM_PROMPT =
@@ -16,9 +17,35 @@ const SYSTEM_PROMPT =
 const MAX_TITLE_LENGTH = 80;
 const DEFAULT_TIMEOUT_MS = 20_000;
 
+// A title is ~10 tokens, but on a reasoning model (the default `openai/gpt-5-nano`
+// is one) this budget covers thinking tokens too, and a reply that runs out of
+// budget mid-title is discarded below. Sized for headroom rather than thrift: the
+// worst case is a fraction of a cent, a truncated title costs a row.
+const MAX_OUTPUT_TOKENS = 256;
+
+// How much of an error response body to keep in the thrown message. OpenRouter
+// explains routing failures there — notably the 404 returned when no endpoint
+// satisfies the provider block — so it is worth surfacing.
+const ERROR_BODY_CHARS = 200;
+
 export interface TitleGeneratorOptions {
-  ollamaUrl: string;
+  /** OpenAI-compatible API root, e.g. https://openrouter.ai/api/v1. */
+  baseUrl: string;
   model: string;
+  apiKey: string;
+  /**
+   * Restrict routing to zero-data-retention endpoints (OpenRouter-specific).
+   * Turn off for OpenAI-compatible endpoints that reject an unknown `provider` field.
+   */
+  zdr?: boolean;
+  /** OpenRouter reasoning effort; empty/undefined omits the parameter entirely. */
+  reasoningEffort?: string;
+  /**
+   * Which output-cap parameter this model's endpoints accept —
+   * `max_completion_tokens` (OpenAI-family) or `max_tokens` (most others).
+   * Under `require_parameters: true` the wrong one filters every endpoint out.
+   */
+  maxTokensParam?: string;
   timeoutMs?: number;
   /** Injectable for tests; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
@@ -55,11 +82,63 @@ export function cleanTitle(raw: string): string {
 }
 
 /**
+ * Builds the chat-completions request body.
+ *
+ * Deliberately sends no `temperature`/`top_p`: the ZDR block needs
+ * `require_parameters: true` (otherwise routing can silently land on an endpoint
+ * that drops a parameter it does not support), and under that flag every
+ * unsupported parameter shrinks the endpoint pool. The default model's endpoints
+ * do not advertise sampling parameters at all, so a stray `temperature` would
+ * filter the pool to empty and 404 every request. The output cap is named by the
+ * caller for the same reason — see `maxTokensParam`.
+ */
+export function buildTitleRequestBody(
+  source: string,
+  options: Pick<TitleGeneratorOptions, 'model' | 'zdr' | 'reasoningEffort' | 'maxTokensParam'>
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model: options.model,
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: source },
+    ],
+    [options.maxTokensParam || 'max_completion_tokens']: MAX_OUTPUT_TOKENS,
+  };
+
+  if (options.reasoningEffort) {
+    body.reasoning = { effort: options.reasoningEffort };
+  }
+  if (options.zdr) {
+    body.provider = { zdr: true, require_parameters: true };
+  }
+
+  return body;
+}
+
+interface ChatCompletionResponse {
+  error?: { message?: unknown };
+  choices?: Array<{
+    finish_reason?: unknown;
+    message?: { content?: unknown };
+  }>;
+}
+
+/** Trims a remote error body down to a single loggable line. */
+function errorSnippet(body: string): string {
+  const collapsed = body.replace(/\s+/g, ' ').trim();
+  if (!collapsed) {
+    return '';
+  }
+  return `: ${collapsed.slice(0, ERROR_BODY_CHARS)}`;
+}
+
+/**
  * Requests a short title for one raw title.
  *
  * Returns the cleaned title, or `null` when the model produced nothing usable
- * (empty or too long) — the caller should skip that row. Network/HTTP failures
- * throw so the worker can back off; an unusable-but-successful response does not.
+ * (empty, truncated, or too long) — the caller should skip that row.
+ * Network/HTTP failures throw so the worker can back off; an
+ * unusable-but-successful response does not.
  */
 export async function generateShortTitle(
   rawTitle: string,
@@ -75,26 +154,43 @@ export async function generateShortTitle(
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
   try {
-    const response = await fetchImpl(`${options.ollamaUrl.replace(/\/+$/, '')}/api/generate`, {
+    const response = await fetchImpl(`${options.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: options.model,
-        system: SYSTEM_PROMPT,
-        prompt: source,
-        stream: false,
-        keep_alive: '5m',
-        options: { temperature: 0.2, top_p: 0.9, num_predict: 24 },
-      }),
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${options.apiKey}`,
+      },
+      body: JSON.stringify(buildTitleRequestBody(source, options)),
       signal: controller.signal,
     });
 
     if (!response.ok) {
-      throw new Error(`Ollama responded ${response.status} ${response.statusText}`);
+      const body = await response.text().catch(() => '');
+      throw new Error(
+        `Title API responded ${response.status} ${response.statusText}${errorSnippet(body)}`
+      );
     }
 
-    const data = (await response.json()) as { response?: unknown };
-    const title = cleanTitle(typeof data.response === 'string' ? data.response : '');
+    const data = (await response.json()) as ChatCompletionResponse;
+
+    // OpenRouter reports some upstream failures as an `error` object inside a
+    // 200, so a status check alone would read that as an empty completion and
+    // burn the row instead of backing off.
+    if (data.error) {
+      const message =
+        typeof data.error.message === 'string' ? data.error.message : JSON.stringify(data.error);
+      throw new Error(`Title API returned an error: ${message.slice(0, ERROR_BODY_CHARS)}`);
+    }
+
+    const choice = data.choices?.[0];
+    // `length` means the reply hit MAX_OUTPUT_TOKENS — either a truncated title
+    // or a model that spent the whole budget on reasoning. Neither is storable.
+    if (choice?.finish_reason === 'length') {
+      return null;
+    }
+
+    const content = choice?.message?.content;
+    const title = cleanTitle(typeof content === 'string' ? content : '');
     if (!title || title.length > MAX_TITLE_LENGTH) {
       return null;
     }

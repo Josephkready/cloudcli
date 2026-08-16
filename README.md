@@ -31,7 +31,7 @@ npm test           # server, front-end unit, and component test suites
 npm run lint       # eslint src/ server/
 ```
 
-The server serves the built client and the API on port `3001` by default. See `.env.example` for configuration (ports, database path, `ROUTER_BASENAME` for subpath hosting, `CLOUDCLI_AI_TITLES_*` for optional Ollama-backed session titles, `CLOUDCLI_EXCLUDED_PROJECT_PATHS` for sidebar filtering, and more).
+The server serves the built client and the API on port `3001` by default. See `.env.example` for configuration (ports, database path, `ROUTER_BASENAME` for subpath hosting, `CLOUDCLI_AI_TITLES_*` for optional AI-shortened session titles, `CLOUDCLI_EXCLUDED_PROJECT_PATHS` for sidebar filtering, and more).
 
 Plugins (custom web-UI tabs, drop-installed by writing files): see [`docs/plugins.md`](docs/plugins.md).
 

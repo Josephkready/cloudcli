@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  parseApiKeyFile,
   processTitleBatch,
   type TitleBatchDeps,
 } from '@/modules/providers/services/ai-session-titler.service.js';
@@ -82,7 +83,7 @@ test('processTitleBatch skips rows with no custom_name without attempting genera
 test('processTitleBatch aborts the rest of the batch when generation throws', async () => {
   const { deps, persisted, generatedFor } = makeDeps({
     'raw a': 'Title A',
-    'raw b': new Error('ollama down'),
+    'raw b': new Error('Title API responded 401 Unauthorized'),
     'raw c': 'Title C',
   });
 
@@ -98,7 +99,48 @@ test('processTitleBatch aborts the rest of the batch when generation throws', as
   // First row succeeded; the throw on the second stops processing before the third.
   assert.deepEqual(persisted, [{ id: 'a', title: 'Title A' }]);
   assert.deepEqual(generatedFor, ['raw a', 'raw b']);
-  assert.deepEqual(result, { rewritten: 1, attempted: 2, failed: true });
+  assert.deepEqual(result, {
+    rewritten: 1,
+    attempted: 2,
+    failed: true,
+    // Carried so the backoff log can distinguish a bad key from a routing
+    // failure — the reason is logged only once per failure streak.
+    failureReason: 'Title API responded 401 Unauthorized',
+  });
+});
+
+test('parseApiKeyFile reads only the named key out of a shared env file', () => {
+  // The point of reading one key (rather than sourcing the file) is that a
+  // deployment can point at a credential file it shares with other services
+  // without importing every unrelated secret in it.
+  const contents = [
+    '# shared credentials',
+    'SOME_OTHER_SECRET=do-not-take-this',
+    'OPENROUTER_API_KEY=sk-or-v1-abc123',
+    'ANOTHER=nope',
+  ].join('\n');
+
+  assert.equal(parseApiKeyFile(contents), 'sk-or-v1-abc123');
+});
+
+test('parseApiKeyFile prefers the cloudcli-specific key over the generic one', () => {
+  const contents = 'OPENROUTER_API_KEY=shared-key\nCLOUDCLI_AI_TITLES_API_KEY=specific-key\n';
+  assert.equal(parseApiKeyFile(contents), 'specific-key');
+});
+
+test('parseApiKeyFile tolerates quotes and surrounding whitespace', () => {
+  assert.equal(parseApiKeyFile('  OPENROUTER_API_KEY="sk-quoted"  '), 'sk-quoted');
+  assert.equal(parseApiKeyFile("OPENROUTER_API_KEY='sk-single'"), 'sk-single');
+});
+
+test('parseApiKeyFile returns empty string when the key is absent or blank', () => {
+  assert.equal(parseApiKeyFile('UNRELATED=1\n'), '');
+  assert.equal(parseApiKeyFile('OPENROUTER_API_KEY=\n'), '');
+  assert.equal(parseApiKeyFile(''), '');
+});
+
+test('parseApiKeyFile does not match a key that is merely a suffix of another name', () => {
+  assert.equal(parseApiKeyFile('MY_OPENROUTER_API_KEY=not-ours\n'), '');
 });
 
 test('processTitleBatch continues the batch when a broadcast fails', async () => {
