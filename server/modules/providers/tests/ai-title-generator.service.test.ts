@@ -176,6 +176,16 @@ test('generateShortTitle returns null for a missing or non-string content field'
     }),
     null,
   );
+
+  // Exercises the `typeof content === 'string'` guard itself, not just nullishness.
+  const numericContent = stubFetch({ choices: [{ message: { content: 42 } }] });
+  assert.equal(
+    await generateShortTitle('a raw title long enough to be worth shortening', {
+      ...OPTIONS,
+      fetchImpl: numericContent.fetchImpl,
+    }),
+    null,
+  );
 });
 
 test('generateShortTitle returns null when the reply was truncated by the token cap', async () => {
@@ -231,5 +241,48 @@ test('generateShortTitle throws when a 200 response carries an error payload', a
   await assert.rejects(
     generateShortTitle('a raw title long enough to be worth shortening', { ...OPTIONS, fetchImpl }),
     /upstream provider timed out/,
+  );
+});
+
+test('generateShortTitle collapses newlines out of remote error text', async () => {
+  // The error text reaches a single `[AI titles]` console.warn line, so a remote
+  // body containing newlines could otherwise forge extra log entries under that
+  // prefix. Both error paths — HTTP-level and 200-with-error — must collapse.
+  const injection = 'Unauthorized\n[AI titles] Title backend reachable again, resuming.';
+
+  const inPayload = stubFetch({ error: { message: injection } });
+  await assert.rejects(
+    generateShortTitle('a raw title long enough to be worth shortening', {
+      ...OPTIONS,
+      fetchImpl: inPayload.fetchImpl,
+    }),
+    (error: Error) => !error.message.includes('\n') && error.message.includes('Unauthorized'),
+  );
+
+  const inBody = stubFetch({}, { ok: false, status: 401, text: injection });
+  await assert.rejects(
+    generateShortTitle('a raw title long enough to be worth shortening', {
+      ...OPTIONS,
+      fetchImpl: inBody.fetchImpl,
+    }),
+    (error: Error) => !error.message.includes('\n'),
+  );
+});
+
+test('generateShortTitle aborts the request when it outruns the timeout', async () => {
+  // Also guards the clearTimeout wiring: a leaked timer would keep the process
+  // alive and make this test hang rather than fail.
+  const fetchImpl = ((url: string, options: any) =>
+    new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+    })) as unknown as typeof fetch;
+
+  await assert.rejects(
+    generateShortTitle('a raw title long enough to be worth shortening', {
+      ...OPTIONS,
+      timeoutMs: 1,
+      fetchImpl,
+    }),
+    /aborted/,
   );
 });

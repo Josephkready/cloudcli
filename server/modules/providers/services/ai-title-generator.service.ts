@@ -123,13 +123,20 @@ interface ChatCompletionResponse {
   }>;
 }
 
+/**
+ * Bounds untrusted remote text for logging. The newline collapse is the
+ * load-bearing half: this ends up inside a thrown Error that the worker logs on
+ * one `[AI titles]` line, so a response body containing newlines could otherwise
+ * forge extra log entries with that prefix.
+ */
+function loggableRemoteText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, ERROR_BODY_CHARS);
+}
+
 /** Trims a remote error body down to a single loggable line. */
 function errorSnippet(body: string): string {
-  const collapsed = body.replace(/\s+/g, ' ').trim();
-  if (!collapsed) {
-    return '';
-  }
-  return `: ${collapsed.slice(0, ERROR_BODY_CHARS)}`;
+  const collapsed = loggableRemoteText(body);
+  return collapsed ? `: ${collapsed}` : '';
 }
 
 /**
@@ -179,7 +186,7 @@ export async function generateShortTitle(
     if (data.error) {
       const message =
         typeof data.error.message === 'string' ? data.error.message : JSON.stringify(data.error);
-      throw new Error(`Title API returned an error: ${message.slice(0, ERROR_BODY_CHARS)}`);
+      throw new Error(`Title API returned an error: ${loggableRemoteText(message)}`);
     }
 
     const choice = data.choices?.[0];

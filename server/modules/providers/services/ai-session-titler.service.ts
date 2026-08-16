@@ -19,7 +19,7 @@ import { sessionsDb } from '@/modules/database/index.js';
 import { generateShortTitle } from '@/modules/providers/services/ai-title-generator.service.js';
 import { broadcastSessionUpserted } from '@/modules/providers/services/sessions-watcher.service.js';
 
-interface TitlerConfig {
+export interface TitlerConfig {
   enabled: boolean;
   baseUrl: string;
   model: string;
@@ -93,7 +93,10 @@ function positiveIntFromEnv(value: string | undefined, fallback: number): number
 export function parseApiKeyFile(contents: string): string {
   for (const name of API_KEY_FILE_NAMES) {
     for (const line of contents.split(/\r?\n/)) {
-      const trimmed = line.trim();
+      // Tolerate `export KEY=...`, which a file meant to be shell-sourced uses
+      // and a systemd EnvironmentFile does not. Silently finding no key because
+      // of that prefix would surface only as "no API key configured".
+      const trimmed = line.trim().replace(/^export\s+/, '');
       if (!trimmed.startsWith(`${name}=`)) {
         continue;
       }
@@ -127,7 +130,8 @@ function readApiKey(): string {
   }
 }
 
-function readConfig(): TitlerConfig {
+/** Exported for tests: the env-parsing here carries several deliberate subtleties. */
+export function readConfig(): TitlerConfig {
   return {
     enabled: process.env.CLOUDCLI_AI_TITLES_ENABLED === 'true',
     baseUrl: process.env.CLOUDCLI_AI_TITLES_BASE_URL?.trim() || DEFAULT_BASE_URL,
@@ -272,12 +276,15 @@ async function runTick(config: TitlerConfig): Promise<void> {
  * The interval is unref'd so it never blocks shutdown.
  */
 export function startAiSessionTitler(): void {
-  const config = readConfig();
-
-  if (!config.enabled) {
+  // Checked before readConfig() so a disabled feature does no work at all —
+  // readConfig reads the key file, which would otherwise warn on every startup
+  // about an unreadable path that nothing was going to use.
+  if (process.env.CLOUDCLI_AI_TITLES_ENABLED !== 'true') {
     console.log('[AI titles] Disabled (set CLOUDCLI_AI_TITLES_ENABLED=true to enable).');
     return;
   }
+
+  const config = readConfig();
   // Refusing to start beats hammering the endpoint with unauthenticated requests
   // that only fail after a full backoff cycle. A keyless local endpoint can pass
   // any non-empty placeholder.
