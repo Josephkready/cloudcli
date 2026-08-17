@@ -36,6 +36,19 @@ export type RetryPendingSendsArgs = {
   persist: (entries: PendingSend[]) => void;
   /** Injected for determinism in tests. */
   now: () => number;
+  /**
+   * Whether `serverMessages` is the whole transcript rather than a page of it.
+   *
+   * The caller refetches with `limit: MESSAGES_PER_PAGE, offset: 0`, so what
+   * arrives here is a window over the most recent messages. On a session with
+   * more messages than fit, the opening prompt is simply not in it — and
+   * treating that absence as "the server never received it" resent a message the
+   * server had held for eighteen minutes (#347/#350). It is why the duplicate
+   * was always the session's *first* message.
+   *
+   * Defaults to `true` so an omitted flag keeps the original behaviour.
+   */
+  transcriptComplete?: boolean;
 };
 
 /**
@@ -56,10 +69,22 @@ export function retryPendingSends({
   send,
   persist,
   now,
+  transcriptComplete = true,
 }: RetryPendingSendsArgs): { confirmed: number; resent: number; stillPending: number } {
   if (entries.length === 0) {
     return { confirmed: 0, resent: 0, stillPending: 0 };
   }
+
+  // How far back the loaded slice actually reaches. On a partial transcript,
+  // anything sent before this is simply outside the window we fetched, so its
+  // absence proves nothing and must not trigger a resend. `Infinity` for an
+  // empty partial slice: it covers nothing at all.
+  const coveredFrom = transcriptComplete
+    ? -Infinity
+    : serverMessages.reduce((oldest, message) => {
+      const time = Date.parse(message.timestamp);
+      return Number.isFinite(time) ? Math.min(oldest, time) : oldest;
+    }, Infinity);
 
   const { confirmed, unconfirmed } = resolvePendingSends(
     entries,
@@ -76,6 +101,22 @@ export function retryPendingSends({
     if (socketLost) {
       // Stop dispatching once the socket has failed: continuing would reorder
       // the queue relative to what actually got through.
+      remaining.push(entry);
+      continue;
+    }
+
+    // The loaded slice never reached back this far, so "not found" is a gap in
+    // what we fetched, not evidence of loss. Hold the entry for a later pass
+    // against a transcript that does cover it (#347/#350).
+    //
+    // This does not strand a genuinely lost message: the reconnect pass in
+    // `ChatInterface` runs against `refreshFromServer`, which fetches the whole
+    // transcript, so it judges the entry properly and resends if it really is
+    // missing. Holding is the right side to err on — resending a message the
+    // server already has asks the model the same thing twice, in front of the
+    // user, whereas waiting costs one reconnect.
+    const firstAttemptAt = Date.parse(entry.firstAttemptAt ?? entry.timestamp);
+    if (Number.isFinite(firstAttemptAt) && firstAttemptAt < coveredFrom) {
       remaining.push(entry);
       continue;
     }

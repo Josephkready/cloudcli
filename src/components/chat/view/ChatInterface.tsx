@@ -254,6 +254,10 @@ function ChatInterface({
           send: sendMessage,
           persist: (entries) => writePendingSends(selectedSession.id, entries),
           now: () => Date.now(),
+          // Unlike the paginated fetch in `useChatSessionState`, `refreshFromServer`
+          // requests `/messages` with no limit, so this slot holds the whole
+          // transcript and an absence here really is one (#347/#350).
+          transcriptComplete: true,
         });
       }
     }
