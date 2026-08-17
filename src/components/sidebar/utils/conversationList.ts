@@ -90,11 +90,16 @@ function isServerLive(session: SessionWithProvider): boolean {
  *
  * The two values come from different clocks: `last_completed_at` is always the
  * server's, while `SessionActivity.startedAt` is documented as the client's and
- * is filled from the server's by the running-sessions poll. A few seconds of
- * disagreement between a phone and dante is ordinary and must not demote a live
- * run; a genuinely stale entry is minutes or hours out, far past this.
+ * is filled from the server's by the running-sessions poll.
+ *
+ * Sized by which mistake costs more. Demoting a live run is the expensive one:
+ * nothing re-promotes it, because the completion stays newer than that run's
+ * start for as long as the run lasts, so a browser whose clock is behind would
+ * show a working session as Done until it finished. Being slow to correct a
+ * stale entry costs nothing by comparison — those are minutes or hours out, far
+ * past any plausible skew — so this is deliberately generous rather than tight.
  */
-const COMPLETION_AFTER_START_MARGIN_MS = 10_000;
+const COMPLETION_AFTER_START_MARGIN_MS = 60_000;
 
 /**
  * True when the client still believes a run is in flight that the server has

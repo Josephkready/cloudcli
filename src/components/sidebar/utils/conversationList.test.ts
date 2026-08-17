@@ -368,3 +368,23 @@ test('an unknown run start never demotes the row, however old the completion', (
   assert.equal(item.status, 'running');
   assert.equal(item.isActive, true);
 });
+
+test('half a minute of clock disagreement does not demote a live run', () => {
+  // Review of #353: demoting a live run is the expensive mistake, because
+  // nothing re-promotes it — the completion stays newer than that run's start
+  // for as long as the run lasts. A browser whose clock is behind would show a
+  // working session as Done until it finished, so the margin is generous.
+  const s = session('s', '2026-07-18T03:00:00Z', completed('2026-07-18T03:00:30.000Z'));
+  const active = new Map([['s', activityStartedAt(RUN_START)]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, null);
+  assert.equal(item.status, 'running');
+});
+
+test('a completion well past the margin is still read as a finished run', () => {
+  const s = session('s', '2026-07-18T03:00:00Z', completed('2026-07-18T03:05:00.000Z'));
+  const active = new Map([['s', activityStartedAt(RUN_START)]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, null);
+  assert.equal(item.status, 'done');
+});
