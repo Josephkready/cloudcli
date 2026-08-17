@@ -14,7 +14,7 @@ import {
   CommandSeparator,
 } from '../../../../shared/view/ui/Command';
 import { cn } from '../../../../lib/utils';
-import { buildNewConversationItems } from '../../utils/newConversation';
+import { buildNewConversationItems, scoreFolderMatch } from '../../utils/newConversation';
 
 type SidebarNewConversationButtonProps = {
   projects: Project[];
@@ -93,6 +93,26 @@ export default function SidebarNewConversationButton({
 
   const label = t('conversations.newConversation', 'New conversation');
 
+  // cmdk hands its filter only the item's `value` string, so keep the parts each
+  // row was built from addressable by that value. Keyed lowercase because cmdk
+  // normalizes case before matching.
+  const rowsByValue = new Map(
+    items.map((item) => {
+      const value = `${item.label} ${item.description ?? ''} ${item.key}`;
+      return [value.toLowerCase(), { label: item.label, path: item.description ?? '' }];
+    }),
+  );
+
+  const filterFolders = (value: string, search: string): number => {
+    const row = rowsByValue.get(value.toLowerCase());
+    // An unknown value can only mean the row was registered after this render;
+    // scoring it visible is the safe default (a stale hide looks like data loss).
+    if (!row) {
+      return 1;
+    }
+    return scoreFolderMatch(row.label, row.path, search);
+  };
+
   return (
     <div ref={containerRef} className={cn('relative', className)}>
       <Button
@@ -109,7 +129,7 @@ export default function SidebarNewConversationButton({
 
       {isOpen && (
         <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg">
-          <Command>
+          <Command filter={filterFolders}>
             <CommandInput
               autoFocus
               placeholder={t('conversations.newConversationSearchPlaceholder', 'Search folders…')}

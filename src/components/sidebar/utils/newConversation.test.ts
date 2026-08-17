@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type { Project } from '../../../types/app';
 
-import { buildNewConversationItems } from './newConversation';
+import { buildNewConversationItems, scoreFolderMatch } from './newConversation';
 
 const t = ((key: string, fallback?: string) => fallback ?? key) as never;
 
@@ -29,6 +29,14 @@ function repo(projectId: string, displayName: string, options: { isStarred?: boo
 /** A space that exists but isn't a repository root — a subfolder, typically. */
 function subfolder(projectId: string, displayName: string, fullPath: string): Project {
   return project(projectId, displayName, { fullPath, isRepository: false });
+}
+
+/** A repository root that is a linked worktree rather than a clone (#344). */
+function worktree(projectId: string, displayName: string, fullPath: string): Project {
+  return {
+    ...project(projectId, displayName, { fullPath, isRepository: true }),
+    isWorktree: true,
+  } as unknown as Project;
 }
 
 test('lists each project then a trailing "New project…" escape hatch', () => {
@@ -220,6 +228,80 @@ test('includeNonRepositories reveals the plain folders, and still counts them as
   assert.equal(hiddenProjectCount, 2 - 1);
 });
 
+// #344: #332's repository filter left the picker still full of folders nobody
+// starts a conversation in, because a linked worktree *is* a repository root.
+// On the reporter's machine 21 of the 46 listed spaces were agent worktrees.
+test('hides linked worktrees, keeping only the clones behind the default listing', () => {
+  const { items, hiddenProjectCount } = buildNewConversationItems({
+    projects: [
+      repo('mind', 'mind'),
+      worktree('mind-wt', 'mind.enrich-career-coach-profiles', '/repos/mind.enrich-a72ffaf5'),
+      worktree('agent-wt', 'round2-apob-cvd', '/home/j/.cache/omni/run-1/wt/round2-apob-cvd'),
+      repo('cloudcli', 'cloudcli'),
+    ],
+    onPickProject: () => {},
+    onCreateProject: () => {},
+    t,
+  });
+
+  assert.deepEqual(
+    items.map((item) => item.label),
+    ['cloudcli', 'mind', 'New project…'],
+  );
+  // Both worktrees join the hidden set the "show all folders" toggle reveals.
+  assert.equal(hiddenProjectCount, 2);
+});
+
+test('includeNonRepositories reveals worktrees alongside plain folders', () => {
+  const { items } = buildNewConversationItems({
+    projects: [
+      repo('mind', 'mind'),
+      worktree('mind-wt', 'mind.feature-branch', '/repos/mind.feature-branch'),
+      subfolder('sub', 'tools', '/repos/mind/tools'),
+    ],
+    onPickProject: () => {},
+    includeNonRepositories: true,
+    t,
+  });
+
+  assert.deepEqual(
+    items.map((item) => item.label),
+    ['mind', 'mind.feature-branch', 'tools'],
+  );
+});
+
+// A server predating the worktree flag reports isRepository but not isWorktree.
+// Treating "unknown" as "worktree" would empty the picker of every repository.
+test('a repository with no worktree flag is listed (older server payload)', () => {
+  const { items, hiddenProjectCount } = buildNewConversationItems({
+    projects: [repo('mind', 'mind'), repo('cloudcli', 'cloudcli')],
+    onPickProject: () => {},
+    t,
+  });
+
+  assert.deepEqual(
+    items.map((item) => item.label),
+    ['cloudcli', 'mind'],
+  );
+  assert.equal(hiddenProjectCount, 0);
+});
+
+test('a starred worktree is still hidden (starring does not make it a clone)', () => {
+  const { items } = buildNewConversationItems({
+    projects: [
+      repo('mind', 'mind'),
+      { ...worktree('wt', 'Scratch WT', '/repos/mind.wt'), isStarred: true } as unknown as Project,
+    ],
+    onPickProject: () => {},
+    t,
+  });
+
+  assert.deepEqual(
+    items.map((item) => item.label),
+    ['mind'],
+  );
+});
+
 test('a starred subfolder is still filtered out (starring is not a repository)', () => {
   const { items } = buildNewConversationItems({
     projects: [
@@ -264,4 +346,124 @@ test('lists every space when no project carries the repository flag', () => {
     ['Alpha', 'Bravo', 'New project…'],
   );
   assert.equal(hiddenProjectCount, 0);
+});
+
+/*
+ * Search ranking (#344, second half).
+ *
+ * cmdk's default filter is a subsequence match: it accepts an item whenever the
+ * query's characters appear in order anywhere in the item's value. Against full
+ * filesystem paths that matches almost everything — typing "mind" surfaced
+ * `datapoint`, `audio-processing-library` and four `.cache/omni-harness/…/repo`
+ * clones, because o**m**n**i**-har**n**ess…**d** spells it. The picker searches
+ * folders, so a plain substring is the right rule.
+ */
+
+test('scoreFolderMatch: an empty query keeps everything', () => {
+  assert.ok(scoreFolderMatch('mind', '/repos/mind', '') > 0);
+});
+
+test('scoreFolderMatch: a subsequence that is not a substring does not match', () => {
+  // The exact false positives seen in the picker.
+  assert.equal(scoreFolderMatch('repo', '/home/j/.cache/omni-harness/refinery/run-1/repo', 'mind'), 0);
+  assert.equal(scoreFolderMatch('datapoint', '/home/j/repos/datapoint', 'mind'), 0);
+  assert.equal(scoreFolderMatch('audio-processing-library', '/home/j/repos/audio-processing-library', 'mind'), 0);
+});
+
+test('scoreFolderMatch: a name substring matches', () => {
+  assert.ok(scoreFolderMatch('mind', '/repos/mind', 'mind') > 0);
+  assert.ok(scoreFolderMatch('wall-display', '/repos/wall-display', 'display') > 0);
+});
+
+test('scoreFolderMatch: matching the name outranks matching only the path', () => {
+  const byName = scoreFolderMatch('mind', '/home/j/repos/mind', 'mind');
+  const byPath = scoreFolderMatch('notes', '/home/j/repos/mind/notes', 'mind');
+  assert.ok(byName > byPath, `expected name match (${byName}) to outrank path match (${byPath})`);
+  assert.ok(byPath > 0, 'a path substring should still be reachable');
+});
+
+test('scoreFolderMatch: an exact name outranks a longer name containing it', () => {
+  const exact = scoreFolderMatch('mind', '/repos/mind', 'mind');
+  const prefixed = scoreFolderMatch('mind-search', '/repos/mind-search', 'mind');
+  assert.ok(exact > prefixed, `expected exact (${exact}) to beat prefix (${prefixed})`);
+});
+
+test('scoreFolderMatch: matching is case-insensitive and ignores surrounding spaces', () => {
+  assert.ok(scoreFolderMatch('CloudCLI', '/repos/cloudcli', '  cloud  ') > 0);
+});
+
+test('scoreFolderMatch: a query matching nothing leaves the list empty', () => {
+  // Including the "New project…" row: #338 wants the "No folders found" message
+  // in that case, not a single surviving action.
+  assert.equal(scoreFolderMatch('New project…', '', 'zzz-nothing-matches'), 0);
+  assert.equal(scoreFolderMatch('mind', '/repos/mind', 'zzz-nothing-matches'), 0);
+});
+
+/*
+ * Repositories buried in a hidden directory (#344, third pass).
+ *
+ * Hiding worktrees left seven `~/.cache/omni-harness/refinery/run-<id>/repo`
+ * entries in the picker. Those are ordinary clones, so no git-shaped rule can
+ * exclude them — but a checkout under a dot-directory is a tool's private
+ * working copy, not a project anyone opens a conversation in. `~/repos/...`
+ * is unaffected; the "show all folders" toggle still reaches them.
+ */
+
+test('hides repositories living under a hidden dot-directory', () => {
+  const { items, hiddenProjectCount } = buildNewConversationItems({
+    projects: [
+      repo('mind', 'mind'),
+      { ...repo('cache-repo', 'repo'), fullPath: '/home/j/.cache/omni-harness/refinery/run-1/repo' } as Project,
+      { ...repo('gem', 'skills'), fullPath: '/home/j/.gemini/antigravity-cli/skills' } as Project,
+    ],
+    onPickProject: () => {},
+    t,
+  });
+
+  assert.deepEqual(
+    items.map((item) => item.label),
+    ['mind'],
+  );
+  assert.equal(hiddenProjectCount, 2);
+});
+
+test('a dot in a file/folder name is not a hidden directory', () => {
+  // `mind.integration` is a normal sibling repo, not a dotfile path.
+  const { items } = buildNewConversationItems({
+    projects: [
+      { ...repo('dotted', 'mind.integration'), fullPath: '/home/j/repos/mind.integration' } as Project,
+      { ...repo('trailing', 'v1.2.3-release'), fullPath: '/home/j/repos/v1.2.3-release' } as Project,
+    ],
+    onPickProject: () => {},
+    t,
+  });
+
+  assert.deepEqual(
+    items.map((item) => item.label),
+    ['mind.integration', 'v1.2.3-release'],
+  );
+});
+
+test('the home directory itself is not treated as hidden', () => {
+  const { items } = buildNewConversationItems({
+    projects: [{ ...repo('home', 'jkready'), fullPath: '/home/jkready' } as Project],
+    onPickProject: () => {},
+    t,
+  });
+
+  assert.deepEqual(items.map((item) => item.label), ['jkready']);
+});
+
+test('revealing all folders still reaches a hidden-directory repository', () => {
+  const { items } = buildNewConversationItems({
+    projects: [
+      repo('mind', 'mind'),
+      { ...repo('cache-repo', 'repo'), fullPath: '/home/j/.cache/omni/run-1/repo' } as Project,
+    ],
+    onPickProject: () => {},
+    includeNonRepositories: true,
+    t,
+  });
+
+  assert.equal(items.length, 2);
 });

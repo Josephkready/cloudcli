@@ -10,6 +10,7 @@ import type {
   ProviderSkillSource,
 } from '@/shared/types.js';
 import {
+  entryLeadsToDirectory,
   findProviderSkillMarkdownFiles,
   readJsonConfig,
   readObjectRecord,
@@ -41,12 +42,20 @@ const pathExistsAsDirectory = async (directoryPath: string): Promise<boolean> =>
   }
 };
 
+// Symlinked plugin folders count, for the same reason symlinked skill folders
+// do (#345) — see entryLeadsToDirectory.
 const listChildDirectories = async (directoryPath: string): Promise<string[]> => {
   try {
     const entries = await readdir(directoryPath, { withFileTypes: true });
-    return entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(directoryPath, entry.name))
+    const childDirectories = await Promise.all(
+      entries.map(async (entry) => {
+        const entryPath = path.join(directoryPath, entry.name);
+        return (await entryLeadsToDirectory(entryPath, entry)) ? entryPath : null;
+      }),
+    );
+
+    return childDirectories
+      .filter((entryPath): entryPath is string => entryPath !== null)
       .sort((left, right) => left.localeCompare(right));
   } catch {
     return [];

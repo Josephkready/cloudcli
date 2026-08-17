@@ -6,6 +6,7 @@ import {
   installKeyboardViewportSync,
   isTextEntryElement,
   isViewportDisplaced,
+  keyboardAwareBottomStyle,
   type DocumentLike,
   type WindowLike,
 } from './keyboardViewport';
@@ -253,4 +254,130 @@ test('no Visual Viewport API means no wiring and a safe teardown', () => {
   uninstall();
 
   assert.equal(harness.properties['--keyboard-height'], undefined);
+});
+
+/*
+ * #346: "starting a new conversation, the keyboard completely covers the input
+ * box."
+ *
+ * The shell raises its own bottom edge by `--keyboard-height`, which works for
+ * the chat composer inside it. The mobile sidebar overlay — which hosts the
+ * new-conversation folder picker and its search box — is itself
+ * `position: fixed; inset: 0`, so it is laid out against the viewport and
+ * inherits nothing from the shell's raised edge. It kept full height and its
+ * content stayed behind the keyboard.
+ *
+ * Verified in a real mobile viewport before the fix: the picker's fixed
+ * ancestor chain was [overlay bottom:0px (no inline style), shell bottom:
+ * var(--keyboard-height, 0px)].
+ */
+
+test('keyboardAwareBottomStyle offsets by the published keyboard height', () => {
+  assert.deepEqual(keyboardAwareBottomStyle(), { bottom: 'var(--keyboard-height, 0px)' });
+});
+
+test('keyboardAwareBottomStyle falls back to 0 so a desktop shell is unaffected', () => {
+  // The fallback in the var() is what keeps every non-iOS surface at inset-0:
+  // `installKeyboardViewportSync` never sets the property without a Visual
+  // Viewport API, so the declaration must degrade on its own.
+  assert.match(keyboardAwareBottomStyle().bottom, /,\s*0px\)$/);
+});
+
+test('keyboardAwareBottomStyle merges into an existing style object', () => {
+  assert.deepEqual(keyboardAwareBottomStyle({ zIndex: 50 }), {
+    zIndex: 50,
+    bottom: 'var(--keyboard-height, 0px)',
+  });
+});
+
+test('keyboardAwareBottomStyle always wins over an inherited bottom', () => {
+  // A caller passing its own bottom is describing the non-keyboard case; the
+  // keyboard offset is the whole point of opting in, so it must not be lost.
+  assert.equal(
+    keyboardAwareBottomStyle({ bottom: '0px' }).bottom,
+    'var(--keyboard-height, 0px)',
+  );
+});
+
+/*
+ * #346 (the reported case): "starting a new conversation, the keyboard
+ * completely covers the input box" — the chat composer, not the folder picker.
+ *
+ * The consuming side is provably fine: driving `--keyboard-height` to 300px in a
+ * real 393x852 viewport shrinks the shell 852 -> 552 and lifts the composer's
+ * bottom 786 -> 486, clear of the keyboard. So the failure is on the publishing
+ * side, and there is exactly one publisher: `resize`.
+ *
+ * That is one event to miss. iOS fires `visualViewport` resize around the
+ * keyboard animation, and a focus that arrives without one — the keyboard
+ * already up from a previous field, a resize swallowed while the view was
+ * mounting (which is what "starting a new conversation" does), a resize
+ * sampled mid-animation — leaves the property unset and the shell full height.
+ * Focus is the moment we know a keyboard is wanted, so sample the height there
+ * too. Idempotent: if resize already published the right value, this rewrites
+ * the same one.
+ */
+
+test('focusing a text field publishes the keyboard height even with no resize event', () => {
+  const harness = makeHarness({ innerHeight: 852 });
+  const teardown = installKeyboardViewportSync(harness.win, harness.doc);
+
+  // The keyboard is up but no resize arrived — the case that leaves the
+  // composer stranded behind it today.
+  harness.win.visualViewport!.height = 552;
+  harness.doc.activeElement = { tagName: 'TEXTAREA' };
+
+  harness.fireFocusIn();
+  harness.runFrames();
+
+  assert.equal(harness.properties['--keyboard-height'], '300px');
+  teardown();
+});
+
+test('focusing re-samples after the frame, catching a mid-animation height', () => {
+  const harness = makeHarness({ innerHeight: 852 });
+  const teardown = installKeyboardViewportSync(harness.win, harness.doc);
+  harness.doc.activeElement = { tagName: 'INPUT' };
+
+  // Focus lands while the keyboard is still sliding in: the viewport reports a
+  // partial height, then settles. The settled value must be the one published.
+  harness.win.visualViewport!.height = 700;
+  harness.fireFocusIn();
+  harness.win.visualViewport!.height = 552;
+  harness.runFrames();
+
+  assert.equal(harness.properties['--keyboard-height'], '300px');
+  teardown();
+});
+
+test('focusing a non-text element does not publish a keyboard height', () => {
+  const harness = makeHarness({ innerHeight: 852 });
+  const teardown = installKeyboardViewportSync(harness.win, harness.doc);
+
+  harness.win.visualViewport!.height = 552;
+  harness.doc.activeElement = { tagName: 'BUTTON' };
+
+  harness.fireFocusIn();
+  harness.runFrames();
+
+  // A button press summons no keyboard; publishing one would shrink the shell
+  // for nothing.
+  assert.equal(harness.properties['--keyboard-height'], undefined);
+  teardown();
+});
+
+test('focus publishing agrees with resize publishing (no fight between them)', () => {
+  const harness = makeHarness({ innerHeight: 852 });
+  const teardown = installKeyboardViewportSync(harness.win, harness.doc);
+  harness.doc.activeElement = { tagName: 'TEXTAREA' };
+
+  openKeyboard(harness, 300, 0);
+  harness.fireResize();
+  harness.runFrames();
+  assert.equal(harness.properties['--keyboard-height'], '300px');
+
+  harness.fireFocusIn();
+  harness.runFrames();
+  assert.equal(harness.properties['--keyboard-height'], '300px');
+  teardown();
 });

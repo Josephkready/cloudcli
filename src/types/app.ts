@@ -79,6 +79,12 @@ export interface Project {
    * predates the flag, which callers must treat as "unknown", not "not a repo".
    */
   isRepository?: boolean;
+  /**
+   * True when that repository root is a linked worktree (`.git` file) rather
+   * than a clone (`.git` directory). Absent on servers predating the flag, which
+   * callers must read as "unknown" — never as "definitely not a worktree".
+   */
+  isWorktree?: boolean;
   sessions?: ProjectSession[];
   sessionMeta?: ProjectSessionMeta;
   [key: string]: unknown;

@@ -259,6 +259,43 @@ test('getProjectsWithSessions flags which spaces are git repository roots', asyn
   });
 });
 
+// #344: `isRepository` alone was not enough to clean up the picker, because a
+// linked worktree is a repository root and agent worktrees outnumbered the real
+// repos. The payload carries the clone/worktree distinction separately so the
+// picker can demote worktrees without the server deciding they aren't repos.
+test('getProjectsWithSessions flags which repository roots are linked worktrees', async () => {
+  await withIsolatedDatabase(async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), 'projects-worktree-flag-'));
+    const clonePath = path.join(workspace, 'clone');
+    const worktreePath = path.join(workspace, 'worktree');
+    const subfolderPath = path.join(clonePath, 'tools');
+
+    await mkdir(path.join(clonePath, '.git'), { recursive: true });
+    await mkdir(worktreePath, { recursive: true });
+    await mkdir(subfolderPath, { recursive: true });
+    await writeFile(path.join(worktreePath, '.git'), 'gitdir: /elsewhere/.git/worktrees/wt\n');
+
+    const byPath = new Map(
+      (
+        await (async () => {
+          for (const projectPath of [clonePath, worktreePath, subfolderPath]) {
+            projectsDb.createProjectPath(projectPath, null);
+          }
+          return getProjectsWithSessions({ skipSynchronization: true });
+        })()
+      ).map((project) => [project.fullPath, project]),
+    );
+
+    assert.equal(byPath.get(worktreePath)?.isWorktree, true, 'a linked worktree is flagged');
+    assert.equal(byPath.get(clonePath)?.isWorktree, false, 'a clone is not a worktree');
+    assert.equal(byPath.get(subfolderPath)?.isWorktree, false, 'a plain subfolder is not a worktree');
+    // The worktree stays a repository root; only its kind is new information.
+    assert.equal(byPath.get(worktreePath)?.isRepository, true);
+
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
 // The archive view builds its rows through a different function, so the flag has
 // to be set there too — an archived space that gets restored goes straight back
 // into the picker, and an unset flag would quietly bury it behind the toggle.
@@ -279,12 +316,13 @@ test('getArchivedProjectsWithSessions flags repository roots too', async () => {
     const byPath = new Map(
       (await getArchivedProjectsWithSessions({ skipSynchronization: true })).map((project) => [
         project.fullPath,
-        project.isRepository,
+        project,
       ]),
     );
 
-    assert.equal(byPath.get(clonePath), true, 'an archived clone is still a repository root');
-    assert.equal(byPath.get(subfolderPath), false, 'an archived subfolder is still not a root');
+    assert.equal(byPath.get(clonePath)?.isRepository, true, 'an archived clone is still a repository root');
+    assert.equal(byPath.get(subfolderPath)?.isRepository, false, 'an archived subfolder is still not a root');
+    assert.equal(byPath.get(clonePath)?.isWorktree, false, 'the worktree flag is set on the archived path too');
 
     await rm(workspace, { recursive: true, force: true });
   });
