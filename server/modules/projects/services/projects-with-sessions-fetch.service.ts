@@ -10,7 +10,7 @@ import {
 } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
-import { AppError, isGitRepositoryRoot, mapWithConcurrency } from '@/shared/utils.js';
+import { AppError, isGitRepositoryRoot, isGitWorktree, mapWithConcurrency } from '@/shared/utils.js';
 
 type SessionSummary = {
   id: string;
@@ -69,6 +69,17 @@ export type ProjectListItem = {
    * package.json read and session page each space already pays for here.
    */
   isRepository: boolean;
+  /**
+   * True when that repository root is a *linked worktree* rather than a clone —
+   * a `.git` file instead of a `.git` directory.
+   *
+   * Filtering to repository roots was not enough on its own (#344): worktrees
+   * are roots, and on a machine running parallel agents they outnumbered the
+   * real repositories in the picker. Reported separately rather than folded into
+   * `isRepository` because a worktree genuinely is a repository — the picker
+   * demotes it behind "show all folders", it isn't lied about.
+   */
+  isWorktree: boolean;
   sessions: SessionSummary[];
   sessionMeta: {
     hasMore: boolean;
@@ -290,7 +301,7 @@ export async function getProjectsWithSessions(
   const projects = await mapWithConcurrency(projectRows, PROJECT_BUILD_CONCURRENCY, async (row) => {
     const projectPath = row.project_path;
 
-    const [displayName, sessionsPage, isRepository] = await Promise.all([
+    const [displayName, sessionsPage, isRepository, isWorktree] = await Promise.all([
       row.custom_project_name && row.custom_project_name.trim().length > 0
         ? Promise.resolve(row.custom_project_name)
         : generateDisplayName(path.basename(projectPath) || projectPath, projectPath),
@@ -299,6 +310,7 @@ export async function getProjectsWithSessions(
         offset: options.sessionsOffset,
       }),
       isGitRepositoryRoot(projectPath),
+      isGitWorktree(projectPath),
     ]);
 
     processedProjects += 1;
@@ -316,6 +328,7 @@ export async function getProjectsWithSessions(
       fullPath: projectPath,
       isStarred: Boolean(row.isStarred),
       isRepository,
+      isWorktree,
       sessions: sessionsPage.sessions,
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
@@ -369,6 +382,7 @@ export async function getArchivedProjectsWithSessions(
       fullPath: row.project_path,
       isStarred: Boolean(row.isStarred),
       isRepository: await isGitRepositoryRoot(row.project_path),
+      isWorktree: await isGitWorktree(row.project_path),
       isArchived: true,
       sessions: sessionsPage.sessions,
       sessionMeta: {

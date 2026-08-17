@@ -47,6 +47,26 @@ export interface DocumentLike {
   documentElement: { style: { setProperty(property: string, value: string): void } };
 }
 
+/**
+ * Style that raises an element's bottom edge clear of the soft keyboard.
+ *
+ * Needed by every `position: fixed` surface that can hold a text field, not just
+ * the app shell. A fixed element is laid out against the viewport, so nesting it
+ * inside the shell does **not** inherit the shell's raised bottom edge — the
+ * mobile sidebar overlay, which hosts the new-conversation folder picker and its
+ * search box, kept full height and sat behind the keyboard for exactly that
+ * reason (#346).
+ *
+ * The `0px` fallback is load-bearing: `installKeyboardViewportSync` never sets
+ * `--keyboard-height` without a Visual Viewport API, so the declaration has to
+ * degrade to `inset-0` on its own everywhere else.
+ */
+export function keyboardAwareBottomStyle(
+  style: Record<string, unknown> = {},
+): Record<string, unknown> & { bottom: string } {
+  return { ...style, bottom: 'var(--keyboard-height, 0px)' };
+}
+
 /** Height the keyboard is covering. Clamped: the two viewports can disagree by a rounding error. */
 export function computeKeyboardHeight(innerHeight: number, viewportHeight: number): number {
   return Math.max(0, innerHeight - viewportHeight);
@@ -123,9 +143,23 @@ export function installKeyboardViewportSync(win: WindowLike, doc: DocumentLike):
   };
 
   const handleFocusIn = () => {
-    // The displacement is applied after focus, so sample on the next frame
-    // rather than during the event.
-    win.requestAnimationFrame(pinViewport);
+    // Focus is the second place we know a keyboard is wanted, and `resize` is
+    // otherwise the only publisher of the height — one event to miss. A focus
+    // that arrives without one (keyboard already up from another field, a resize
+    // swallowed while the chat view was mounting, a resize sampled mid-slide)
+    // used to leave `--keyboard-height` unset, so the shell kept full height and
+    // the composer stayed behind the keyboard (#346).
+    //
+    // Sampled on the next frame, not during the event: both the height and the
+    // displacement are applied after focus. Idempotent with the resize path —
+    // when that already published the settled value this rewrites the same one,
+    // which is why the two cannot fight.
+    win.requestAnimationFrame(() => {
+      if (isTextEntryElement(doc.activeElement)) {
+        applyKeyboardHeight();
+      }
+      pinViewport();
+    });
   };
 
   viewport.addEventListener('resize', handleResize);

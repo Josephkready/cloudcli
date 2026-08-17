@@ -7,6 +7,12 @@ import { rgPath } from '@vscode/ripgrep';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { stripAntigravityTranscriptTags } from '@/modules/providers/list/antigravity/antigravity-session-synchronizer.provider.js';
+// The renderer's attribution predicates are the source of truth. Search kept its
+// own copy of the prefix list and it drifted (#341) — reuse, never re-declare.
+import {
+  isAgentAuthoredUserTurn,
+  isInternalContent as isClaudeInternalContent,
+} from '@/modules/providers/list/claude/claude-sessions.provider.js';
 
 type AnyRecord = Record<string, any>;
 type SearchableProvider = 'claude' | 'codex' | 'antigravity';
@@ -89,20 +95,34 @@ const RIPGREP_FILE_CHUNK_SIZE = 40;
 const RIPGREP_CHUNK_CONCURRENCY = 6;
 const UNKNOWN_PROJECT_KEY = '__unknown_project__';
 
-const INTERNAL_CONTENT_PREFIXES = [
-  '<system-reminder>',
-  'Caveat:',
-  'Invalid API key',
-  '[Request interrupted',
-] as const;
+/**
+ * Search-only internal-content prefixes, layered on top of the Claude provider's
+ * own {@link isInternalContent}.
+ *
+ * The shared list is the source of truth — this file used to keep a full private
+ * copy and it drifted (#341), missing both `<local-command-caveat>` and
+ * `Base directory for this skill:`. Only strings the renderer has no opinion
+ * about belong here; an API-key error is never worth a search hit but is not a
+ * rendering concern.
+ */
+const SEARCH_ONLY_INTERNAL_CONTENT_PREFIXES = ['Invalid API key'] as const;
 
 /**
  * Codex includes extra internal metadata tags that should not surface as
  * user-facing searchable conversation content.
+ *
+ * A scan of 417 local Codex transcripts (#341) found four more injected
+ * user-role wrappers beyond the original two, each of which was being indexed as
+ * though the user had typed it: skill bodies, plugin recommendations, abort
+ * banners and subagent notifications.
  */
 const CODEX_INTERNAL_CONTENT_PREFIXES = [
   '<environment_context>',
   '<cwd>',
+  '<recommended_plugins>',
+  '<skill>',
+  '<turn_aborted>',
+  '<subagent_notification>',
 ] as const;
 
 function normalizeComparablePath(inputPath: string): string {
@@ -158,10 +178,15 @@ function toSummaryText(customName: string | null, fallback: string | null | unde
 }
 
 function isInternalContent(content: string): boolean {
-  return INTERNAL_CONTENT_PREFIXES.some((prefix) => content.startsWith(prefix));
+  if (isClaudeInternalContent(content)) {
+    return true;
+  }
+
+  const text = content.trimStart();
+  return SEARCH_ONLY_INTERNAL_CONTENT_PREFIXES.some((prefix) => text.startsWith(prefix));
 }
 
-function isInternalCodexContent(content: string): boolean {
+export function isInternalCodexContent(content: string): boolean {
   const normalized = content.trimStart();
   return CODEX_INTERNAL_CONTENT_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
@@ -352,8 +377,11 @@ type ClaudeSearchableMessage = {
  * Claude mixes visible chat, compact summaries, and local command wrappers into
  * the same transcript stream. Search should operate on the user-visible meaning
  * of those rows rather than the raw wrapper syntax.
+ *
+ * Exported for unit testing: the branch table below is the whole behaviour, and
+ * driving it through `searchConversations` would need a transcript on disk.
  */
-function extractClaudeSearchableMessage(entry: AnyRecord): ClaudeSearchableMessage | null {
+export function extractClaudeSearchableMessage(entry: AnyRecord): ClaudeSearchableMessage | null {
   if (!entry.message?.content || entry.isApiErrorMessage) {
     return null;
   }
@@ -399,6 +427,10 @@ function extractClaudeSearchableMessage(entry: AnyRecord): ClaudeSearchableMessa
       return null;
     }
 
+    if (rawRole === 'user' && isAgentAuthoredUserTurn(entry)) {
+      return null;
+    }
+
     return {
       text: content,
       role: rawRole,
@@ -418,6 +450,13 @@ function extractClaudeSearchableMessage(entry: AnyRecord): ClaudeSearchableMessa
   }
 
   if (isInternalContent(text)) {
+    return null;
+  }
+
+  // Same gate as the string branch: only rows that would claim to be the user's
+  // own words are dropped. Assistant rows and the re-attributed branches above
+  // are untouched (#341, mirroring #340).
+  if (rawRole === 'user' && isAgentAuthoredUserTurn(entry)) {
     return null;
   }
 

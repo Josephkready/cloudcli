@@ -17,7 +17,7 @@ import { useRunningSessionsPoll } from '../../hooks/useRunningSessionsPoll';
 import { useArchiveSession } from '../../hooks/useArchiveSession';
 import { api } from '../../utils/api';
 
-import { installKeyboardViewportSync } from './keyboardViewport';
+import { installKeyboardViewportSync, keyboardAwareBottomStyle } from './keyboardViewport';
 
 export default function AppContent() {
   return (
@@ -169,7 +169,7 @@ function AppContentInner() {
   useEffect(() => installKeyboardViewportSync(window, document), []);
 
   return (
-    <div className="fixed inset-0 flex bg-background" style={{ bottom: 'var(--keyboard-height, 0px)' }}>
+    <div className="fixed inset-0 flex bg-background" style={keyboardAwareBottomStyle()}>
       {!isMobile ? (
         <div className="h-full flex-shrink-0 border-r border-border/50">
           <Sidebar {...sidebarSharedProps} />
@@ -178,6 +178,11 @@ function AppContentInner() {
         <div
           className={`fixed inset-0 z-50 flex transition-[opacity,visibility] duration-base ease-out ${sidebarOpen ? 'visible opacity-100' : 'invisible opacity-0'
             }`}
+          // Its own offset, not the shell's: this overlay is `position: fixed`,
+          // so it resolves against the viewport and inherits nothing from the
+          // raised edge above it. Without this the new-conversation folder
+          // search sat behind the keyboard (#346).
+          style={keyboardAwareBottomStyle()}
         >
           <button
             className="fixed inset-0 bg-background/80 transition-opacity duration-base ease-out"

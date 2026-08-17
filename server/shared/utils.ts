@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import type { Dirent } from 'node:fs';
 import {
   access,
   lstat,
@@ -833,6 +834,26 @@ export async function isGitRepositoryRoot(dirPath: string): Promise<boolean> {
 }
 
 /**
+ * True when `dirPath` is a *linked worktree* (or submodule) rather than an
+ * ordinary clone.
+ *
+ * Both are repositories — {@link isGitRepositoryRoot} counts each — but they are
+ * not the same kind of thing to a person choosing a folder. A worktree is
+ * usually machinery: `/start-work` branches and parallel-agent scratch
+ * checkouts, which on this machine outnumbered the actual repositories in the
+ * new-conversation picker (#344). Git already records the distinction in the
+ * marker's shape: a clone keeps a `.git` directory, a linked worktree keeps a
+ * `.git` file holding a `gitdir:` pointer.
+ */
+export async function isGitWorktree(dirPath: string): Promise<boolean> {
+  try {
+    return (await stat(path.join(dirPath, '.git'))).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Finds the highest git worktree root visible from a starting directory.
  *
  * Provider skill systems such as Codex walk upward through parent
@@ -885,6 +906,33 @@ export function addUniqueProviderSkillSource(
 // ---------------------------
 //----------------- PROVIDER SKILL MARKDOWN UTILITIES ------------
 /**
+ * Does this directory entry lead to a directory, following a symlink if that is
+ * what it is?
+ *
+ * `Dirent.isDirectory()` describes the entry itself, so it answers false for a
+ * symlink even when the symlink points at a directory. Skill folders are very
+ * often exactly that: the canonical copy lives in the repo that owns the skill
+ * and `~/.claude/skills/<name>` links to it, which keeps a skill versioned with
+ * its project while staying globally invokable. Judging those by the link alone
+ * hid every one of them from discovery (#345), so resolve the target instead.
+ * A broken link stats as an error and is reported as "not a directory".
+ */
+export async function entryLeadsToDirectory(entryPath: string, entry: Dirent): Promise<boolean> {
+  if (entry.isDirectory()) {
+    return true;
+  }
+  if (!entry.isSymbolicLink()) {
+    return false;
+  }
+
+  try {
+    return (await stat(entryPath)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Finds direct child skill markdown files under a provider skill root.
  *
  * Skill systems usually store one skill per child directory, so direct mode
@@ -892,6 +940,11 @@ export function addUniqueProviderSkillSource(
  * provider sources that can nest skills arbitrarily, and it returns every
  * descendant `SKILL.md`. Missing or unreadable roots return an empty list
  * because users may not have every provider installed or configured.
+ *
+ * Symlinked skill directories count as directories in both modes — see
+ * {@link entryLeadsToDirectory}. Because following links can turn the tree into
+ * a cyclic graph, the recursive walk remembers the resolved identity of every
+ * directory it enters and refuses to enter one twice.
  */
 export async function findProviderSkillMarkdownFiles(
   rootDir: string,
@@ -899,14 +952,7 @@ export async function findProviderSkillMarkdownFiles(
 ): Promise<string[]> {
   const skillFiles: string[] = [];
 
-  const collectRecursive = async (dirPath: string): Promise<void> => {
-    let entries;
-    try {
-      entries = await readdir(dirPath, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
+  const collectSkillFile = async (dirPath: string): Promise<void> => {
     try {
       const skillPath = path.join(dirPath, 'SKILL.md');
       const skillStats = await stat(skillPath);
@@ -916,10 +962,36 @@ export async function findProviderSkillMarkdownFiles(
     } catch {
       // Directories without SKILL.md are expected while walking plugin trees.
     }
+  };
+
+  // Keyed by resolved real path, so a link and its target are one destination.
+  const visitedDirectories = new Set<string>();
+
+  const collectRecursive = async (dirPath: string): Promise<void> => {
+    let realDirPath: string;
+    try {
+      realDirPath = await realpath(dirPath);
+    } catch {
+      return;
+    }
+    if (visitedDirectories.has(realDirPath)) {
+      return;
+    }
+    visitedDirectories.add(realDirPath);
+
+    let entries;
+    try {
+      entries = await readdir(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    await collectSkillFile(dirPath);
 
     for (const entry of entries) {
-      if (entry.isDirectory()) {
-        await collectRecursive(path.join(dirPath, entry.name));
+      const entryPath = path.join(dirPath, entry.name);
+      if (await entryLeadsToDirectory(entryPath, entry)) {
+        await collectRecursive(entryPath);
       }
     }
   };
@@ -933,19 +1005,14 @@ export async function findProviderSkillMarkdownFiles(
     const entries = await readdir(rootDir, { withFileTypes: true });
 
     for (const entry of entries) {
-      if (!entry.isDirectory()) {
+      const entryPath = path.join(rootDir, entry.name);
+      if (!(await entryLeadsToDirectory(entryPath, entry))) {
         continue;
       }
 
-      const skillPath = path.join(rootDir, entry.name, 'SKILL.md');
-      try {
-        const skillStats = await stat(skillPath);
-        if (skillStats.isFile()) {
-          skillFiles.push(skillPath);
-        }
-      } catch {
-        // A partial skill directory should not block discovery of sibling skills.
-      }
+      // A partial skill directory should not block discovery of siblings; the
+      // helper already swallows a missing or unreadable SKILL.md.
+      await collectSkillFile(entryPath);
     }
 
     return skillFiles.sort((left, right) => left.localeCompare(right));

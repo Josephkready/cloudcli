@@ -23,6 +23,44 @@ type BuildNewConversationItemsArgs = {
   t: TFunction;
 };
 
+/**
+ * Ranks one folder row against the picker's search box. `0` hides the row.
+ *
+ * Replaces cmdk's default filter, which is a *subsequence* match: it accepts an
+ * item whenever the query's characters appear in order anywhere in its value.
+ * That is reasonable for short command names and wrong for filesystem paths,
+ * where nearly everything matches — typing "mind" surfaced `datapoint`,
+ * `audio-processing-library` and four `.cache/omni-harness/…/repo` clones,
+ * because `omni-harness…d` spells m-i-n-d in order (#344). Folders are picked by
+ * name, so a substring is both stricter and closer to what someone means.
+ *
+ * Scores are ordered, not absolute: exact name, then name prefix, then name
+ * substring, then path substring. A row that matches only deep in its path is
+ * still reachable but never outranks one whose name matches.
+ *
+ * Every row is scored the same way, including the "New project…" escape hatch:
+ * a query matching nothing is meant to leave the list empty and show the
+ * "No folders found" message (#338), not one lone action.
+ */
+export function scoreFolderMatch(label: string, path: string, query: string): number {
+  const needle = query.trim().toLowerCase();
+  if (!needle) {
+    return 1;
+  }
+
+  const name = label.toLowerCase();
+  if (name === needle) {
+    return 1;
+  }
+  if (name.startsWith(needle)) {
+    return 0.9;
+  }
+  if (name.includes(needle)) {
+    return 0.8;
+  }
+  return path.toLowerCase().includes(needle) ? 0.5 : 0;
+}
+
 export type NewConversationMenu = {
   items: ActionMenuItem[];
   /**
@@ -34,12 +72,41 @@ export type NewConversationMenu = {
 };
 
 /**
- * A space counts as a repository root when the server said so. `undefined` is
- * "the server never told us" (a build older than the flag), not "no" — see
- * {@link buildNewConversationItems} for why that distinction matters.
+ * True when any directory in the path is hidden (dot-prefixed).
+ *
+ * A checkout under `~/.cache`, `~/.gemini` or the like is a tool's private
+ * working copy — omni-harness alone left seven clones there — and nobody starts
+ * a conversation in one. Git cannot tell them apart from a real project (they
+ * are ordinary clones), but their location can. Only *directory* segments count,
+ * so `~/repos/mind.integration` and `~/repos/v1.2.3-release` stay listed; the
+ * leading separator and the final segment are ignored for the same reason.
+ *
+ * Both separators are split on: `fullPath` is whatever the server reported, and
+ * on Windows that is backslash-separated. Splitting on `/` alone would let those
+ * paths bypass the filter without any visible failure.
  */
-function isRepositoryRoot(project: Project): boolean {
-  return project.isRepository === true;
+function livesUnderHiddenDirectory(fullPath: string): boolean {
+  return fullPath
+    .split(/[/\\]/)
+    .slice(0, -1)
+    .some((segment) => segment.startsWith('.') && segment !== '.' && segment !== '..');
+}
+
+/**
+ * A space is listable when the server called it a repository root, did not call
+ * it a linked worktree, and it does not live inside a hidden directory.
+ *
+ * `undefined` on either flag is "the server never told us" (a build older than
+ * that flag), not "no" — so an older payload that reports `isRepository` alone
+ * still lists its repositories rather than hiding every one of them as a
+ * suspected worktree. See {@link buildNewConversationItems}.
+ */
+function isListableRepository(project: Project): boolean {
+  return (
+    project.isRepository === true
+    && project.isWorktree !== true
+    && !livesUnderHiddenDirectory(project.fullPath ?? '')
+  );
 }
 
 /**
@@ -58,14 +125,23 @@ function isRepositoryRoot(project: Project): boolean {
  * caller without a create-project flow would otherwise render an item that does
  * nothing (#331).
  *
- * Only repository roots are listed by default (#332). A space row exists for
- * every session's cwd, so agents run inside `<repo>/tools/x`, scratchpad dirs
- * and long-deleted worktrees all become spaces — on a working machine that is
- * hundreds of subfolders drowning the few dozen repos anyone actually starts a
- * conversation in, and typing into the search box matched them just as happily.
- * This is the same filter the folder picker got in #309/#312, applied to the
- * other place a folder gets chosen, and it comes with the same escape hatch:
- * `includeNonRepositories` reveals the rest, counted by `hiddenProjectCount`.
+ * Only repository *clones* are listed by default (#332, #344). A space row
+ * exists for every session's cwd, so agents run inside `<repo>/tools/x`,
+ * scratchpad dirs and long-deleted worktrees all become spaces — on a working
+ * machine that is hundreds of subfolders drowning the few dozen repos anyone
+ * actually starts a conversation in, and typing into the search box matched them
+ * just as happily. This is the same filter the folder picker got in #309/#312,
+ * applied to the other place a folder gets chosen, and it comes with the same
+ * escape hatch: `includeNonRepositories` reveals the rest, counted by
+ * `hiddenProjectCount`.
+ *
+ * Filtering on `isRepository` alone was not enough (#344): a linked worktree is
+ * a repository root, and a machine running parallel agents accumulates far more
+ * of those than it has repositories — 21 of 46 listed spaces on the reporter's.
+ * They are hidden by default and revealed by the same toggle, rather than
+ * dropped, since a worktree is a legitimate place to hold a conversation. The
+ * same goes for clones under a hidden directory (see
+ * {@link livesUnderHiddenDirectory}), which no git-shaped rule can catch.
  *
  * If *no* project carries the flag the payload predates it, and filtering on a
  * bit nobody set would empty the picker; in that case every space is listed and
@@ -82,12 +158,12 @@ export function buildNewConversationItems({
     (project) => typeof project.isRepository === 'boolean',
   );
   const hiddenProjectCount = serverReportsRepositories
-    ? projects.filter((project) => !isRepositoryRoot(project)).length
+    ? projects.filter((project) => !isListableRepository(project)).length
     : 0;
 
   const listable =
     serverReportsRepositories && !includeNonRepositories
-      ? projects.filter(isRepositoryRoot)
+      ? projects.filter(isListableRepository)
       : projects;
   const ordered = sortProjects(listable, 'name');
 
