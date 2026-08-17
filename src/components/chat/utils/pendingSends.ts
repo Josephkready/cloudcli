@@ -37,8 +37,24 @@ export type PendingSend = {
   /** Stable id so a confirmed entry can be removed without re-matching text. */
   id: string;
   content: string;
-  /** ISO-8601, matching `NormalizedMessage.timestamp` so echo matching lines up. */
+  /**
+   * ISO-8601 of the LATEST send attempt, matching `NormalizedMessage.timestamp`
+   * so echo matching lines up.
+   */
   timestamp: string;
+  /**
+   * ISO-8601 of the FIRST send attempt, when the entry has been retried.
+   *
+   * A retry moves `timestamp` forward (see {@link retimePendingSend}), which
+   * used to orphan the transcript row the first attempt had already written —
+   * the echo matcher judged it too old, the entry could never be confirmed, and
+   * it was resent on every later refresh (#347/#350). Keeping the original
+   * instant lets the matcher still recognise that row.
+   *
+   * Absent on a never-retried entry (and on any entry stored before this
+   * existed), where it is simply `timestamp`.
+   */
+  firstAttemptAt?: string;
   options?: Record<string, unknown>;
   /**
    * Whether the frame was ever written to a socket.
@@ -72,7 +88,7 @@ function normalizePendingSend(value: unknown): PendingSend | null {
   if (!value || typeof value !== 'object') {
     return null;
   }
-  const { id, content, timestamp, options, dispatched } = value as Partial<PendingSend>;
+  const { id, content, timestamp, firstAttemptAt, options, dispatched } = value as Partial<PendingSend>;
   if (typeof id !== 'string' || !id || typeof content !== 'string' || !content.trim()) {
     return null;
   }
@@ -83,6 +99,11 @@ function normalizePendingSend(value: unknown): PendingSend | null {
     return null;
   }
   const base: PendingSend = { id, content, timestamp };
+  // A garbled value is dropped rather than trusted: the matcher would otherwise
+  // read NaN and fall back anyway, and keeping it would mislead the next reader.
+  if (typeof firstAttemptAt === 'string' && !Number.isNaN(Date.parse(firstAttemptAt))) {
+    base.firstAttemptAt = firstAttemptAt;
+  }
   if (options !== undefined && options !== null && typeof options === 'object') {
     base.options = options as Record<string, unknown>;
   }
@@ -162,7 +183,8 @@ export function removePendingSend(sessionId: string, id: string): void {
 }
 
 /**
- * Restamps an entry to the moment it is (re)sent.
+ * Restamps an entry to the moment it is (re)sent, remembering when it first went
+ * out.
  *
  * Echo matching compares the entry's timestamp against the server's, and only
  * accepts them as the same message inside a bounded window
@@ -170,9 +192,16 @@ export function removePendingSend(sessionId: string, id: string): void {
  * long outage would be written to the transcript far outside that window, its
  * echo would never match, and it would be resent on every reconnect forever.
  * Restamping at send time is what keeps a retry confirmable.
+ *
+ * But restamping alone broke the other direction (#347/#350): it also moved the
+ * window's *lower* bound forward, past the row the first attempt had already
+ * written. That row is the usual evidence the message arrived, so the entry
+ * became permanently unconfirmable and was resent on every refresh from then on.
+ * Preserving `firstAttemptAt` keeps both ends reachable — see
+ * `hasServerEchoForLocalUser`.
  */
 export function retimePendingSend(entry: PendingSend, timestamp: string): PendingSend {
-  return { ...entry, timestamp };
+  return { ...entry, firstAttemptAt: entry.firstAttemptAt ?? entry.timestamp, timestamp };
 }
 
 /**

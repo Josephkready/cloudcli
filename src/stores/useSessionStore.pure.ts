@@ -154,15 +154,41 @@ export function readMessageTime(m: NormalizedMessage): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
+/**
+ * Is this local user message already present in the server transcript?
+ *
+ * The accepted window runs from the message's *earliest* send attempt to
+ * `LOCAL_USER_DEDUPE_WINDOW_MS` past its latest one.
+ *
+ * `earliestAttemptAt` exists because a pending send can be retried, and a retry
+ * restamps the entry to the moment it went out again (see `retimePendingSend`).
+ * Anchoring the lower bound to that new timestamp orphaned the row the *first*
+ * attempt had already written: it was suddenly "too old", the entry could never
+ * be confirmed again, and it was resent on every subsequent transcript refresh —
+ * which is how one prompt reached Claude five times (#347/#350). Reaching back
+ * to the first attempt keeps the original echo matchable while the upper bound,
+ * still measured from the latest attempt, keeps a late resend's own echo
+ * matchable too.
+ *
+ * Callers with a single attempt (optimistic bubble dedupe) omit it and get the
+ * previous behaviour exactly: the bound falls back to the message's timestamp.
+ */
 export function hasServerEchoForLocalUser(
   localMessage: NormalizedMessage,
   serverMessages: NormalizedMessage[],
+  options: { earliestAttemptAt?: number } = {},
 ): boolean {
   const localText = userTextFingerprint(localMessage);
   const localTime = readMessageTime(localMessage);
   if (!localText || localTime === null) {
     return false;
   }
+
+  const earliestAttemptAt =
+    typeof options.earliestAttemptAt === 'number' && Number.isFinite(options.earliestAttemptAt)
+      // A malformed stored value must never widen the window past the real send.
+      ? Math.min(options.earliestAttemptAt, localTime)
+      : localTime;
 
   return serverMessages.some((serverMessage) => {
     if (userTextFingerprint(serverMessage) !== localText) {
@@ -172,7 +198,7 @@ export function hasServerEchoForLocalUser(
     const serverTime = readMessageTime(serverMessage);
     return (
       serverTime !== null
-      && serverTime >= localTime - LOCAL_USER_DEDUPE_CLOCK_SKEW_MS
+      && serverTime >= earliestAttemptAt - LOCAL_USER_DEDUPE_CLOCK_SKEW_MS
       && serverTime - localTime <= LOCAL_USER_DEDUPE_WINDOW_MS
     );
   });

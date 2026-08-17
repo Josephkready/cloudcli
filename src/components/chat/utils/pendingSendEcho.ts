@@ -45,7 +45,14 @@ export function resolvePendingSends(
   serverMessages: NormalizedMessage[],
   sessionId: string,
 ): { confirmed: PendingSend[]; unconfirmed: PendingSend[] } {
-  return partitionPendingSends(entries, (entry) =>
-    hasServerEchoForLocalUser(pendingSendAsMessage(entry, sessionId), serverMessages),
-  );
+  return partitionPendingSends(entries, (entry) => {
+    // A retried entry carries the instant it FIRST went out. Without it the
+    // matcher's lower bound sits at the retry, and the row the first attempt
+    // already wrote reads as too old to be this message's echo — the entry then
+    // never confirms and is resent on every refresh (#347/#350).
+    const earliest = Date.parse(entry.firstAttemptAt ?? entry.timestamp);
+    return hasServerEchoForLocalUser(pendingSendAsMessage(entry, sessionId), serverMessages, {
+      earliestAttemptAt: Number.isNaN(earliest) ? undefined : earliest,
+    });
+  });
 }

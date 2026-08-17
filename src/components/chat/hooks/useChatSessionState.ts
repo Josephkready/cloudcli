@@ -707,6 +707,11 @@ export function useChatSessionState({
             send: sendMessage,
             persist: (entries) => writePendingSends(selectedSessionId, entries),
             now: () => Date.now(),
+            // This fetch is one page (`MESSAGES_PER_PAGE`, offset 0). When more
+            // remain, the session's older messages — its opening prompt above
+            // all — are not in `slot.serverMessages`, and their absence must not
+            // be read as "the server never got it" (#347/#350).
+            transcriptComplete: !slot.hasMore,
           });
         }
       }
