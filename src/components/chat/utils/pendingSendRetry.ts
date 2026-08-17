@@ -108,6 +108,13 @@ export function retryPendingSends({
     // The loaded slice never reached back this far, so "not found" is a gap in
     // what we fetched, not evidence of loss. Hold the entry for a later pass
     // against a transcript that does cover it (#347/#350).
+    //
+    // This does not strand a genuinely lost message: the reconnect pass in
+    // `ChatInterface` runs against `refreshFromServer`, which fetches the whole
+    // transcript, so it judges the entry properly and resends if it really is
+    // missing. Holding is the right side to err on — resending a message the
+    // server already has asks the model the same thing twice, in front of the
+    // user, whereas waiting costs one reconnect.
     const firstAttemptAt = Date.parse(entry.firstAttemptAt ?? entry.timestamp);
     if (Number.isFinite(firstAttemptAt) && firstAttemptAt < coveredFrom) {
       remaining.push(entry);
