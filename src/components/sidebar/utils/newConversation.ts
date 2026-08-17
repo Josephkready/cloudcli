@@ -79,11 +79,15 @@ export type NewConversationMenu = {
  * a conversation in one. Git cannot tell them apart from a real project (they
  * are ordinary clones), but their location can. Only *directory* segments count,
  * so `~/repos/mind.integration` and `~/repos/v1.2.3-release` stay listed; the
- * leading `/` and the final segment are ignored for the same reason.
+ * leading separator and the final segment are ignored for the same reason.
+ *
+ * Both separators are split on: `fullPath` is whatever the server reported, and
+ * on Windows that is backslash-separated. Splitting on `/` alone would let those
+ * paths bypass the filter without any visible failure.
  */
 function livesUnderHiddenDirectory(fullPath: string): boolean {
   return fullPath
-    .split('/')
+    .split(/[/\\]/)
     .slice(0, -1)
     .some((segment) => segment.startsWith('.') && segment !== '.' && segment !== '..');
 }

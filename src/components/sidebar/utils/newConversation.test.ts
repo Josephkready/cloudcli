@@ -467,3 +467,22 @@ test('revealing all folders still reaches a hidden-directory repository', () => 
 
   assert.equal(items.length, 2);
 });
+
+test('a hidden directory is detected in a Windows-style path too', () => {
+  // `fullPath` is whatever the server reported, and on Windows that is
+  // backslash-separated. Splitting on '/' alone let those bypass the filter
+  // silently — the picker would quietly go back to listing tool scratch clones.
+  const { items } = buildNewConversationItems({
+    projects: [
+      { ...repo('win', 'repo'), fullPath: 'C:\\Users\\j\\.cache\\omni\\run-1\\repo' } as Project,
+      { ...repo('ok', 'mind'), fullPath: 'C:\\Users\\j\\repos\\mind' } as Project,
+    ],
+    onPickProject: () => {},
+    t,
+  });
+
+  assert.deepEqual(
+    items.map((item) => item.label),
+    ['mind'],
+  );
+});
