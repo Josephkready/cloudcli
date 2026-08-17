@@ -257,3 +257,134 @@ test('formatCompactAge returns empty for invalid or non-positive input', () => {
   assert.equal(formatCompactAge(-1, now), '');
   assert.equal(formatCompactAge(now.getTime() + 60_000, now), '<1m');
 });
+
+/*
+ * #349 — "this conversation status is running but it is done".
+ *
+ * `resolveStatus` trusts the client's `activeSessions` map absolutely: an entry
+ * there ranks the row Running before anything else is consulted. That map is a
+ * belief, and it can outlive the run — a `complete` frame only reaches sockets
+ * that started or subscribed to that run (#204), the poll is gated on tab
+ * visibility, and `syncProcessingSessions` keeps an entry the server no longer
+ * reports for as long as `now - startedAt` is under the grace (which never
+ * elapses if `startedAt` is ahead of the client clock — the poll fills it from
+ * the SERVER's clock while the field is documented as the client's).
+ *
+ * Rather than guess which of those produced it, use the fact that settles all of
+ * them: `last_completed_at` is written by the server at its single completion
+ * choke point. A completion stamped after the run began is positive proof that
+ * run ended, and it must outrank the client's belief that it is still going.
+ *
+ * Deliberately NOT absence-based. "The transcript looks idle" would demote a
+ * session that is merely thinking quietly; a recorded completion cannot.
+ */
+
+const RUN_START = Date.parse('2026-07-18T03:00:00.000Z');
+
+function activityStartedAt(startedAt: number, blocked = false): SessionActivity {
+  return { statusText: null, canInterrupt: true, startedAt, blocked };
+}
+
+test('a run the server recorded as completed does not still rank Running', () => {
+  const s = session('s', '2026-07-18T03:00:00Z', completed('2026-07-18T03:05:00.000Z'));
+  const active = new Map([['s', activityStartedAt(RUN_START)]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, null);
+  assert.equal(item.status, 'done', 'the completion is newer than the run start — the run is over');
+});
+
+test('a stale entry does not mask Done even when it claims to be blocked', () => {
+  // The blocked branch is checked first, so it needs the same guard or a stale
+  // blocked entry pins the row to "needs attention" forever.
+  const s = session('s', '2026-07-18T03:00:00Z', completed('2026-07-18T03:05:00.000Z'));
+  const active = new Map([['s', activityStartedAt(RUN_START, true)]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, null);
+  assert.equal(item.status, 'done');
+});
+
+test('a NEW run started after the last completion still ranks Running', () => {
+  // The whole point: only a completion *after* this run began proves anything.
+  const s = session('s', '2026-07-18T04:00:00Z', completed('2026-07-18T03:05:00.000Z'));
+  const active = new Map([['s', activityStartedAt(Date.parse('2026-07-18T03:10:00.000Z'))]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, null);
+  assert.equal(item.status, 'running');
+});
+
+test('a live run is not demoted by clock skew between the two sources', () => {
+  // `startedAt` may come from the client clock and `last_completed_at` always
+  // from the server's, so a few seconds of disagreement must not read as "this
+  // run already finished". Only a clearly-newer completion counts.
+  const s = session('s', '2026-07-18T03:00:00Z', completed('2026-07-18T03:00:03.000Z'));
+  const active = new Map([['s', activityStartedAt(RUN_START)]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, null);
+  assert.equal(item.status, 'running', 'a 3s disagreement is skew, not a completed run');
+});
+
+test('a run with no recorded completion is unaffected', () => {
+  const s = session('s', '2026-07-18T03:00:00Z');
+  const active = new Map([['s', activityStartedAt(RUN_START)]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, null);
+  assert.equal(item.status, 'running');
+});
+
+test('a blocked run with no completion still ranks Blocked', () => {
+  const s = session('s', '2026-07-18T03:00:00Z');
+  const active = new Map([['s', activityStartedAt(RUN_START, true)]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, null);
+  assert.equal(item.status, 'blocked');
+});
+
+test('the open session still shows Recent rather than flashing Done', () => {
+  // isSessionDone already suppresses Done for the viewed session; dropping the
+  // stale run must not route around that.
+  const s = session('s', '2026-07-18T03:00:00Z', completed('2026-07-18T03:05:00.000Z'));
+  const active = new Map([['s', activityStartedAt(RUN_START)]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, 's');
+  assert.equal(item.status, 'recent');
+});
+
+test('isActive follows the same truth, so a stale entry cannot hide the delete action', () => {
+  const s = session('s', '2026-07-18T03:00:00Z', completed('2026-07-18T03:05:00.000Z'));
+  const active = new Map([['s', activityStartedAt(RUN_START)]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, null);
+  assert.equal(item.isActive, false);
+});
+
+test('an unknown run start never demotes the row, however old the completion', () => {
+  // `startedAt: 0` is "we do not know when this began", not "it began at the
+  // epoch". With no start there is no way to tell whether the completion belongs
+  // to this run or the one before it, so the row must stay Running.
+  const s = session('s', '2026-07-18T03:00:00Z', completed('2026-07-18T01:00:00.000Z'));
+  const active = new Map([['s', activityStartedAt(0)]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, null);
+  assert.equal(item.status, 'running');
+  assert.equal(item.isActive, true);
+});
+
+test('half a minute of clock disagreement does not demote a live run', () => {
+  // Review of #353: demoting a live run is the expensive mistake, because
+  // nothing re-promotes it — the completion stays newer than that run's start
+  // for as long as the run lasts. A browser whose clock is behind would show a
+  // working session as Done until it finished, so the margin is generous.
+  const s = session('s', '2026-07-18T03:00:00Z', completed('2026-07-18T03:00:30.000Z'));
+  const active = new Map([['s', activityStartedAt(RUN_START)]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, null);
+  assert.equal(item.status, 'running');
+});
+
+test('a completion well past the margin is still read as a finished run', () => {
+  const s = session('s', '2026-07-18T03:00:00Z', completed('2026-07-18T03:05:00.000Z'));
+  const active = new Map([['s', activityStartedAt(RUN_START)]]);
+
+  const [item] = buildConversationList([project('p', [s])], active, null);
+  assert.equal(item.status, 'done');
+});

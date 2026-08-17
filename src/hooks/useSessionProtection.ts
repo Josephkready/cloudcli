@@ -196,7 +196,20 @@ export function useSessionProtection() {
       }
 
       for (const [sessionId, activity] of prev) {
-        if (!incoming.has(sessionId) && now - activity.startedAt < LOCAL_ACTIVITY_GRACE_MS) {
+        if (incoming.has(sessionId)) {
+          continue;
+        }
+        // Bounded at BOTH ends. The upper bound is the grace itself: a run this
+        // client just started survives the window before the server reports it.
+        // The lower bound matters just as much — `startedAt` is documented as
+        // the client clock but the running-sessions poll fills it from the
+        // server's, so a clock disagreement can put it in the future. Then
+        // `now - startedAt` is negative, negative is forever under the grace,
+        // and the entry was re-retained on every sync — pinning the row to
+        // Running long after the run finished (#349). A little skew is still
+        // tolerated; a startedAt further ahead than the grace is not.
+        const age = now - activity.startedAt;
+        if (age > -LOCAL_ACTIVITY_GRACE_MS && age < LOCAL_ACTIVITY_GRACE_MS) {
           updated.set(sessionId, activity);
         }
       }
