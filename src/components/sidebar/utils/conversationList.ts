@@ -1,5 +1,5 @@
 import type { Project } from '../../../types/app';
-import type { SessionActivityMap } from '../../../hooks/useSessionProtection';
+import type { SessionActivity, SessionActivityMap } from '../../../hooks/useSessionProtection';
 import type { SessionWithProvider } from '../types/types';
 
 import { getAllSessions, getSessionDate } from './utils';
@@ -84,13 +84,59 @@ function isServerLive(session: SessionWithProvider): boolean {
   );
 }
 
+/**
+ * How far `last_completed_at` must lead the run's start before it is read as
+ * "this run finished" rather than clock disagreement.
+ *
+ * The two values come from different clocks: `last_completed_at` is always the
+ * server's, while `SessionActivity.startedAt` is documented as the client's and
+ * is filled from the server's by the running-sessions poll. A few seconds of
+ * disagreement between a phone and dante is ordinary and must not demote a live
+ * run; a genuinely stale entry is minutes or hours out, far past this.
+ */
+const COMPLETION_AFTER_START_MARGIN_MS = 10_000;
+
+/**
+ * True when the client still believes a run is in flight that the server has
+ * already recorded as finished.
+ *
+ * `activeSessions` is a belief, and it can outlive the run: a `complete` frame
+ * only reaches sockets that started or subscribed to that run (#204), the poll
+ * that would correct it is gated on tab visibility, and `syncProcessingSessions`
+ * retains an entry the server no longer reports while `now - startedAt` is under
+ * its grace — which never elapses if `startedAt` sits ahead of the client clock.
+ * Any of those leaves a row pinned to Running long after it is done (#349).
+ *
+ * `last_completed_at` settles all of them at once. The server writes it at its
+ * single completion choke point, so a completion stamped after this run began is
+ * positive proof the run ended — unlike "the transcript looks idle", which is
+ * absence-based and would demote a session that is merely thinking quietly.
+ */
+function hasRunAlreadyCompleted(session: SessionWithProvider, activeRun: SessionActivity): boolean {
+  const completedAt = session.last_completed_at ? Date.parse(session.last_completed_at) : NaN;
+  if (!Number.isFinite(completedAt)) {
+    return false;
+  }
+  // A missing or non-positive `startedAt` means the start is unknown, not that
+  // the run began at the epoch. Without it there is no way to tell whether the
+  // completion belongs to THIS run or a previous one, so fail closed and leave
+  // the row Running — the same conservatism the rest of this module uses.
+  if (!Number.isFinite(activeRun.startedAt) || activeRun.startedAt <= 0) {
+    return false;
+  }
+  return completedAt - activeRun.startedAt > COMPLETION_AFTER_START_MARGIN_MS;
+}
+
 export function resolveStatus(
   session: SessionWithProvider,
   activeSessions: SessionActivityMap,
   selectedSessionId: string | null,
 ): ConversationStatus {
   const sessionId = String(session.id);
-  const activeRun = activeSessions.get(sessionId);
+  const liveRun = activeSessions.get(sessionId);
+  // A run the server already completed is a stale belief, not a live run — drop
+  // it before it can claim Running or Blocked below (#349).
+  const activeRun = liveRun && hasRunAlreadyCompleted(session, liveRun) ? undefined : liveRun;
   // A live run the server reports as blocked (waiting on a permission prompt or
   // an interaction tool) needs me now — in any tab, regardless of who started
   // it. Distinguish a plan submitted for approval from a generic prompt via the
@@ -143,6 +189,7 @@ export function buildConversationList(
   for (const project of projects) {
     for (const session of getAllSessions(project)) {
       const status = resolveStatus(session, activeSessions, selectedSessionId);
+      const liveRun = activeSessions.get(String(session.id));
       items.push({
         project,
         session,
@@ -150,7 +197,13 @@ export function buildConversationList(
         // A run is in flight if cloudcli launched it (client `activeSessions`) or
         // the server sees the terminal transcript live (working/blocked). Either
         // way the row should suppress destructive actions like delete.
-        isActive: activeSessions.has(String(session.id)) || isServerLive(session),
+        //
+        // Reads the same stale-run test as the ranking above: a belief the server
+        // has already completed must not keep hiding the delete action either
+        // (#349), or a wrongly-Running row becomes a row you cannot clean up.
+        isActive:
+          (liveRun !== undefined && !hasRunAlreadyCompleted(session, liveRun))
+          || isServerLive(session),
         activityTime: getSessionDate(session).getTime(),
       });
     }
