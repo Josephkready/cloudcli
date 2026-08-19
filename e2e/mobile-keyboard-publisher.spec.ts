@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { readPublishedKeyboardHeight, shrinkVisualViewport } from './keyboard';
+import { publishedKeyboardHeight, shrinkVisualViewport } from './keyboard';
 
 /**
  * The publisher half: given a real shrinking visual viewport, does the app
@@ -26,12 +26,7 @@ test.use({
 });
 
 const KEYBOARD = 336;
-
-/** Parses `--keyboard-height` back to a number, so near-misses read clearly. */
-async function publishedHeight(page: Parameters<typeof readPublishedKeyboardHeight>[0]): Promise<number> {
-  const raw = await readPublishedKeyboardHeight(page);
-  return Number.parseFloat(raw.replace('px', '')) || 0;
-}
+const publishedHeight = publishedKeyboardHeight;
 
 test('publishes the keyboard height when the visual viewport really shrinks', async ({ page }) => {
   await page.goto('/');

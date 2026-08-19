@@ -41,26 +41,39 @@ import { expect } from './fixtures';
 export const IOS_KEYBOARD_HEIGHT = 336;
 
 /**
- * Publishes `--keyboard-height`, exactly as `installKeyboardViewportSync` does
- * when the real keyboard opens.
+ * Raises the keyboard and waits until the app has published its height.
  *
- * This is the **consumer** primitive: it takes the publisher as given and asks
- * whether each surface responds. That is deliberate — it is the half that needs
- * no emulation, runs identically in WebKit and Chromium, and is the half that
- * was never tested. A surface that never reads the variable fails here no matter
- * which engine or device is in play.
+ * This is the **consumer** primitive: once the height is up, each surface is
+ * asked whether it responds. A surface that never reads the variable fails here
+ * regardless of engine or device.
+ *
+ * It shrinks the viewport and lets the app publish, rather than writing
+ * `--keyboard-height` directly, and that distinction is load-bearing. Writing
+ * the variable behind the app's back races the app's own publisher: `focusin`
+ * schedules a recompute on the next frame, and a test that focuses a field and
+ * then writes the variable can have that recompute land afterwards, sample a
+ * viewport that never actually shrank, and overwrite the height with 0. The
+ * result was a suite that passed locally and failed in CI on identical code —
+ * caught by the gate, not by me. Driving the real viewport makes every
+ * recompute land on the same number, so the ordering stops mattering.
+ *
+ * The wait is part of the contract, not a sleep: it fails with a message naming
+ * the publisher, so a genuine publisher regression cannot masquerade as a
+ * geometry failure in every surface at once.
  */
 export async function showKeyboard(page: Page, height: number = IOS_KEYBOARD_HEIGHT): Promise<void> {
-  await page.evaluate((px) => {
-    document.documentElement.style.setProperty('--keyboard-height', `${px}px`);
-  }, height);
+  await shrinkVisualViewport(page, height);
+  await expect
+    .poll(() => publishedKeyboardHeight(page), {
+      message: `the app did not publish a ${height}px keyboard height`,
+    })
+    .toBe(height);
 }
 
-/** Retracts the keyboard published by {@link showKeyboard}. */
+/** Retracts the keyboard, and waits for the app to notice. */
 export async function hideKeyboard(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    document.documentElement.style.setProperty('--keyboard-height', '0px');
-  });
+  await restoreVisualViewport(page);
+  await expect.poll(() => publishedKeyboardHeight(page)).toBe(0);
 }
 
 /**
@@ -184,4 +197,11 @@ export async function readPublishedKeyboardHeight(page: Page): Promise<string> {
   return page.evaluate(() =>
     getComputedStyle(document.documentElement).getPropertyValue('--keyboard-height').trim(),
   );
+}
+
+/** {@link readPublishedKeyboardHeight} as a number; unset or unparseable reads as 0. */
+export async function publishedKeyboardHeight(page: Page): Promise<number> {
+  const raw = await readPublishedKeyboardHeight(page);
+  const parsed = Number.parseFloat(raw.replace('px', ''));
+  return Number.isFinite(parsed) ? parsed : 0;
 }
