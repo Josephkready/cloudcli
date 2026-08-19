@@ -28,8 +28,15 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../..');
 
-/** Marks a full-screen overlay: it covers the viewport, so it owns its own bottom edge. */
-const OVERLAY = /fixed inset-0/;
+/**
+ * Marks a full-screen overlay: it covers the viewport, so it owns its bottom edge.
+ *
+ * Both spellings, because they are the same thing and the codebase uses both.
+ * `ProjectCreationWizard` writes `fixed bottom-0 left-0 right-0 top-0` longhand
+ * and was missed entirely by the `inset-0`-only version of this check — found
+ * while reviewing this test, not by the test.
+ */
+const OVERLAY = /fixed inset-0|fixed bottom-0 left-0 right-0 top-0/;
 
 /** Marks something the soft keyboard would open for. */
 const TEXT_ENTRY = /<input|<textarea|contentEditable|<Input\b|cmdk-input/;
@@ -68,12 +75,37 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/**
+ * Does this file, or a component it directly renders, take text?
+ *
+ * One level deep, because an overlay commonly holds no field itself and renders
+ * children that do — `ProjectCreationWizard` has zero inputs of its own and
+ * renders three components full of them, so a file-local check called it clean
+ * while the keyboard covered its form. One level is enough for that shape and
+ * stops well short of walking the whole tree, which would drag in every leaf and
+ * flag overlays that merely *can* reach a field somewhere.
+ */
+function takesTextInput(file: string, source: string): boolean {
+  if (TEXT_ENTRY.test(source)) return true;
+
+  const dir = path.dirname(file);
+  for (const match of source.matchAll(/from\s+'(\.[^']+)'/g)) {
+    const specifier = match[1];
+    for (const suffix of ['.tsx', '/index.tsx']) {
+      const candidate = path.resolve(dir, specifier + suffix);
+      if (!candidate.startsWith(SRC) || !fs.existsSync(candidate)) continue;
+      if (TEXT_ENTRY.test(fs.readFileSync(candidate, 'utf8'))) return true;
+    }
+  }
+  return false;
+}
+
 test('every full-screen overlay holding a text field accounts for the keyboard', () => {
   const offenders: string[] = [];
 
   for (const file of walk(SRC)) {
     const source = fs.readFileSync(file, 'utf8');
-    if (!OVERLAY.test(source) || !TEXT_ENTRY.test(source)) continue;
+    if (!OVERLAY.test(source) || !takesTextInput(file, source)) continue;
 
     const relative = path.relative(SRC, file).split(path.sep).join('/');
     if (EXEMPT.has(relative)) continue;

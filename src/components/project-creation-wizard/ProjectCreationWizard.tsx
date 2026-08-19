@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { FolderPlus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { keyboardAwareBottomStyle } from '../app/keyboardViewport';
 import { recordFeatureUse } from '../../utils/featureUsage';
 import { useFocusTrap } from '../../shared/view/ui/useFocusTrap';
 import { useOverlayDismiss } from '../../shared/view/ui/useOverlayDismiss';
@@ -152,8 +153,13 @@ export default function ProjectCreationWizard({
   const { containerRef } = useFocusTrap<HTMLDivElement>({ isActive: true });
 
   return (
+    // Stops at the top of the keyboard so the flex centring re-centres the wizard
+    // in what stays visible (#357). No field lives in this file — they are in
+    // WorkspacePathField and StepConfiguration — but they render inside this box,
+    // and `fixed` resolves against the layout viewport, which iOS does not shrink.
     <div
       className="fixed bottom-0 left-0 right-0 top-0 z-[60] flex items-center justify-center bg-black/50 p-0 backdrop-blur-sm sm:p-4"
+      style={keyboardAwareBottomStyle()}
       {...backdropProps}
     >
       <div
