@@ -56,6 +56,14 @@ describe('filterSlashCommands is sigil-agnostic', () => {
     assert.deepEqual(names(filterSlashCommands(MIXED, '$')), names(MIXED));
   });
 
+  it('searches descriptions with the sigil stripped as well', () => {
+    // Otherwise the function contradicts itself: a bare `token` reaches the
+    // description while `/token` does not, which is the #356 surprise again.
+    const withDescription = [command('$cost', 'Show token cost for this session')];
+    assert.deepEqual(names(filterSlashCommands(withDescription, '/token')), ['$cost']);
+    assert.deepEqual(names(filterSlashCommands(withDescription, 'token')), ['$cost']);
+  });
+
   it('does not match across the sigil boundary into the middle of a name', () => {
     // Guard against the lazy fix of stripping sigils everywhere and falling back
     // to substring matching: `okr` must not match `dante-live`.

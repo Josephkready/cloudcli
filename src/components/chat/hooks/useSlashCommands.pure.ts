@@ -115,7 +115,10 @@ export const filterSlashCommands = (
     return nameSubstringMatches;
   }
 
+  // Descriptions are searched with the sigil stripped too, or the function
+  // contradicts itself: `token` would find `/cost` by its description while
+  // `/token` found nothing, which is the same surprise #356 is about.
   return commands.filter((command) =>
-    Boolean(command.description?.toLowerCase().includes(normalizedQuery)),
+    Boolean(command.description?.toLowerCase().includes(needle)),
   );
 };
