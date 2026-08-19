@@ -16,6 +16,19 @@ import { defineConfig, devices } from '@playwright/test';
  * server/routes/mock-agent-provider.js), so a full browser chat turn runs with
  * no real CLI/SDK, network, or auth.
  */
+/**
+ * Anchored to the file name, deliberately.
+ *
+ * These patterns are matched against each spec's **absolute** path, so an
+ * unanchored `/mobile-keyboard.*\.spec\.ts/` also matches any spec that merely
+ * lives under a directory containing that phrase — and `/start-work` names its
+ * worktree after the task, so developing this very feature produced
+ * `/tmp/cloudcli-fix-mobile-keyboard-.../e2e/chat.spec.ts` and silently emptied
+ * the desktop project. A config that quietly runs nothing is far worse than one
+ * that fails, so the leading separator and trailing `$` are load-bearing.
+ */
+const KEYBOARD_SPECS = /[\\/]mobile-keyboard(-publisher)?\.spec\.ts$/;
+
 export default defineConfig({
   testDir: './e2e',
   globalSetup: './e2e/global-setup.ts',
@@ -43,7 +56,28 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      // The mobile-keyboard specs have their own projects below; excluding them
+      // here keeps them from running a third time under desktop metrics, where a
+      // soft keyboard is meaningless.
+      testIgnore: KEYBOARD_SPECS,
       use: { ...devices['Desktop Chrome'] },
+    },
+    // The soft-keyboard specs run on BOTH engines, and the WebKit half is the
+    // point: WebKit is the engine Safari ships, so it is the only one here that
+    // can speak to an iPhone report at all. Chromium runs alongside it to catch
+    // the reverse — a keyboard fix that quietly breaks Android.
+    //
+    // Scoped by `testMatch` rather than added globally: pointing the whole suite
+    // at WebKit would be a much larger and unrelated change, and a slower gate.
+    {
+      name: 'mobile-safari',
+      testMatch: KEYBOARD_SPECS,
+      use: { ...devices['iPhone 14 Pro'] },
+    },
+    {
+      name: 'mobile-chrome',
+      testMatch: KEYBOARD_SPECS,
+      use: { ...devices['Pixel 7'] },
     },
   ],
 });

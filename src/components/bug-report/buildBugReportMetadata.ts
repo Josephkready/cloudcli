@@ -11,6 +11,13 @@ export type BrowserEnvironment = {
   language?: string;
   timezone?: string;
   viewport?: string;
+  /**
+   * The *visible* area, which on iOS is the only one the soft keyboard shrinks.
+   * Absent where the Visual Viewport API is.
+   */
+  visualViewport?: string;
+  /** What the app currently believes the keyboard is covering. */
+  keyboardInset?: string;
   route?: string;
 };
 
@@ -35,6 +42,8 @@ export type BugReportMetadata = {
   route?: string;
   userAgent?: string;
   viewport?: string;
+  visualViewport?: string;
+  keyboardInset?: string;
   language?: string;
   timezone?: string;
 };
@@ -64,11 +73,29 @@ export function readBrowserEnvironment(): BrowserEnvironment {
     // Intl is optional in exotic runtimes; the field is simply omitted.
   }
 
+  // Deliberately three separate numbers, from three separate sources.
+  //
+  // `viewport` is the layout viewport, and on iOS it is identical whether or not
+  // the keyboard is up — which is why #354 and #357 both reported `390×797` and
+  // neither could be diagnosed from the report. `visualViewport` is what is
+  // actually visible, and `keyboardInset` is what the app *believes* is covered.
+  //
+  // Their disagreement is the diagnosis. Layout and visual equal while the user
+  // says the keyboard is up means the app was never told. Visual short but
+  // inset 0 means the app was told and failed to publish. Both correct, field
+  // still buried, means a surface is ignoring the offset. Collapsing any two of
+  // these into one source would destroy exactly that discrimination.
+  const visual = window.visualViewport;
+
   return {
     userAgent: window.navigator?.userAgent,
     language: window.navigator?.language,
     timezone,
     viewport: `${window.innerWidth}×${window.innerHeight}`,
+    visualViewport: visual ? `${Math.round(visual.width)}×${Math.round(visual.height)}` : undefined,
+    keyboardInset: visual
+      ? `${Math.max(0, Math.round(window.innerHeight - visual.height))}px`
+      : undefined,
     route: `${window.location?.pathname ?? ''}${window.location?.search ?? ''}`,
   };
 }
@@ -100,6 +127,8 @@ export function buildBugReportMetadata({
     route: present(environment.route),
     userAgent: present(environment.userAgent),
     viewport: present(environment.viewport),
+    visualViewport: present(environment.visualViewport),
+    keyboardInset: present(environment.keyboardInset),
     language: present(environment.language),
     timezone: present(environment.timezone),
   };

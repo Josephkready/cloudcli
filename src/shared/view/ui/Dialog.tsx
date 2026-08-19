@@ -135,8 +135,29 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
 
     if (!open) return null;
 
+    // The wrapper below is the dialog's containing block, and it stops at the
+    // top of the keyboard (#357).
+    //
+    // Raising that one edge is what re-anchors every dialog, because the content
+    // inside is `absolute` and so resolves against this box rather than against
+    // the layout viewport — which iOS never shrinks for the keyboard, and which
+    // `dvh` does not track either (`dvh` follows retractable browser chrome). A
+    // centred dialog therefore re-centres in what is still visible, and a
+    // bottom-anchored sheet lands on top of the keyboard instead of behind it,
+    // with no per-dialog styling and no inline overrides.
+    //
+    // Doing it per-dialog was tried first and is wrong: forcing `top` from here
+    // would have overridden the mobile bottom-sheet in
+    // `ProviderSelectionEmptyState`, which deliberately opts out of centring
+    // with `top-auto bottom-0`. An existing test caught it.
+    //
+    // With no keyboard the offset is `0px` and this is exactly `inset-0`, so
+    // desktop layout is unchanged.
     return createPortal(
-      <div className={cn('fixed inset-0 z-50', wrapperClassName)}>
+      <div
+        className={cn('fixed inset-0 z-50', wrapperClassName)}
+        style={{ bottom: 'var(--keyboard-height, 0px)' }}
+      >
         {/* Overlay */}
         <div
           className="fixed inset-0 animate-dialog-overlay-show bg-black/50 backdrop-blur-sm"
@@ -155,8 +176,12 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
           }}
           role="dialog"
           aria-modal="true"
+          // `absolute`, not `fixed` — see the wrapper below. A fixed element
+          // resolves against the layout viewport no matter what encloses it, so
+          // as long as this was fixed, no amount of adjusting the wrapper could
+          // move it (#357).
           className={cn(
-            'fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
+            'absolute left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
             'rounded-xl border bg-popover text-popover-foreground shadow-lg',
             'animate-dialog-content-show',
             className

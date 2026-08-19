@@ -61,10 +61,22 @@ export const mapSkillToSlashCommand = (skill: ProviderSkill): SlashCommand => ({
 });
 
 /**
+ * Removes a single leading command sigil, if there is one.
+ *
+ * `/` is Claude's and `$` is Codex's. Anchored and non-greedy by construction so
+ * that only the first character can ever be removed — a name is otherwise
+ * untouched.
+ */
+const stripCommandSigil = (value: string): string => value.replace(/^[/$]/, '');
+
+/**
  * Rank a typed query against the loaded command list, most-specific first:
  * command-name prefix, then command-name substring, then description
  * substring. Once the query names a namespace (`plugin:`) only prefix matches
  * stay visible so it behaves like path completion.
+ *
+ * Matching ignores the leading sigil on both sides, so a skill is findable by
+ * name whichever provider owns it — see {@link stripCommandSigil}.
  */
 export const filterSlashCommands = (
   commands: SlashCommand[],
@@ -75,11 +87,19 @@ export const filterSlashCommands = (
     return commands;
   }
 
-  const commandPrefix = normalizedQuery.startsWith('/')
-    ? normalizedQuery
-    : `/${normalizedQuery}`;
+  // The leading sigil is dropped from both sides before comparing (#356).
+  //
+  // Providers name their skills differently — Claude uses `/okr`, Codex uses
+  // `$okr` — but that is an invocation detail, not something a user should have
+  // to know in order to *search*. Normalising the query to `/` and comparing it
+  // whole meant a Codex user typing `/okr` matched nothing, and a bare `/`
+  // matched no Codex command at all, so the menu simply came up empty.
+  //
+  // Only the sigil is stripped, and only from the front. Everything after it
+  // still has to match as a prefix, so `okr` does not reach `dante-live`.
+  const needle = stripCommandSigil(normalizedQuery);
   const namePrefixMatches = commands.filter((command) =>
-    command.name.toLowerCase().startsWith(commandPrefix),
+    stripCommandSigil(command.name.toLowerCase()).startsWith(needle),
   );
 
   // Namespaced commands should behave like path completion. Once a provider
@@ -89,7 +109,7 @@ export const filterSlashCommands = (
   }
 
   const nameSubstringMatches = commands.filter((command) =>
-    command.name.toLowerCase().includes(normalizedQuery),
+    stripCommandSigil(command.name.toLowerCase()).includes(needle),
   );
   if (nameSubstringMatches.length > 0) {
     return nameSubstringMatches;
