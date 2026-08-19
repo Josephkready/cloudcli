@@ -68,10 +68,17 @@ setup    = "ln -sfn /deps/node_modules node_modules"
 run      = "npm run build:client && npm run test:server:coverage && npm run test:unit:coverage && npm run test:component:coverage && npm run coverage:floor:selftest && npm run coverage:floor && npm run check:bundle:selftest && npm run check:bundle"
 
 [[lane]]
-# The pinned Playwright image ships Chromium and its system libraries prebuilt, so this
-# skips the `playwright install --with-deps` download the GitHub workflow paid on every
-# run. Keep the tag in lockstep with the `@playwright/test` pin in package.json — a
+# The pinned Playwright image ships the browsers and their system libraries prebuilt, so
+# this skips the `playwright install --with-deps` download the GitHub workflow paid on
+# every run. Keep the tag in lockstep with the `@playwright/test` pin in package.json — a
 # mismatch makes Playwright refuse the bundled browser.
+#
+# It must keep shipping WEBKIT, not just Chromium. The mobile-keyboard specs run on the
+# `mobile-safari` project because WebKit is the engine Safari ships, and it is the only
+# thing in this repo that can speak to an iPhone report — the soft-keyboard bugs (#346,
+# #354, #357) were all iOS-only. Verified present in this tag as `webkit-2104`, matching
+# the 1.49.1 pin. Swapping to a slimmer image would not fail loudly; Playwright would
+# simply refuse that project, so check before changing the tag.
 #
 # `npm run test:e2e` builds the client itself (VITE_AUTH_DISABLED baked in) via the
 # Playwright global-setup, then boots a per-worker server against the deterministic
