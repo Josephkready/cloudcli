@@ -35,7 +35,14 @@ export const METADATA_FIELDS = [
   ['platform', 'Server platform'],
   ['nodeVersion', 'Node version'],
   ['userAgent', 'User agent'],
-  ['viewport', 'Viewport'],
+  // Three rows, because their disagreement is what makes a keyboard report
+  // diagnosable. `Viewport` is the layout viewport, which iOS does not shrink
+  // for the keyboard — on its own it reads the same in the working and the
+  // broken case, which is why #354 and #357 could not be settled from the
+  // reports.
+  ['viewport', 'Viewport (layout)'],
+  ['visualViewport', 'Viewport (visible)'],
+  ['keyboardInset', 'Keyboard inset'],
   ['language', 'Language'],
   ['timezone', 'Timezone'],
   ['reportedAt', 'Reported at'],
