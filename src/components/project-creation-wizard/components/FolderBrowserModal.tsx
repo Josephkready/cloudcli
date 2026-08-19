@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Eye, EyeOff, Folder, FolderGit2, FolderOpen, Loader2, Plus, X } from 'lucide-react';
+import { keyboardAwareBottomStyle } from '../../app/keyboardViewport';
 import { Button, Input } from '../../../shared/view/ui';
 import { useFocusTrap } from '../../../shared/view/ui/useFocusTrap';
 import { useOverlayDismiss } from '../../../shared/view/ui/useOverlayDismiss';
@@ -139,8 +140,12 @@ export default function FolderBrowserModal({
   }
 
   return (
+    // Stops at the top of the keyboard so the flex centring below re-centres the
+    // browser in what is still visible (#357) — it carries a path field, and
+    // `fixed` resolves against the layout viewport, which iOS does not shrink.
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      style={keyboardAwareBottomStyle()}
       {...backdropProps}
     >
       <div

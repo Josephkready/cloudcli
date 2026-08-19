@@ -2,6 +2,7 @@ import { FolderOpen, Globe, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
+import { keyboardAwareBottomStyle } from '../../../app/keyboardViewport';
 import { Button, Input } from '../../../../shared/view/ui';
 import { useFocusTrap } from '../../../../shared/view/ui/useFocusTrap';
 import { useOverlayDismiss } from '../../../../shared/view/ui/useOverlayDismiss';
@@ -133,7 +134,15 @@ export default function McpServerFormModal({
   const showCodexOnlyFields = provider === 'codex' && !isGlobalMode;
 
   return createPortal(
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4" {...backdropProps}>
+    // Stops at the top of the keyboard, so the flex centring below re-centres
+    // this form in what is still visible (#357). It has ten text fields and is
+    // `fixed`, which resolves against the layout viewport — the one iOS does not
+    // shrink when the keyboard opens.
+    <div
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4"
+      style={keyboardAwareBottomStyle()}
+      {...backdropProps}
+    >
       <div
         ref={containerRef}
         role="dialog"

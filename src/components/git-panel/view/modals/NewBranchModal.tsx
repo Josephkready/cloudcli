@@ -1,6 +1,7 @@
 import { Plus, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import { keyboardAwareBottomStyle } from '../../../app/keyboardViewport';
 import { disabledControlClasses } from '../../../../shared/view/ui/disabledState';
 
 type NewBranchModalProps = {
@@ -50,7 +51,13 @@ export default function NewBranchModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    // Only the centring container stops at the keyboard (#357); the backdrop
+    // below deliberately stays full-screen so it still dims the area behind the
+    // keyboard rather than leaving an undimmed band.
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={keyboardAwareBottomStyle()}
+    >
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
         className="relative w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
