@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { keyboardAwareBottomStyle } from '../../app/keyboardViewport';
 import ProviderLoginModal from '../../provider-auth/view/ProviderLoginModal';
 import { Button } from '../../../shared/view/ui';
 import { useFocusTrap } from '../../../shared/view/ui/useFocusTrap';
@@ -84,8 +85,13 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
   const isAuthenticated = Boolean(loginProvider && providerAuthStatus[loginProvider].authenticated);
 
   return (
+    // Stops at the top of the keyboard so the flex centring re-centres settings
+    // in what stays visible (#357). The fields are in the tab components rendered
+    // inside this box rather than in this file, but they are still `fixed`
+    // descendants of a viewport-anchored element that iOS does not shrink.
     <div
       className="modal-backdrop fixed inset-0 z-[9999] flex items-center justify-center bg-background/80 backdrop-blur-sm md:p-4"
+      style={keyboardAwareBottomStyle()}
       {...backdropProps}
     >
       <div
