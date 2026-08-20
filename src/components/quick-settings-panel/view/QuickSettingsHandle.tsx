@@ -21,10 +21,18 @@ import type { QuickSettingsHandleStyle } from '../types';
  * state neither component is designed for: the settings panel sliding out from
  * under an open sidebar.
  *
- * Dropping a level costs nothing. The handle only has to out-stack the chat
- * surface (`z-10`/`z-20`), and it never overlaps its own panel — when the panel
- * is open the handle sits at `right-64`, immediately left of the panel's
- * `right-0 w-64`, so sharing `z-40` with it is not a collision.
+ * Dropping a level costs nothing here, though "it only has to beat the chat
+ * surface" would be too glib: `ChatComposer` has two `z-50` elements of its own.
+ * The drag-active image overlay is a descendant of `PromptInput`, whose
+ * `backdrop-blur-sm` establishes a stacking context, so it is contained and can
+ * never reach this handle. The `@`-file-mention dropdown is not contained and
+ * can overlap the handle once it is dragged into roughly the upper third — it
+ * simply loses the tie today. That is worth knowing before anyone reshuffles
+ * these values again.
+ *
+ * The handle also never overlaps its own panel: when the panel is open the
+ * handle sits at `right-64`, immediately left of the panel's `right-0 w-64`, so
+ * sharing `z-40` with it is not a collision.
  *
  * The slash-command popover is a portal at `z-index: 1000` and was never at
  * risk; the handle merely shows *beside* it, outside its box.
