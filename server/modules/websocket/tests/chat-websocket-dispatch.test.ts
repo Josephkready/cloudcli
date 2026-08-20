@@ -1193,11 +1193,16 @@ test('frames for a socket that closed mid-run are dropped, not thrown, and the r
     sendChat(socket, 'closed-session', 'hello');
     await settle();
 
+    // Frames already delivered before the close are not what this asserts (a
+    // send now also broadcasts the session's derived name, #368), so measure the
+    // growth from the close point — which is what "written to a CLOSED socket"
+    // actually means.
+    const framesBeforeClose = socket.frames.length;
     socket.readyState = 3; // CLOSED
     socket.emit('close');
     (calls[0] as SpawnCall).writer.send({ kind: 'assistant', provider: 'claude', content: 'into the void' });
 
-    assert.equal(socket.frames.length, 0, 'nothing is written to a closed socket');
+    assert.equal(socket.frames.length, framesBeforeClose, 'nothing is written to a closed socket');
     assert.equal(chatRunRegistry.isProcessing('closed-session'), true, 'the run is not cancelled');
     assert.equal(
       chatRunRegistry.replayEvents('closed-session', 0).length,
@@ -1323,11 +1328,14 @@ test('a background run keeps running when its viewer drops and re-attaches on re
 
     // The only viewer disconnects (tab closed / network drop). The run is not
     // cancelled and keeps producing events, which buffer for a later subscriber.
+    const framesBeforeClose = socket.frames.length;
     socket.readyState = 3;
     socket.emit('close');
     (calls[0] as SpawnCall).writer.send({ kind: 'assistant', provider: 'claude', content: 'while away' });
     assert.equal(chatRunRegistry.isProcessing('background-run'), true, 'the run keeps going with no live subscriber');
-    assert.equal(socket.frames.length, 0, 'the dead socket received nothing while disconnected');
+    // Growth from the close, not an absolute count: a send also broadcasts the
+    // session's derived name before the socket drops (#368).
+    assert.equal(socket.frames.length, framesBeforeClose, 'the dead socket received nothing while disconnected');
 
     // A reconnecting client re-subscribes the session (the frontend now
     // re-subscribes every running session, not just the viewed one). It
@@ -1356,7 +1364,7 @@ test('a background run keeps running when its viewer drops and re-attaches on re
     // reconnected client gets the terminal complete live.
     assert.equal(chatRunRegistry.isProcessing('background-run'), false);
     assert.equal(reconnected.framesOfKind('complete').length, 1, 'the reconnected client gets the terminal complete');
-    assert.equal(socket.frames.length, 0, 'the dead socket still received nothing');
+    assert.equal(socket.frames.length, framesBeforeClose, 'the dead socket still received nothing');
     assert.ok(
       sessionsDb.getSessionById('background-run')?.last_completed_at,
       'completion is still persisted as the durable Done state',
@@ -1366,5 +1374,89 @@ test('a background run keeps running when its viewer drops and re-attaches on re
       true,
       'and the terminal event is replayable for whoever subscribes next',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Session naming from the opening message (issue #368)
+// ---------------------------------------------------------------------------
+
+test('an app-created session takes its name from the first message', async () => {
+  await withIsolatedDatabase(async () => {
+    const { spawn, calls } = makeControllableSpawn();
+    const { dependencies } = makeDependencies(spawn);
+    // Created the way POST /api/providers/sessions does it: before any message
+    // exists, so there is nothing to name it from yet.
+    sessionsDb.createAppSession('unnamed', 'claude', '/workspace/demo');
+    assert.equal(sessionsDb.getSessionById('unnamed')?.custom_name, null, 'starts unnamed');
+
+    const socket = new FakeSocket();
+    connect(socket, dependencies);
+    sendChat(socket, 'unnamed', '  Show me a long   code sample  ');
+    await settle();
+
+    const row = sessionsDb.getSessionById('unnamed');
+    assert.equal(row?.custom_name, 'Show me a long code sample');
+    // name_source stays NULL so the AI titler remains free to shorten it — this
+    // supplies the first-prompt input that worker always assumed was there.
+    assert.equal(row?.name_source, null, 'the row stays eligible for AI titling');
+
+    // Persisted is not enough: without the broadcast the sidebar keeps showing
+    // "New Session" until something else triggers a refresh, which is the whole
+    // symptom. Assert the name actually reached the client.
+    const upserts = socket.frames.filter((frame) => frame.kind === 'session_upserted');
+    assert.equal(upserts.length, 1, 'the derived name is broadcast to open clients');
+    assert.match(JSON.stringify(upserts[0]), /Show me a long code sample/);
+
+    finishRun(calls[0] as SpawnCall);
+    await settle();
+  });
+});
+
+test('a session that already has a name keeps it', async () => {
+  await withIsolatedDatabase(async () => {
+    const { spawn, calls } = makeControllableSpawn();
+    const { dependencies } = makeDependencies(spawn);
+    sessionsDb.createAppSession('named', 'claude', '/workspace/demo');
+    sessionsDb.updateSessionCustomName('named', 'A name the user chose', 'user');
+
+    const socket = new FakeSocket();
+    connect(socket, dependencies);
+    sendChat(socket, 'named', 'a later message that must not become the title');
+    await settle();
+
+    const row = sessionsDb.getSessionById('named');
+    assert.equal(row?.custom_name, 'A name the user chose', 'a real name is never overwritten');
+    assert.equal(row?.name_source, 'user');
+
+    finishRun(calls[0] as SpawnCall);
+    await settle();
+  });
+});
+
+test('a slash command does not become the session title', async () => {
+  await withIsolatedDatabase(async () => {
+    const { spawn, calls } = makeControllableSpawn();
+    const { dependencies } = makeDependencies(spawn);
+    sessionsDb.createAppSession('slash-first', 'claude', '/workspace/demo');
+
+    const socket = new FakeSocket();
+    connect(socket, dependencies);
+    sendChat(socket, 'slash-first', '/model opus');
+    await settle();
+
+    // "/model opus" names the command, not the conversation, so the row stays
+    // unnamed and the NEXT real message gets to title it.
+    assert.equal(sessionsDb.getSessionById('slash-first')?.custom_name, null);
+
+    finishRun(calls[0] as SpawnCall);
+    await settle();
+
+    sendChat(socket, 'slash-first', 'now the actual question');
+    await settle();
+    assert.equal(sessionsDb.getSessionById('slash-first')?.custom_name, 'now the actual question');
+
+    finishRun(calls[1] as SpawnCall);
+    await settle();
   });
 });

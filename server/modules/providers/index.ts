@@ -10,5 +10,8 @@ export { providerMcpService } from './services/mcp.service.js';
 
 export { initializeSessionsWatcher } from './services/sessions-watcher.service.js';
 export { closeSessionsWatcher } from './services/sessions-watcher.service.js';
+// Chat naming a session from its opening message pushes the new title to open
+// clients through this (#368), so it has to leave the module by the barrel.
+export { broadcastSessionUpserted } from './services/sessions-watcher.service.js';
 
 export { startAiSessionTitler, stopAiSessionTitler } from './services/ai-session-titler.service.js';

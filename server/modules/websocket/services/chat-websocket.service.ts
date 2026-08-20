@@ -3,7 +3,9 @@ import path from 'node:path';
 import type { WebSocket } from 'ws';
 
 import { activeRunsDb, sessionsDb } from '@/modules/database/index.js';
+import { broadcastSessionUpserted } from '@/modules/providers/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
+import { deriveOpeningName, needsOpeningName } from '@/modules/websocket/utils/sessionOpeningName.js';
 import type { ChatRun, QueuedChatMessage } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
 import { getGlobalImageAssetsDir, normalizeImageDescriptors } from '@/shared/image-attachments.js';
@@ -203,6 +205,84 @@ async function driveSingleRun(
 }
 
 /**
+ * Give a still-unnamed session a title from the first thing the user said (#368).
+ *
+ * Without this the sidebar is a column of identical "New Session" rows separated
+ * only by a relative timestamp, because the fields it reads
+ * (`title || summary || name`) are all empty until the AI titler fills them —
+ * and that worker is opt-in, needs an API key, and cannot title a session before
+ * its first turn completes anyway.
+ *
+ * The gap is specific to app-created sessions. The disk synchronizers already
+ * fall back to the first prompt for sessions they discover, but a session
+ * created through cloudcli has its row written by POST /api/providers/sessions
+ * *before* any message exists, so nothing ever wrote the prompt into it.
+ *
+ * Written with no `name_source`, deliberately: that leaves the row eligible for
+ * the AI titler, which exists to rewrite exactly this kind of long
+ * opening-line title into a short one. This supplies the input that worker
+ * always assumed was there, rather than competing with it.
+ *
+ * Best-effort and never fatal — a title is not worth failing a send over.
+ *
+ * KNOWN TRADE-OFF. Writing a name here forecloses one the synchronizer might
+ * have found later. Its guard treats *any* non-placeholder `custom_name` as
+ * terminal:
+ *
+ *     if (existingSessionName && existingSessionName !== 'Untitled Claude Session') return …
+ *
+ * so once this row has an opening line, the synchronizer stops re-reading the
+ * transcript and Claude Code's own `ai-title` event — a better summary than a
+ * raw first prompt — is never adopted into `custom_name`. Before this change the
+ * row was NULL, so that path stayed open.
+ *
+ * Shipped anyway, because the trade is "a real title immediately, forever"
+ * against "New Session now, possibly a nicer title later", and the issue is
+ * about the sidebar being unusable *now*. Users with cloudcli's own AI titler
+ * enabled lose nothing — `name_source` is left NULL precisely so it can still
+ * rewrite this.
+ *
+ * The proper fix is to make that guard honour `name_source` (the DB already
+ * does: `custom_name = CASE WHEN name_source IS NULL THEN … END`), so a
+ * provisional name stays replaceable by a real title event. That changes naming
+ * for every session across two synchronizers, so it wants its own change and its
+ * own review rather than riding along here. Tracked separately.
+ */
+function nameSessionFromOpeningMessage(
+  sessionId: string,
+  currentName: string | null,
+  content: string,
+): void {
+  if (!needsOpeningName(currentName)) {
+    return;
+  }
+
+  const derived = deriveOpeningName(content);
+  if (!derived) {
+    return;
+  }
+
+  try {
+    // Cheap and safe to do inline: this is a single UPDATE by primary key and
+    // reads no session row, so it cannot disturb the dispatch path below.
+    sessionsDb.updateSessionCustomName(sessionId, derived);
+  } catch (error) {
+    console.warn('[Chat] Failed to derive session name from opening message', { sessionId, error });
+    return;
+  }
+
+  // The broadcast, however, re-reads the row to build its event. Deferred to a
+  // macrotask so that read lands after the dispatch path's own lookups rather
+  // than interleaving with them — the send is the priority, and the sidebar
+  // update is not worth perturbing it.
+  setImmediate(() => {
+    void broadcastSessionUpserted(sessionId).catch((error) => {
+      console.warn('[Chat] Failed to broadcast derived session name', { sessionId, error });
+    });
+  });
+}
+
+/**
  * Server-side per-session FIFO queue drain. Drives the head run to completion,
  * then dispatches every message that queued for the session while runs were in
  * flight — in arrival order — until the queue empties. This is what guarantees
@@ -318,6 +398,8 @@ async function handleChatSend(
     userId,
     enqueuedAt: Date.now(),
   };
+
+  nameSessionFromOpeningMessage(sessionId, session.custom_name, message.content);
 
   const result = chatRunRegistry.submitMessage(
     {
