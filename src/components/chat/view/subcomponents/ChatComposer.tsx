@@ -215,6 +215,32 @@ export default function ChatComposer({
 
   const hasQueuedDraft = queuedDrafts.length > 0;
   const canQueueDraft = isLoading && Boolean(input.trim());
+
+  /**
+   * Send, then put focus back in the textarea (#367).
+   *
+   * Clicking the submit button focuses it — ordinary browser behaviour. Sending
+   * clears the input, so when the run finishes `disabled` below evaluates to
+   * `!input.trim()` === true, and the browser blurs a control the moment it
+   * becomes disabled. Focus lands on <body>: on desktop you must click back into
+   * the box, and on a phone the keyboard closes after every single message.
+   *
+   * Traced in a real browser rather than inferred — the button is never
+   * unmounted (it is one persistent element whose label flips Send/Stop), it
+   * fires a genuine focusout while still connected, and reads `disabled: true`
+   * on the next frame. So the fix belongs at the point focus moves TO the
+   * button, not at the point it is lost.
+   *
+   * This must stay synchronous inside the click: iOS only opens the on-screen
+   * keyboard for a programmatic focus() that runs inside a user gesture.
+   */
+  const handleSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement> | MouseEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>) => {
+      onSubmit(event);
+      textareaRef.current?.focus();
+    },
+    [onSubmit, textareaRef],
+  );
   const submitHint = canQueueDraft
     ? hasQueuedDraft
       ? t('input.hintText.queueAnother', { defaultValue: 'Enter to queue another message' })
@@ -297,7 +323,7 @@ export default function ChatComposer({
         />
 
         <PromptInput
-          onSubmit={onSubmit as (event: FormEvent<HTMLFormElement>) => void}
+          onSubmit={handleSubmit as (event: FormEvent<HTMLFormElement>) => void}
           status={isLoading ? 'streaming' : 'ready'}
           className={[
             isTextareaExpanded ? 'chat-input-expanded' : '',
@@ -472,7 +498,7 @@ export default function ChatComposer({
                 canQueueDraft
                   ? (e: MouseEvent<HTMLButtonElement>) => {
                       e.preventDefault();
-                      onSubmit(e);
+                      handleSubmit(e);
                     }
                   : isLoading
                     ? onAbortSession
