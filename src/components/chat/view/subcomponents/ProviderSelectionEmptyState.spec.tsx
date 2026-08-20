@@ -104,6 +104,31 @@ describe('ProviderSelectionEmptyState mobile model picker', () => {
   });
 });
 
+describe('ProviderSelectionEmptyState search hint', () => {
+  // #362: the hint names a keyboard shortcut, so on a touch device it advertised
+  // a route the user cannot take — and it was the only pointer to search on the
+  // screen. `matches` for '(pointer: coarse)' is the same signal the component
+  // already used to keep the model picker from summoning the keyboard.
+  const HINT = /to search sessions, files, and commits/;
+
+  it('hides the keyboard shortcut hint on a coarse pointer', () => {
+    mockPointer(true);
+    renderPicker();
+
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('still shows the hint on a fine pointer, where the shortcut works', () => {
+    mockPointer(false);
+    renderPicker();
+
+    // Guards against "fixing" this by deleting the hint outright: the shortcut
+    // is real and discoverable nowhere else on this screen.
+    expect(screen.getByText(HINT)).toBeInTheDocument();
+    expect(screen.getByText(/^(Ctrl\+K|⌘K)$/)).toBeInTheDocument();
+  });
+});
+
 describe('ProviderSelectionEmptyState — Antigravity models', () => {
   it('selects and persists an Antigravity model from the provider picker', () => {
     const setProvider = vi.fn();

@@ -316,18 +316,29 @@ export default function ProviderSelectionEmptyState({
             }
           </p>
 
-          <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground/60">
-            <Trans
-              ns="chat"
-              i18nKey="providerSelection.pressToSearch"
-              values={{ shortcut: MOD_KEY === "⌘" ? "⌘K" : "Ctrl+K" }}
-              components={{
-                kbd: (
-                  <kbd className="inline-flex items-center gap-0.5 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]" />
-                ),
-              }}
-            />
-          </p>
+          {/*
+            Keyboard-only hint, so it is hidden on a coarse pointer (#362). It
+            advertised a shortcut a phone cannot press, and it was the only
+            thing on this screen pointing at search — telling a touch user the
+            feature exists while naming the one route they cannot take. It also
+            spent a line of vertical space on the surface where space is
+            tightest. Hiding it is the whole fix here: giving touch users a
+            tappable route into the same palette is a separate, additive change.
+          */}
+          {!isCoarsePointer && (
+            <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground/60">
+              <Trans
+                ns="chat"
+                i18nKey="providerSelection.pressToSearch"
+                values={{ shortcut: MOD_KEY === "⌘" ? "⌘K" : "Ctrl+K" }}
+                components={{
+                  kbd: (
+                    <kbd className="inline-flex items-center gap-0.5 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]" />
+                  ),
+                }}
+              />
+            </p>
+          )}
         </div>
       </div>
     );
