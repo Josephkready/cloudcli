@@ -224,6 +224,29 @@ async function driveSingleRun(
  * always assumed was there, rather than competing with it.
  *
  * Best-effort and never fatal — a title is not worth failing a send over.
+ *
+ * KNOWN TRADE-OFF. Writing a name here forecloses one the synchronizer might
+ * have found later. Its guard treats *any* non-placeholder `custom_name` as
+ * terminal:
+ *
+ *     if (existingSessionName && existingSessionName !== 'Untitled Claude Session') return …
+ *
+ * so once this row has an opening line, the synchronizer stops re-reading the
+ * transcript and Claude Code's own `ai-title` event — a better summary than a
+ * raw first prompt — is never adopted into `custom_name`. Before this change the
+ * row was NULL, so that path stayed open.
+ *
+ * Shipped anyway, because the trade is "a real title immediately, forever"
+ * against "New Session now, possibly a nicer title later", and the issue is
+ * about the sidebar being unusable *now*. Users with cloudcli's own AI titler
+ * enabled lose nothing — `name_source` is left NULL precisely so it can still
+ * rewrite this.
+ *
+ * The proper fix is to make that guard honour `name_source` (the DB already
+ * does: `custom_name = CASE WHEN name_source IS NULL THEN … END`), so a
+ * provisional name stays replaceable by a real title event. That changes naming
+ * for every session across two synchronizers, so it wants its own change and its
+ * own review rather than riding along here. Tracked separately.
  */
 function nameSessionFromOpeningMessage(
   sessionId: string,

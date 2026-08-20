@@ -70,17 +70,31 @@ test('a name is needed when the row has none', () => {
     }
 });
 
-test('synchronizer placeholders count as unnamed', () => {
+test('synchronizer placeholders count as unnamed, for every provider', () => {
     // These carry no more information than an empty string, so a real opening
-    // line should be allowed to replace them.
+    // line should be allowed to replace them. Antigravity is the one an
+    // enumerated list originally missed: its placeholder is also excluded from
+    // the AI titler by `custom_name NOT LIKE 'Untitled % Session'`, so a session
+    // stuck on it would have had no route to a name at all.
     for (const placeholder of [
         'Untitled Claude Session',
         'Untitled Codex Session',
+        'Untitled Antigravity Session',
         'untitled session',
         'New Session',
     ]) {
         assert.equal(needsOpeningName(placeholder), true, `expected true for ${placeholder}`);
     }
+});
+
+test('a provider added later is covered without touching this file', () => {
+    // The pattern mirrors getSessionsNeedingAiTitle's SQL filter, so the two
+    // cannot drift apart the way an enumerated list would.
+    assert.equal(needsOpeningName('Untitled Gemini Session'), true);
+    assert.equal(needsOpeningName('Untitled Some New Provider Session'), true);
+    // ...without swallowing a real title that merely mentions a session.
+    assert.equal(needsOpeningName('Untitled draft about my session notes'), false);
+    assert.equal(needsOpeningName('Debug the untitled session bug'), false);
 });
 
 test('a real name is never overwritten', () => {

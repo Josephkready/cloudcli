@@ -10,13 +10,21 @@ import { normalizeSessionName } from '@/shared/utils.js';
  */
 const MAX_OPENING_NAME_LENGTH = 80;
 
-/** Sentinel names the synchronizers write when they have nothing better. */
-const PLACEHOLDER_NAMES = new Set([
-  'untitled claude session',
-  'untitled codex session',
-  'untitled session',
-  'new session',
-]);
+/**
+ * Sentinel names the synchronizers write when they have nothing better.
+ *
+ * Matched as a pattern rather than an enumerated list, mirroring the
+ * `custom_name NOT LIKE 'Untitled % Session'` filter that
+ * `getSessionsNeedingAiTitle` uses to exclude the same rows. Every provider
+ * writes its own variant — `Untitled Claude Session`, `Untitled Codex Session`,
+ * `Untitled Antigravity Session` — so a hardcoded set silently omits whichever
+ * provider is added next, and that session would then never be named from its
+ * opening message *or* picked up by the AI titler.
+ */
+const PLACEHOLDER_NAME_PATTERN = /^untitled\b.*\bsession$/;
+
+/** The frontend's own fallback label, which is never stored but is worth catching. */
+const CLIENT_FALLBACK_NAME = 'new session';
 
 /**
  * Does this session still need a name derived from its opening message?
@@ -26,11 +34,11 @@ const PLACEHOLDER_NAMES = new Set([
  * count as blank because they carry no information either.
  */
 export function needsOpeningName(customName: string | null | undefined): boolean {
-  const normalized = (customName ?? '').replace(/\s+/g, ' ').trim();
+  const normalized = (customName ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
   if (!normalized) {
     return true;
   }
-  return PLACEHOLDER_NAMES.has(normalized.toLowerCase());
+  return normalized === CLIENT_FALLBACK_NAME || PLACEHOLDER_NAME_PATTERN.test(normalized);
 }
 
 /**

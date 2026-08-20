@@ -1401,6 +1401,13 @@ test('an app-created session takes its name from the first message', async () =>
     // supplies the first-prompt input that worker always assumed was there.
     assert.equal(row?.name_source, null, 'the row stays eligible for AI titling');
 
+    // Persisted is not enough: without the broadcast the sidebar keeps showing
+    // "New Session" until something else triggers a refresh, which is the whole
+    // symptom. Assert the name actually reached the client.
+    const upserts = socket.frames.filter((frame) => frame.kind === 'session_upserted');
+    assert.equal(upserts.length, 1, 'the derived name is broadcast to open clients');
+    assert.match(JSON.stringify(upserts[0]), /Show me a long code sample/);
+
     finishRun(calls[0] as SpawnCall);
     await settle();
   });
