@@ -90,22 +90,47 @@ function getProviderDisplayName(p: LLMProvider) {
   return "Claude";
 }
 
-function useCoarsePointer() {
-  const [isCoarsePointer, setIsCoarsePointer] = useState(
-    () => typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true,
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(
+    () => typeof window !== "undefined" && window.matchMedia?.(query).matches === true,
   );
 
   useEffect(() => {
-    const query = window.matchMedia?.("(pointer: coarse)");
-    if (!query) return undefined;
+    const list = window.matchMedia?.(query);
+    if (!list) return undefined;
 
-    const update = () => setIsCoarsePointer(query.matches);
+    const update = () => setMatches(list.matches);
     update();
-    query.addEventListener?.("change", update);
-    return () => query.removeEventListener?.("change", update);
-  }, []);
+    list.addEventListener?.("change", update);
+    return () => list.removeEventListener?.("change", update);
+  }, [query]);
 
-  return isCoarsePointer;
+  return matches;
+}
+
+/**
+ * Is the primary pointer a finger? Governs whether opening a picker should
+ * summon the keyboard.
+ */
+function useCoarsePointer() {
+  return useMediaQuery("(pointer: coarse)");
+}
+
+/**
+ * Does the device have ANY precise pointer — a mouse, trackpad or stylus?
+ *
+ * Deliberately not `(pointer: coarse)`, which only describes the *primary*
+ * pointer. iPadOS reports `pointer: coarse` even with a Magic Keyboard attached,
+ * so keying a keyboard-shortcut hint off that would hide it from the single most
+ * common touch-plus-keyboard device — a user who can actually press the
+ * shortcut. `any-pointer: fine` is true there, and false on a plain phone.
+ *
+ * The picker's autofocus above can keep using the primary-pointer query: getting
+ * that wrong only costs a tap, whereas this decides whether a capability is
+ * discoverable at all.
+ */
+function useHasFinePointer() {
+  return useMediaQuery("(any-pointer: fine)");
 }
 
 export default function ProviderSelectionEmptyState({
@@ -126,6 +151,7 @@ export default function ProviderSelectionEmptyState({
   const { t } = useTranslation("chat");
   const [dialogOpen, setDialogOpen] = useState(false);
   const isCoarsePointer = useCoarsePointer();
+  const hasFinePointer = useHasFinePointer();
 
   const visibleProviderGroups = useMemo<ProviderGroup[]>(() => {
     return PROVIDER_META.map((p) => ({
@@ -317,15 +343,21 @@ export default function ProviderSelectionEmptyState({
           </p>
 
           {/*
-            Keyboard-only hint, so it is hidden on a coarse pointer (#362). It
-            advertised a shortcut a phone cannot press, and it was the only
-            thing on this screen pointing at search — telling a touch user the
-            feature exists while naming the one route they cannot take. It also
-            spent a line of vertical space on the surface where space is
-            tightest. Hiding it is the whole fix here: giving touch users a
-            tappable route into the same palette is a separate, additive change.
+            Keyboard-only hint, so it is shown only where a precise pointer
+            exists (#362). It advertised a shortcut a phone cannot press, and it
+            was the only thing on this screen pointing at search — telling a
+            touch user the feature exists while naming the one route they cannot
+            take. It also spent a line of vertical space on the surface where
+            space is tightest.
+
+            Keyed off `any-pointer: fine` rather than the primary-pointer query
+            used just above, so an iPad with a Magic Keyboard — which reports
+            `pointer: coarse` even while a trackpad is attached — keeps the hint
+            it can actually act on. Hiding is the whole fix here: giving touch
+            users a tappable route into the palette is a separate, additive
+            change that wants design review.
           */}
-          {!isCoarsePointer && (
+          {hasFinePointer && (
             <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground/60">
               <Trans
                 ns="chat"
