@@ -16,11 +16,11 @@ const DEPLOYMENT_ASSET_DIRECTORIES = new Set(['assets', 'static', 'icons', 'imag
  * CloudCLI can be served from a path prefix by a reverse proxy, for example:
  *   /ai/manifest.json
  *   /ai/assets/index-abc123.js
- *   /ai/icons/icon-192x192.png
+ *   /ai/icons/icon-512x512.png
  *
  * React Router needs that prefix as its basename, but the packaged app should
  * also keep working when served directly from the domain root. The direct-root
- * case is easy to misread because asset URLs such as /icons/icon-192x192.png
+ * case is easy to misread because asset URLs such as /icons/icon-512x512.png
  * contain a directory even though there is no application basename.
  */
 function detectRouterBasename() {
@@ -74,8 +74,8 @@ function detectRouterBasename() {
 
           // Strip directories that describe where static files live, not where
           // the app is mounted. This must also run for a single segment:
-          //   /icons/icon-192x192.png       -> ''
-          //   /ai/icons/icon-192x192.png    -> '/ai'
+          //   /icons/icon-512x512.png       -> ''
+          //   /ai/icons/icon-512x512.png    -> '/ai'
           // The previous implementation only stripped while more than one
           // segment remained, which incorrectly turned root deployments into a
           // Router basename of /icons and caused a blank page after login.

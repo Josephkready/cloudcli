@@ -27,13 +27,28 @@
     
     <!-- iOS Safari PWA Meta Tags -->
     <meta name="mobile-web-app-capable" content="yes" />
+    <!--
+      The Apple-prefixed twin of the tag above. Current iOS understands the
+      standardised name, so this is belt-and-braces rather than a fix for a
+      known break — it was required historically and costs one line (issue #373).
+    -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="CloudCLI UI" />
-    
-    <!-- iOS Safari Icons -->
-    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png" />
-    
+
+    <!--
+      iOS Safari icon. One link, no `sizes`, because there is exactly one icon
+      file and it is 512x512. This used to declare 152x152 and 180x180 against
+      two paths that were both byte-identical 512x512 copies — a `sizes` value a
+      file does not have is worse than none, since iOS picks by declared size
+      and then gets something else (issues #369/#373). With a single unsized
+      link iOS takes it and downscales, which is what it was doing anyway.
+
+      Keep at least one `rel="apple-touch-icon"` here: src/App.tsx reads icon
+      link hrefs to detect the router basename behind a path-prefix proxy.
+    -->
+    <link rel="apple-touch-icon" href="/icons/icon-512x512.png" />
+
     <!-- Theme Color -->
     <meta name="theme-color" content="#ffffff" />
     <meta name="msapplication-TileColor" content="#ffffff" />
@@ -44,20 +59,12 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-    
-    <!-- Service Worker Registration -->
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then(registration => {
-              console.log('SW registered: ', registration);
-            })
-            .catch(registrationError => {
-              console.log('SW registration failed: ', registrationError);
-            });
-        });
-      }
-    </script>
+    <!--
+      The service worker is registered in src/main.jsx and nowhere else (#372).
+      An inline copy used to run here on `load` as well: harmless, since both
+      calls resolve to the same registration for the same script and scope, but
+      it meant two code paths with different logging, and the usual way that
+      bites is someone "moving" registration and editing only one of them.
+    -->
   </body>
 </html>

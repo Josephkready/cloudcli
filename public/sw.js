@@ -1,7 +1,11 @@
 // Service Worker for CloudCLI PWA
-// Cache only manifest (needed for PWA install). HTML and JS are never pre-cached
-// so a rebuild + refresh always picks up the latest assets.
-const CACHE_NAME = 'claude-ui-v2';
+// Cache only manifest (needed for PWA install). HTML and JS are never cached
+// here at all, so a rebuild + refresh always picks up the latest assets.
+//
+// Bump this by hand whenever the cached set changes. It is *not* a per-build
+// version and must not become one — see the note on `activate` for why a build
+// hash cannot work in this repo, and why it no longer needs to (issue #372).
+const CACHE_NAME = 'claude-ui-v3';
 const urlsToCache = [
   '/manifest.json'
 ];
@@ -15,7 +19,7 @@ self.addEventListener('install', event => {
   self.skipWaiting();
 });
 
-// Fetch event — network-first for everything except hashed assets
+// Fetch event — network-first throughout; nothing here writes to the cache
 self.addEventListener('fetch', event => {
   const url = event.request.url;
 
@@ -36,28 +40,47 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Hashed assets (JS/CSS in /assets/) — cache-first since filenames change per build
-  if (url.includes('/assets/')) {
-    event.respondWith(
-      caches.match(event.request).then(cached => {
-        if (cached) return cached;
-        return fetch(event.request).then(response => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-          return response;
-        });
-      })
-    );
-    return;
-  }
-
+  // NOTE: /assets/ is deliberately not cached here (issue #372).
+  //
+  // This used to be a cache-first branch that `put` every hashed JS/CSS chunk
+  // into CACHE_NAME. Because the filenames are content-hashed, each deploy added
+  // a whole fresh set and nothing ever removed the previous one — the cache grew
+  // by one full build per deploy, forever. That is the failure mode iOS punishes
+  // hardest, since it evicts an origin's storage wholesale and opaquely.
+  //
+  // Removing it costs nothing, because the HTTP cache already does this job and
+  // does it better: server/middleware/compression.ts serves everything matching
+  // IMMUTABLE_ASSET_PATTERN out of dist/ as
+  // `Cache-Control: public, max-age=31536000, immutable`. So a hashed chunk was
+  // being held twice — once in a browser-managed cache with real eviction, and
+  // once in a Cache Storage bucket with none. Only the second one was a leak.
+  //
+  // There is also no offline capability to lose: the navigate branch above has
+  // no cached shell to fall back on and answers with a static "Offline" page, so
+  // cached chunks could never have been used without a network anyway.
+  //
   // Everything else — network-first
   event.respondWith(
     fetch(event.request).catch(() => caches.match(event.request))
   );
 });
 
-// Activate event — purge old caches
+// Activate event — purge every cache that is not the current one.
+//
+// This fires only when the *bytes of this file* change: the browser byte-compares
+// sw.js on navigation and does nothing if it matches, so `install`/`activate`
+// never re-run between deploys that leave this file alone. That is why deriving
+// CACHE_NAME from a build hash is not the fix it looks like — and in this repo it
+// cannot work at all, because server/index.js mounts `public/` ahead of `dist/`
+// (see mountStaticAssets in server/middleware/compression.ts). A build step that
+// stamped `dist/sw.js` would emit a file that never reaches the wire; `/sw.js`
+// always answers from this un-stamped source, which is also what
+// compression.test.ts pins.
+//
+// It no longer needs to. Nothing accumulates now that /assets/ is uncached, so
+// the only job left is the one-shot cleanup: bumping v2 -> v3 changes these bytes,
+// which is what makes this handler run once per install and delete the caches
+// that earlier builds piled up.
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(cacheNames =>

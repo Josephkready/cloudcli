@@ -513,7 +513,7 @@ test('setPublicAssetHeaders freezes fonts and nothing else under public/', () =>
         '/app/public/sw.js',
         '/app/public/manifest.json',
         '/app/public/logo.svg',
-        '/app/public/icons/icon-192x192.png',
+        '/app/public/icons/icon-512x512.png',
         '/app/public/api-docs.html',
         '/app/public/fonts/encode-sans-OFL.txt',
     ]) {

@@ -9,7 +9,9 @@ import './index.css'
 // Initialize i18n
 import './i18n/config.js'
 
-// Register service worker for PWA + Web Push support
+// Register service worker for PWA + Web Push support.
+// This is the ONLY registration site (#372) — index.html used to carry a second
+// inline copy on `window.load`. If registration ever moves, move it, don't add.
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(err => {
     console.warn('Service worker registration failed:', err);
