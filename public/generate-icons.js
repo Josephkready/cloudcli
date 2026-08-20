@@ -1,7 +1,17 @@
+// UNUSED — not part of the build, and nothing in the app references its output.
+//
+// This emits SVGs of a design the app does not ship: a purple rounded square
+// with a MessageSquare glyph, from an icon rework that was never finished. The
+// PNGs actually served are a different, dark full-bleed mark. Converting these
+// SVGs to PNG would REPLACE the app icon with that other design, which is a
+// visual change for a human to decide, not a build step to run.
+//
+// The shipped icons are three real sizes resampled from icon-512x512.png. See
+// public/convert-icons.md for what ships and how to regenerate it (issue #369).
 const fs = require('fs');
 const path = require('path');
 
-// Icon sizes needed
+// Sizes for the unshipped SVG set only — NOT the sizes the manifest declares.
 const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
 
 // SVG template function
