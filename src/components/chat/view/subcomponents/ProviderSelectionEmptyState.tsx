@@ -128,6 +128,13 @@ function useCoarsePointer() {
  * The picker's autofocus above can keep using the primary-pointer query: getting
  * that wrong only costs a tap, whereas this decides whether a capability is
  * discoverable at all.
+ *
+ * Still a proxy, not an answer: no CSS media feature reports whether a physical
+ * keyboard exists, so this infers one from a precise pointer. It over-reports on
+ * a stylus tablet — a Samsung S Pen registers as a fine pointer with no keyboard
+ * attached — which shows the hint to someone who cannot press the shortcut. That
+ * is the same shape of error in the gentler direction: an unusable hint beats
+ * hiding the only route to a feature from someone who can use it.
  */
 function useHasFinePointer() {
   return useMediaQuery("(any-pointer: fine)");
