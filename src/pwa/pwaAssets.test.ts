@@ -37,12 +37,17 @@ function stripHtmlComments(html: string): string {
  * here search for strings like `cache.put(` that the surrounding commentary
  * naturally mentions, so a future contributor writing
  * `something()  // do not reintroduce cache.put() here` would otherwise fail a
- * test by explaining it. Protocol-relative `//` inside a string literal is the
- * known false strip, and is why the sw.js patterns below anchor on code shapes
- * (`cache.put(`) rather than on bare URLs.
+ * test by explaining it.
+ *
+ * The character class excludes `:` and the three quote characters so a `//`
+ * that opens a URL (`https://…`) or sits inside a string literal (`'//legacy'`)
+ * is not mistaken for a comment. That matters most for the registration walk
+ * below, which runs this over the whole `src/` tree: over-stripping there would
+ * silently swallow a real `serviceWorker.register(` that happened to share a
+ * line with such a literal, defeating the one thing that test exists to catch.
  */
 function stripJsComments(js: string): string {
-    return js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    return js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
 }
 
 /**
