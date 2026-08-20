@@ -13,9 +13,17 @@ import './i18n/config.js'
 // This is the ONLY registration site (#372) — index.html used to carry a second
 // inline copy on `window.load`. If registration ever moves, move it, don't add.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(err => {
-    console.warn('Service worker registration failed:', err);
-  });
+  navigator.serviceWorker
+    .register('/sw.js')
+    // Success was logged by the index.html copy this replaced. Kept, at debug,
+    // because "did the worker register?" is the first question for any push or
+    // install bug and nothing else in the app reports it.
+    .then(registration => {
+      console.debug('Service worker registered, scope:', registration.scope);
+    })
+    .catch(err => {
+      console.warn('Service worker registration failed:', err);
+    });
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -19,7 +19,6 @@ import test from 'node:test';
 const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
 const PUBLIC_DIR = path.join(REPO_ROOT, 'public');
 const INDEX_HTML = readFileSync(path.join(REPO_ROOT, 'index.html'), 'utf8');
-const MAIN_JSX = readFileSync(path.join(REPO_ROOT, 'src', 'main.jsx'), 'utf8');
 const SW_JS = readFileSync(path.join(PUBLIC_DIR, 'sw.js'), 'utf8');
 const MANIFEST = JSON.parse(readFileSync(path.join(PUBLIC_DIR, 'manifest.json'), 'utf8')) as {
     icons: { src: string; sizes: string; type: string; purpose?: string }[];
@@ -30,9 +29,20 @@ function stripHtmlComments(html: string): string {
     return html.replace(/<!--[\s\S]*?-->/g, '');
 }
 
-/** Strip `//` and block comments so the prose explaining the old code can't fake one either. */
+/**
+ * Strip `//` and block comments so the prose explaining the old code can't fake
+ * a match for the patterns below.
+ *
+ * Trailing comments are stripped too, not just whole-line ones: the assertions
+ * here search for strings like `cache.put(` that the surrounding commentary
+ * naturally mentions, so a future contributor writing
+ * `something()  // do not reintroduce cache.put() here` would otherwise fail a
+ * test by explaining it. Protocol-relative `//` inside a string literal is the
+ * known false strip, and is why the sw.js patterns below anchor on code shapes
+ * (`cache.put(`) rather than on bare URLs.
+ */
 function stripJsComments(js: string): string {
-    return js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    return js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
 /**
@@ -87,9 +97,31 @@ test('every manifest icon is the size it claims to be', () => {
     }
 });
 
+test('the manifest declares both sizes Chrome requires to offer installation', () => {
+    // Chrome's installability check (and Lighthouse's installable-manifest
+    // audit) wants a 192x192 AND a 512x512 entry: 192 is the launcher/home
+    // screen icon, 512 is the splash screen. Missing either one suppresses the
+    // native install prompt entirely — the app can then only be installed
+    // through the browser menu.
+    //
+    // This is the guard rail on the #369 fix. Trimming the manifest to only the
+    // sizes that genuinely existed is right, but trimming past 192 would have
+    // traded a cosmetic lie for a broken install button.
+    const declared = new Set(MANIFEST.icons.map((icon) => icon.sizes));
+    for (const required of ['192x192', '512x512']) {
+        assert.ok(
+            declared.has(required),
+            `manifest declares no ${required} icon — Chrome will not offer to install the app`,
+        );
+    }
+});
+
 test('the manifest ships no duplicate icon entries', () => {
     // The regression this replaces: eight entries, eight different declared
-    // sizes, one byte-identical 512x512 file behind all of them.
+    // sizes, one byte-identical 512x512 file behind all of them. Every icon must
+    // be a genuinely distinct image, not a copy relabelled to fill a slot.
+    assert.ok(MANIFEST.icons.length >= 2, 'too few icons for this check to mean anything');
+
     const sources = MANIFEST.icons.map((icon) => icon.src);
     assert.deepEqual(
         sources,
@@ -107,16 +139,18 @@ test('the manifest ships no duplicate icon entries', () => {
     );
 });
 
-test('at least one manifest icon is usable as a maskable install icon', () => {
+test('the largest maskable icon is big enough for the launcher to crop', () => {
     const maskable = MANIFEST.icons.filter((icon) => (icon.purpose ?? 'any').split(/\s+/).includes('maskable'));
     assert.ok(maskable.length > 0, 'no manifest icon declares purpose "maskable"');
 
-    // Android's maskable spec crops to a 512-diameter circle inside 512x512, so
-    // anything smaller is upscaled by the launcher.
-    for (const icon of maskable) {
-        const { width } = pngSize(publicPathFor(icon.src));
-        assert.ok(width >= 512, `maskable icon ${icon.src} is ${width}px — below the 512 baseline`);
-    }
+    // Android's maskable spec crops to a circle inside the icon box, so the
+    // largest declared maskable source has to be at least 512 or the launcher
+    // upscales it.
+    const widths = maskable.map((icon) => pngSize(publicPathFor(icon.src)).width);
+    assert.ok(
+        Math.max(...widths) >= 512,
+        `largest maskable icon is ${Math.max(...widths)}px — below the 512 baseline`,
+    );
 });
 
 test('apple-touch-icon links exist and never declare a size the file does not have', () => {
@@ -193,14 +227,37 @@ test('the service worker precaches nothing that can go stale', () => {
 });
 
 test('the service worker is registered from exactly one place', () => {
-    const sites = [
-        ['index.html', stripHtmlComments(INDEX_HTML)],
-        ['src/main.jsx', stripJsComments(MAIN_JSX)],
-    ] as const;
+    // Walks the whole front-end tree rather than checking two named files, so a
+    // third registration site added anywhere — a new module, a Vite PWA plugin
+    // wired into index.html — is caught too. Enumerating the known sites would
+    // only ever re-confirm the two this PR already fixed.
+    const roots = [path.join(REPO_ROOT, 'src'), path.join(REPO_ROOT, 'index.html')];
+    const registering: string[] = [];
 
-    const registering = sites.filter(([, source]) => /serviceWorker\.register\(/.test(source));
+    const visit = (target: string): void => {
+        const info = statSync(target);
+        if (info.isDirectory()) {
+            for (const entry of readdirSync(target)) {
+                visit(path.join(target, entry));
+            }
+            return;
+        }
+        if (!/\.(html|js|jsx|ts|tsx|mjs)$/.test(target)) {
+            return;
+        }
+
+        const raw = readFileSync(target, 'utf8');
+        const source = target.endsWith('.html')
+            ? stripJsComments(stripHtmlComments(raw))
+            : stripJsComments(raw);
+        if (/serviceWorker\s*\.\s*register\s*\(/.test(source)) {
+            registering.push(path.relative(REPO_ROOT, target));
+        }
+    };
+    roots.forEach(visit);
+
     assert.deepEqual(
-        registering.map(([name]) => name),
+        registering.sort(),
         ['src/main.jsx'],
         'service worker registration must live in src/main.jsx and nowhere else (#372)',
     );

@@ -59,9 +59,14 @@ self.addEventListener('fetch', event => {
   // no cached shell to fall back on and answers with a static "Offline" page, so
   // cached chunks could never have been used without a network anyway.
   //
-  // Everything else — network-first
+  // Everything else — network-first. Nothing but /manifest.json is precached, so
+  // the fallback almost always resolves to undefined and the request fails; log
+  // it, because a silent failure here is indistinguishable from a bug in the app.
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
+    fetch(event.request).catch(() => {
+      console.warn('[sw] fetch failed, no cached fallback:', url);
+      return caches.match(event.request);
+    })
   );
 });
 
@@ -83,13 +88,16 @@ self.addEventListener('fetch', event => {
 // that earlier builds piled up.
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(cacheNames =>
-      Promise.all(
-        cacheNames
-          .filter(name => name !== CACHE_NAME)
-          .map(name => caches.delete(name))
-      )
-    )
+    caches.keys().then(cacheNames => {
+      const stale = cacheNames.filter(name => name !== CACHE_NAME);
+      // The one-shot cleanup is the whole point of the version bump, and it runs
+      // on a user's device where nothing else can observe it. Without this line
+      // there is no way to tell from a devtools console whether it ever fired.
+      if (stale.length) {
+        console.info('[sw] purging stale caches:', stale.join(', '));
+      }
+      return Promise.all(stale.map(name => caches.delete(name)));
+    })
   );
   self.clients.claim();
 });

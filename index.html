@@ -37,17 +37,17 @@
     <meta name="apple-mobile-web-app-title" content="CloudCLI UI" />
 
     <!--
-      iOS Safari icon. One link, no `sizes`, because there is exactly one icon
-      file and it is 512x512. This used to declare 152x152 and 180x180 against
-      two paths that were both byte-identical 512x512 copies — a `sizes` value a
-      file does not have is worse than none, since iOS picks by declared size
-      and then gets something else (issues #369/#373). With a single unsized
-      link iOS takes it and downscales, which is what it was doing anyway.
+      iOS Safari icon. 180x180 is the size iOS actually wants for an iPhone home
+      screen, and this now points at a real 180x180 file. It used to declare
+      152x152 and 180x180 against two paths that were both byte-identical
+      512x512 copies (issues #369/#373) — a `sizes` a file does not have is
+      worse than none, because iOS picks by the declared size and then gets
+      something else. iOS downscales this one link for every other slot.
 
       Keep at least one `rel="apple-touch-icon"` here: src/App.tsx reads icon
       link hrefs to detect the router basename behind a path-prefix proxy.
     -->
-    <link rel="apple-touch-icon" href="/icons/icon-512x512.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180x180.png" />
 
     <!-- Theme Color -->
     <meta name="theme-color" content="#ffffff" />

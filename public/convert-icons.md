@@ -1,53 +1,52 @@
-# Convert SVG Icons to PNG
+# App icons
 
-I've created SVG versions of the app icons that match the MessageSquare design from the sidebar. To convert them to PNG format, you can use one of these methods:
+## What ships today
 
-## Method 1: Online Converter (Easiest)
-1. Go to https://cloudconvert.com/svg-to-png
-2. Upload each SVG file from the `/icons/` directory
-3. Download the PNG versions
-4. Replace the existing PNG files
+CloudCLI's PWA icons live in `public/icons/` and there are **three**, all
+resampled from the same 512x512 source artwork:
 
-## Method 2: Using Node.js (if you have it)
-```bash
-npm install sharp
-node -e "
-const sharp = require('sharp');
-const fs = require('fs');
-const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
-sizes.forEach(size => {
-  const svgPath = \`./icons/icon-\${size}x\${size}.svg\`;
-  const pngPath = \`./icons/icon-\${size}x\${size}.png\`;
-  if (fs.existsSync(svgPath)) {
-    sharp(svgPath).png().toFile(pngPath);
-    console.log(\`Converted \${svgPath} to \${pngPath}\`);
-  }
-});
-"
-```
+| file | declared in | used for |
+|---|---|---|
+| `icon-192x192.png` | `manifest.json` | launcher / home screen, and required for Chrome to offer installation |
+| `icon-512x512.png` | `manifest.json` | splash screen, and the maskable source Android crops |
+| `icon-180x180.png` | `index.html` `apple-touch-icon` | iOS home screen |
 
-## Method 3: Using ImageMagick (if installed)
-```bash
-cd public/icons
-for size in 72 96 128 144 152 192 384 512; do
-  convert "icon-${size}x${size}.svg" "icon-${size}x${size}.png"
-done
-```
+Chrome's installability check wants **both** a 192x192 and a 512x512 entry in the
+manifest. Dropping either one silently removes the native install prompt, so
+neither is optional. `src/pwa/pwaAssets.test.ts` pins that, and also asserts that
+every declared `sizes` matches the file's real dimensions — the bug that prompted
+this rewrite was eight declared sizes backed by eight byte-identical 512x512
+copies (issue #369).
 
-## Method 4: Using Inkscape (if installed)
+**Do not add a size by copying another file and renaming it.** The test reads the
+PNG header and will reject it. Browsers downscale a larger icon perfectly well,
+so extra sizes buy nothing and cost a build artifact each.
+
+## Regenerating them
+
+Resample from `icon-512x512.png`, which is the source of record:
+
 ```bash
 cd public/icons
-for size in 72 96 128 144 152 192 384 512; do
-  inkscape --export-type=png "icon-${size}x${size}.svg"
-done
+python3 - <<'PY'
+from PIL import Image
+src = Image.open('icon-512x512.png').convert('RGBA')
+for size in (192, 180):
+    src.resize((size, size), Image.LANCZOS).save(f'icon-{size}x{size}.png', optimize=True)
+PY
 ```
 
-## Icon Design
-The new icons feature:
-- Clean MessageSquare (chat bubble) design matching the sidebar
-- Primary color background with rounded corners
-- White stroke icon that's clearly visible
-- Consistent sizing and proportions across all sizes
-- Proper PWA-compliant format
+Then run `npx tsx --tsconfig tsconfig.json --test "src/pwa/*.test.ts"` to confirm
+the manifest and the files still agree.
 
-Once converted, the PNG files will replace the existing ones and provide a consistent icon experience across all platforms.
+## The unused SVGs
+
+`public/icons/icon-*.svg` and `public/generate-icons.js` are **not part of the
+build and nothing references them.** They are a different, unshipped design — a
+purple rounded square with a MessageSquare glyph — from an icon rework that was
+never completed. The PNGs in this directory are a dark full-bleed mark instead.
+
+They are kept only as a design artifact. Running `generate-icons.js` rewrites
+those SVGs and changes nothing the app loads. Converting them to PNG would
+**replace the app's icon with a different design**, which is a visual change that
+wants a human decision, not a build step.
