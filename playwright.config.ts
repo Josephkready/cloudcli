@@ -29,6 +29,20 @@ import { defineConfig, devices } from '@playwright/test';
  */
 const KEYBOARD_SPECS = /[\\/]mobile-keyboard(-publisher)?\.spec\.ts$/;
 
+/**
+ * Specs that must run on every engine, desktop and mobile alike.
+ *
+ * `composer-focus` (#367) is one bug with two faces: on desktop losing focus
+ * costs a click, on a phone it closes the on-screen keyboard after every single
+ * message. Pinning it on only one engine would leave half the report uncovered,
+ * and WebKit is the only engine here that can speak to an iPhone report.
+ *
+ * Same anchoring rules as above — the leading separator and trailing `$` are
+ * load-bearing, because these are matched against absolute paths and the
+ * worktree directory is named after the task being developed.
+ */
+const CROSS_ENGINE_SPECS = /[\\/]composer-focus\.spec\.ts$/;
+
 export default defineConfig({
   testDir: './e2e',
   globalSetup: './e2e/global-setup.ts',
@@ -71,12 +85,12 @@ export default defineConfig({
     // at WebKit would be a much larger and unrelated change, and a slower gate.
     {
       name: 'mobile-safari',
-      testMatch: KEYBOARD_SPECS,
+      testMatch: [KEYBOARD_SPECS, CROSS_ENGINE_SPECS],
       use: { ...devices['iPhone 14 Pro'] },
     },
     {
       name: 'mobile-chrome',
-      testMatch: KEYBOARD_SPECS,
+      testMatch: [KEYBOARD_SPECS, CROSS_ENGINE_SPECS],
       use: { ...devices['Pixel 7'] },
     },
   ],
