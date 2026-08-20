@@ -10,6 +10,27 @@ import {
 import { useTranslation } from 'react-i18next';
 import type { QuickSettingsHandleStyle } from '../types';
 
+/**
+ * Deliberately BELOW the mobile sidebar overlay, which is `z-50` (#361).
+ *
+ * Both used to be `z-50`, and that is not a tie the stacking context resolves in
+ * anyone's favour — it falls through to DOM order, and this handle happens to
+ * render later. So it floated on top of the sidebar's dimmed backdrop and stayed
+ * hit-testable while a modal surface was open. On a phone it sits exactly where
+ * a thumb rests on the right edge, which made it a realistic mis-tap into a
+ * state neither component is designed for: the settings panel sliding out from
+ * under an open sidebar.
+ *
+ * Dropping a level costs nothing. The handle only has to out-stack the chat
+ * surface (`z-10`/`z-20`), and it never overlaps its own panel — when the panel
+ * is open the handle sits at `right-64`, immediately left of the panel's
+ * `right-0 w-64`, so sharing `z-40` with it is not a collision.
+ *
+ * The slash-command popover is a portal at `z-index: 1000` and was never at
+ * risk; the handle merely shows *beside* it, outside its box.
+ */
+const STACKING_CLASS = 'z-40';
+
 type QuickSettingsHandleProps = {
   isOpen: boolean;
   isDragging: boolean;
@@ -56,7 +77,7 @@ export default function QuickSettingsHandle({
       onClick={onClick}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
-      className={`fixed ${placementClass} z-50 ${transitionClass} border bg-white dark:bg-gray-800 ${borderClass} rounded-l-md p-2 shadow-lg hover:bg-gray-100 dark:hover:bg-gray-700 ${cursorClass} touch-none`}
+      className={`fixed ${placementClass} ${STACKING_CLASS} ${transitionClass} border bg-white dark:bg-gray-800 ${borderClass} rounded-l-md p-2 shadow-lg hover:bg-gray-100 dark:hover:bg-gray-700 ${cursorClass} touch-none`}
       style={{
         ...style,
         touchAction: 'none',
