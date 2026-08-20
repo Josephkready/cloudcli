@@ -5,11 +5,28 @@ import { describe, expect, it, vi } from 'vitest';
 
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
 
-function mockPointer(coarse: boolean) {
+/**
+ * Model a device's pointer capabilities.
+ *
+ * Two queries, because they answer different questions and disagree on exactly
+ * the device that matters: `(pointer: coarse)` describes the PRIMARY pointer,
+ * while `(any-pointer: fine)` asks whether a precise pointer exists at all. An
+ * iPad with a Magic Keyboard is `coarse` AND `fine` — it drives the model
+ * picker's touch behaviour while still having a keyboard to press Ctrl+K with.
+ *
+ * `finePointer` defaults to the non-hybrid case (a phone has no fine pointer, a
+ * desktop has one), so existing call sites keep their original meaning.
+ */
+function mockPointer(coarse: boolean, finePointer: boolean = !coarse) {
   vi.spyOn(window, 'matchMedia').mockImplementation(
     (query: string) =>
       ({
-        matches: query === '(pointer: coarse)' && coarse,
+        matches:
+          query === '(pointer: coarse)'
+            ? coarse
+            : query === '(any-pointer: fine)'
+              ? finePointer
+              : false,
         media: query,
         onchange: null,
         addListener: () => {},
@@ -101,6 +118,45 @@ describe('ProviderSelectionEmptyState mobile model picker', () => {
       'flex-1',
       'overscroll-contain',
     );
+  });
+});
+
+describe('ProviderSelectionEmptyState search hint', () => {
+  // #362: the hint names a keyboard shortcut, so on a touch device it advertised
+  // a route the user cannot take — and it was the only pointer to search on the
+  // screen. `matches` for '(pointer: coarse)' is the same signal the component
+  // already used to keep the model picker from summoning the keyboard.
+  const HINT = /to search sessions, files, and commits/;
+
+  it('hides the keyboard shortcut hint on a phone, which has no fine pointer', () => {
+    mockPointer(true);
+    renderPicker();
+
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('still shows the hint on a fine pointer, where the shortcut works', () => {
+    mockPointer(false);
+    renderPicker();
+
+    // Guards against "fixing" this by deleting the hint outright: the shortcut
+    // is real and discoverable nowhere else on this screen.
+    expect(screen.getByText(HINT)).toBeInTheDocument();
+    // jsdom hardcodes navigator.platform to '', so MOD_KEY is deterministically
+    // 'Ctrl' here. Asserting the concrete value rather than a Ctrl-or-Cmd
+    // alternation means a swapped Mac/non-Mac branch would also fail.
+    expect(screen.getByText('Ctrl+K')).toBeInTheDocument();
+  });
+
+  it('keeps the hint on a hybrid device that is coarse but has a trackpad', () => {
+    // iPadOS reports `pointer: coarse` even with a Magic Keyboard attached, and
+    // does not re-evaluate it when one is connected. Keying off the primary
+    // pointer would permanently hide the shortcut from the most common
+    // touch-plus-keyboard device — a user who can actually press it.
+    mockPointer(true, true);
+    renderPicker();
+
+    expect(screen.getByText(HINT)).toBeInTheDocument();
   });
 });
 
