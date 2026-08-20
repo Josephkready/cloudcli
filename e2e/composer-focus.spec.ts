@@ -22,11 +22,31 @@ import { test, expect } from './fixtures';
 
 const COMPOSER = '[data-slot="prompt-input-textarea"]';
 
-async function completeOneTurn(page: import('@playwright/test').Page, message: string) {
+/**
+ * The two ways to send, which take genuinely different code paths.
+ *
+ * A <textarea> never triggers implicit form submission, so Enter does NOT reach
+ * the form's `onSubmit` — `handleKeyDown` calls the composer state's
+ * `handleSubmit` directly. A fix applied only to the view's `onSubmit` prop
+ * would repair the click and leave the primary desktop gesture broken, and a
+ * suite that only clicks would not notice.
+ */
+type SendGesture = 'click' | 'enter';
+
+async function completeOneTurn(
+  page: import('@playwright/test').Page,
+  message: string,
+  gesture: SendGesture = 'click',
+) {
   const composer = page.locator(COMPOSER);
   await composer.click();
   await composer.fill(message);
-  await page.getByRole('button', { name: 'Send' }).click();
+
+  if (gesture === 'enter') {
+    await composer.press('Enter');
+  } else {
+    await page.getByRole('button', { name: 'Send' }).click();
+  }
 
   // Prove the turn really ran, so we are asserting on a completed send rather
   // than on a moment before the state transition that causes the bug.
@@ -63,6 +83,54 @@ test('composer keeps focus after a send completes', async ({ page }) => {
   // Second send, inside the live session with no navigation — the issue reports
   // this happening on *every* send, so one turn is not enough to pin it.
   await completeOneTurn(page, 'second message');
+
+  expect(await focusDescription(page)).toMatchObject({
+    tag: 'TEXTAREA',
+    slot: 'prompt-input-textarea',
+  });
+});
+
+test('composer keeps focus when sending with Enter', async ({ page }, testInfo) => {
+  // Desktop only, and not for convenience: on a touch layout plain Enter inserts
+  // a NEWLINE rather than sending (resolveEnterKeyAction, so the on-screen
+  // keyboard's Return key does not fire the message). There is no Enter-to-send
+  // path on mobile to assert about.
+  test.skip(
+    testInfo.project.name !== 'chromium',
+    'plain Enter inserts a newline on touch layouts by design',
+  );
+
+  /*
+   * Enter takes a different path from the click: a <textarea> never triggers
+   * implicit form submission, so `handleKeyDown` calls the composer state's
+   * `handleSubmit` directly and the form's `onSubmit` — where the fix lives — is
+   * never reached.
+   *
+   * This path was nonetheless never broken, which is worth recording because it
+   * looks like it should have been. The bug needs focus to be ON the submit
+   * button when it becomes disabled; pressing Enter leaves focus in the textarea
+   * the whole time, so the disable has nothing to evict. Verified against
+   * unfixed `origin/main`: the two click tests fail there and this one passes.
+   *
+   * So this is a guard, not a reproduction — it pins a path that a "tidier" fix
+   * could break. Specifically, moving the focus restore into the hook's
+   * `handleSubmit` to "cover every call site" would be wrong: that function also
+   * has three PROGRAMMATIC callers (queue drain, slash-command dispatch, and
+   * voice send-on-transcript), all on a setTimeout outside any user gesture.
+   * Focusing there would steal focus — and pop the on-screen keyboard — while
+   * the user is reading a reply.
+   */
+  await page.goto('/');
+  await expect(page.locator(COMPOSER)).toBeVisible();
+
+  await completeOneTurn(page, 'sent with the enter key', 'enter');
+
+  expect(await focusDescription(page)).toMatchObject({
+    tag: 'TEXTAREA',
+    slot: 'prompt-input-textarea',
+  });
+
+  await completeOneTurn(page, 'second one with enter too', 'enter');
 
   expect(await focusDescription(page)).toMatchObject({
     tag: 'TEXTAREA',
