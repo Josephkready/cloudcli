@@ -13,6 +13,7 @@ type MainContentTitleProps = {
   selectedProject: Project;
   selectedSession: ProjectSession | null;
   onRenameSession: (sessionId: string, summary: string) => void | Promise<void>;
+  isMobile?: boolean;
 };
 
 function getTabTitle(activeTab: AppTab, t: (key: string) => string, pluginDisplayName?: string) {
@@ -40,6 +41,7 @@ export default function MainContentTitle({
   selectedProject,
   selectedSession,
   onRenameSession,
+  isMobile = false,
 }: MainContentTitleProps) {
   const { t } = useTranslation();
   const { plugins } = usePlugins();
@@ -82,7 +84,12 @@ export default function MainContentTitle({
     ? plugins.find((p) => p.name === activeTab.replace('plugin:', ''))?.displayName
     : undefined;
 
-  const showSessionIcon = activeTab === 'chat' && Boolean(selectedSession);
+  // On mobile the open-session strip directly below the header already carries
+  // the session title (with its own provider logo) at nearly full width, so the
+  // header collapses to the project name for context (#364) — no icon, no
+  // hard-truncated duplicate title.
+  const collapseToProjectName = isMobile && activeTab === 'chat' && Boolean(selectedSession);
+  const showSessionIcon = activeTab === 'chat' && Boolean(selectedSession) && !collapseToProjectName;
   const showChatNewSession = activeTab === 'chat' && !selectedSession;
 
   return (
@@ -94,7 +101,13 @@ export default function MainContentTitle({
       )}
 
       <div className="min-w-0 flex-1">
-        {activeTab === 'chat' && selectedSession ? (
+        {collapseToProjectName ? (
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold leading-tight text-foreground">
+              {selectedProject.displayName}
+            </h2>
+          </div>
+        ) : activeTab === 'chat' && selectedSession ? (
           <div className="min-w-0">
             {isEditingTitle ? (
               <input
