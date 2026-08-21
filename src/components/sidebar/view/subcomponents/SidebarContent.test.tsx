@@ -105,6 +105,9 @@ test('the Spaces section renders a collapse toggle and is collapsed by default',
   const markup = render({ sidebarOverlay: 'none', spacesExpanded: false });
 
   assert.ok(markup.includes('Toggle spaces'), 'expected the Spaces collapse toggle affordance');
+  // #363: the ~27px full-width trigger floors its painted height to the 44px
+  // touch floor (a real reflow, not the overlapping hit-h-44 overlay).
+  assert.ok(markup.includes('touch:min-h-44'), 'expected the Spaces toggle to floor the touch height (#363)');
   assert.ok(markup.includes('aria-expanded="false"'), 'expected the trigger to report collapsed');
   assert.ok(markup.includes('data-state="closed"'), 'expected the Spaces region to render collapsed');
   assert.ok(!markup.includes('data-state="open"'), 'the Spaces region should not be open by default');

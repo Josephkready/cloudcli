@@ -594,9 +594,11 @@ export default function SidebarContent({
             style={spacesExpanded ? { flexBasis: '40%', flexGrow: 0, flexShrink: 0 } : undefined}
           >
             <CollapsibleTrigger
-              // touch:hit-h-44 floors the touch height at 44px (#363); the
-              // spaces toggle row is only ~27px tall, below the touch floor.
-              className="touch:hit-h-44 flex w-full flex-shrink-0 items-center gap-2 px-3 pb-1 pt-2 text-left transition-colors hover:bg-accent/40"
+              // touch:min-h-44 grows this full-width row to the 44px touch floor
+              // (#363). A real reflow (not the hit-h-44 overlay) because it sits
+              // only ~9px below the Search/Archived toggles — two centred 44px
+              // overlays there would overlap and steal each other's taps.
+              className="touch:min-h-44 flex w-full flex-shrink-0 items-center gap-2 px-3 pb-1 pt-2 text-left transition-colors hover:bg-accent/40"
               aria-label={t('sections.toggleSpaces', 'Toggle spaces')}
             >
               <ChevronRight
