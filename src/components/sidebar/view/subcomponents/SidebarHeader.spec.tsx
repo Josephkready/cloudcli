@@ -59,4 +59,37 @@ describe('SidebarHeader search autofocus (#366)', () => {
     const active = document.activeElement as HTMLElement | null;
     expect(active?.getAttribute('placeholder')).not.toBe(SEARCH_PLACEHOLDER);
   });
+
+  it('focuses on the none -> search transition, the real runtime path', () => {
+    // The effect is keyed on `sidebarOverlay`; the live trigger is a prop change
+    // (tapping "Search chats"), not a fresh mount — so exercise the update path.
+    const { rerender } = renderHeader({ sidebarOverlay: 'none' });
+    expect((document.activeElement as HTMLElement | null)?.getAttribute('placeholder')).not.toBe(
+      SEARCH_PLACEHOLDER,
+    );
+
+    const props: React.ComponentProps<typeof SidebarHeader> = {
+      isPWA: false,
+      isMobile: false,
+      isLoading: false,
+      projectsCount: 3,
+      runningSessionsCount: 0,
+      archivedSessionsCount: 0,
+      isArchivedSessionsLoading: false,
+      searchFilter: '',
+      onSearchFilterChange: vi.fn(),
+      onClearSearchFilter: vi.fn(),
+      sidebarOverlay: 'search',
+      onSetOverlay: vi.fn(),
+      onRefresh: vi.fn(),
+      isRefreshing: false,
+      onCreateProject: vi.fn(),
+      onCollapseSidebar: vi.fn(),
+      t,
+    };
+    rerender(<SidebarHeader {...props} />);
+    expect((document.activeElement as HTMLElement | null)?.getAttribute('placeholder')).toBe(
+      SEARCH_PLACEHOLDER,
+    );
+  });
 });
