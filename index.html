@@ -49,9 +49,13 @@
     -->
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180x180.png" />
 
-    <!-- Theme Color -->
-    <meta name="theme-color" content="#ffffff" />
-    <meta name="msapplication-TileColor" content="#ffffff" />
+    <!-- Theme Color — matched to the app's own light/dark surface tokens
+         (hsl(44 22% 96%) / hsl(0 0% 8%)) so the browser/OS chrome isn't a white
+         flash before the app's JS runs. ThemeContext keeps these in sync with an
+         explicit in-app theme choice after hydration (#371). -->
+    <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)" />
+    <meta name="msapplication-TileColor" content="#141414" />
     
     <!-- Prevent zoom on iOS -->
     <meta name="format-detection" content="telephone=no" />

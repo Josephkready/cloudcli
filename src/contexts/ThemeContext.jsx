@@ -2,6 +2,16 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const ThemeContext = createContext();
 
+// index.html declares a light AND a dark media-queried `theme-color` meta so the
+// pre-JS paint matches the OS scheme (#371). Once a theme is applied we set both
+// to the applied colour, so an explicit in-app choice that differs from the OS
+// scheme still wins over the media match.
+function setThemeColor(color) {
+  document
+    .querySelectorAll('meta[name="theme-color"]')
+    .forEach((meta) => meta.setAttribute('content', color));
+}
+
 export const useTheme = () => {
   const context = useContext(ThemeContext);
   if (!context) {
@@ -38,25 +48,21 @@ export const ThemeProvider = ({ children }) => {
       if (statusBarMeta) {
         statusBarMeta.setAttribute('content', 'black-translucent');
       }
-      
-      const themeColorMeta = document.querySelector('meta[name="theme-color"]');
-      if (themeColorMeta) {
-        themeColorMeta.setAttribute('content', '#141414'); // Dark background color (hsl(0 0% 8%))
-      }
+      // index.html ships two media-queried theme-color metas (#371); an explicit
+      // in-app theme can differ from the OS scheme, so drive BOTH to the applied
+      // colour to override the media match. Dark background = hsl(0 0% 8%).
+      setThemeColor('#141414');
     } else {
       document.documentElement.classList.remove('dark');
       localStorage.setItem('theme', 'light');
-      
+
       // Update iOS status bar style and theme color for light mode
       const statusBarMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
       if (statusBarMeta) {
         statusBarMeta.setAttribute('content', 'default');
       }
-      
-      const themeColorMeta = document.querySelector('meta[name="theme-color"]');
-      if (themeColorMeta) {
-        themeColorMeta.setAttribute('content', '#f6f4ef'); // Light background color (warm cream)
-      }
+      // Light background = warm cream, hsl(44 22% 96%).
+      setThemeColor('#f6f4ef');
     }
   }, [isDarkMode]);
 
