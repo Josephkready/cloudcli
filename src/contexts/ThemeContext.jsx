@@ -61,8 +61,8 @@ export const ThemeProvider = ({ children }) => {
       if (statusBarMeta) {
         statusBarMeta.setAttribute('content', 'default');
       }
-      // Light background = warm cream, hsl(44 22% 96%).
-      setThemeColor('#f6f4ef');
+      // Light background = warm cream, hsl(44 22% 96%) == #f7f6f3.
+      setThemeColor('#f7f6f3');
     }
   }, [isDarkMode]);
 
