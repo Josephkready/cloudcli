@@ -2,7 +2,7 @@ import { Bell, Bot, Database, GitBranch, Info, Key, Mic, Palette } from 'lucide-
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '../../../lib/utils';
-import { PillBar, Pill } from '../../../shared/view/ui';
+import { PillBar, Pill, ScrollFade } from '../../../shared/view/ui';
 import type { SettingsMainTab } from '../types/types';
 
 type SettingsSidebarProps = {
@@ -61,25 +61,28 @@ export default function SettingsSidebar({ activeTab, onChange }: SettingsSidebar
         </nav>
       </aside>
 
-      {/* Mobile horizontal nav — pill bar */}
+      {/* Mobile horizontal nav — pill bar. Eight categories overflow 390px, so the
+          row scrolls with an edge fade cueing the off-screen tabs (#360). */}
       <div className="flex-shrink-0 border-b border-border px-3 py-2 md:hidden">
-        <PillBar className="scrollbar-hide w-full overflow-x-auto">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
+        <ScrollFade>
+          <PillBar className="w-max">
+            {NAV_ITEMS.map((item) => {
+              const Icon = item.icon;
 
-            return (
-              <Pill
-                key={item.id}
-                isActive={activeTab === item.id}
-                onClick={() => onChange(item.id)}
-                className="flex-shrink-0"
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {t(item.labelKey, item.labelFallback ?? item.labelKey)}
-              </Pill>
-            );
-          })}
-        </PillBar>
+              return (
+                <Pill
+                  key={item.id}
+                  isActive={activeTab === item.id}
+                  onClick={() => onChange(item.id)}
+                  className="flex-shrink-0"
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {t(item.labelKey, item.labelFallback ?? item.labelKey)}
+                </Pill>
+              );
+            })}
+          </PillBar>
+        </ScrollFade>
       </div>
     </>
   );
