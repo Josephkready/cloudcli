@@ -126,4 +126,18 @@ describe('SidebarNewConversationButton — repository-root spaces only (#332)', 
     expect(screen.getByText('legacy-b')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Show all folders/ })).toBeNull();
   });
+
+  /*
+   * #366: opening the folder picker is a *browse* action — it must not autofocus
+   * the search field and pop the keyboard over the folder list. Typing to filter
+   * is the fallback, matching the model selector's deliberate no-autofocus policy.
+   */
+  it('does not autofocus the folder search on open', async () => {
+    const user = userEvent.setup();
+    renderPicker();
+
+    const input = await openPicker(user);
+
+    expect(input).not.toHaveFocus();
+  });
 });

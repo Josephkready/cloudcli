@@ -130,8 +130,12 @@ export default function SidebarNewConversationButton({
       {isOpen && (
         <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg">
           <Command filter={filterFolders}>
+            {/* No autoFocus: opening the picker is a *browse* action — most users
+                have a handful of folders and want to tap one, so raising the
+                keyboard (which covers the list on mobile) is the wrong default.
+                Typing to filter is the fallback, and matches the model selector's
+                deliberate no-autofocus policy (#366). */}
             <CommandInput
-              autoFocus
               placeholder={t('conversations.newConversationSearchPlaceholder', 'Search folders…')}
             />
             <CommandList>

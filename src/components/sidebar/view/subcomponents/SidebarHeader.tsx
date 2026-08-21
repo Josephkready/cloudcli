@@ -1,5 +1,5 @@
 import { Archive, FolderPlus, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
-import type { ComponentType } from 'react';
+import { useEffect, useRef, type ComponentType } from 'react';
 import type { TFunction } from 'i18next';
 
 import { Button, Input } from '../../../../shared/view/ui';
@@ -104,6 +104,21 @@ export default function SidebarHeader({
     onSetOverlay(sidebarOverlay === 'archived' ? 'none' : 'archived');
   };
 
+  // Tapping "Search chats" is an unambiguous intent to type (the overlay even
+  // says "Type at least 2 characters…"), so focus the search field instead of
+  // making the user tap a second time (#366). Both refs are focused: the header
+  // renders a desktop AND a mobile input, one of which is always `display:none`
+  // (`hidden`/`md:hidden`) and therefore an unfocusable no-op, so only the
+  // visible field takes focus. Browsing overlays ('none', 'archived') are left
+  // alone, matching the browse-vs-search policy.
+  const desktopSearchRef = useRef<HTMLInputElement>(null);
+  const mobileSearchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (sidebarOverlay !== 'search') return;
+    mobileSearchRef.current?.focus();
+    desktopSearchRef.current?.focus();
+  }, [sidebarOverlay]);
+
   // Shared by the desktop and mobile search inputs. Counted once per search
   // session (empty -> non-empty) rather than per keystroke.
   const handleSearchFilterChange = (value: string) => {
@@ -189,6 +204,7 @@ export default function SidebarHeader({
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50" />
               <Input
+                ref={desktopSearchRef}
                 type="text"
                 placeholder={searchPlaceholder}
                 value={searchFilter}
@@ -268,6 +284,7 @@ export default function SidebarHeader({
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/50" />
               <Input
+                ref={mobileSearchRef}
                 type="text"
                 placeholder={searchPlaceholder}
                 value={searchFilter}
