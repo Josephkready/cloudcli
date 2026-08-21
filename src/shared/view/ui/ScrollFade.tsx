@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import { cn } from '../../../lib/utils';
 
@@ -13,6 +13,10 @@ import { computeScrollFade, type ScrollFadeState } from './scrollFadeState';
  * widening) that shifts the fades far more often than the viewport's own box.
  * Pass `resetKey` (e.g. an item count) to force a re-measure when the content
  * changes in a way a resize alone would not catch.
+ *
+ * The initial measurement runs in a layout effect so a row that already
+ * overflows on mount paints with its edge fade already present — matching the
+ * pre-extraction behaviour — rather than fading it in one frame late.
  */
 export function useScrollFade<T extends HTMLElement>(resetKey?: unknown) {
   const scrollRef = useRef<T>(null);
@@ -27,7 +31,7 @@ export function useScrollFade<T extends HTMLElement>(resetKey?: unknown) {
     setState(computeScrollFade(el));
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     onScroll();

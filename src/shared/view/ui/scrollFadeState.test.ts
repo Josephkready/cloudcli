@@ -39,3 +39,21 @@ test('sub-2px offsets read as no-scroll so the fade does not flicker at rest', (
     canScrollRight: false,
   });
 });
+
+test('exactly 2px from the left edge still reads as no left fade (strict >)', () => {
+  // scrollLeft === EDGE_TOLERANCE must NOT light the left fade, or a row parked
+  // 2px in would keep a permanent sliver.
+  assert.deepEqual(computeScrollFade({ scrollLeft: 2, scrollWidth: 400, clientWidth: 200 }), {
+    canScrollLeft: false,
+    canScrollRight: true,
+  });
+});
+
+test('exactly 2px from the right edge still reads as no right fade (strict <)', () => {
+  // scrollWidth - clientWidth - scrollLeft === EDGE_TOLERANCE: at the boundary
+  // the right fade stays off.
+  assert.deepEqual(computeScrollFade({ scrollLeft: 198, scrollWidth: 400, clientWidth: 200 }), {
+    canScrollLeft: true,
+    canScrollRight: false,
+  });
+});

@@ -1,8 +1,8 @@
-import { useCallback, useRef, useState, useEffect } from 'react';
+import { useCallback, useState } from 'react';
 import { Archive, Bug } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { Tooltip } from '../../../../shared/view/ui';
+import { ScrollFade, Tooltip } from '../../../../shared/view/ui';
 import type { MainContentHeaderProps } from '../../types/types';
 import { recordFeatureUse } from '../../../../utils/featureUsage';
 import BugReportDialog from '../../../bug-report/BugReportDialog';
@@ -26,9 +26,6 @@ export default function MainContentHeader({
   onArchiveSession,
 }: MainContentHeaderProps) {
   const { t } = useTranslation();
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
   const [bugReportOpen, setBugReportOpen] = useState(false);
 
   // The reporter is always reachable — a bug worth filing is often one that
@@ -36,13 +33,6 @@ export default function MainContentHeader({
   const handleReportBugClick = useCallback(() => {
     recordFeatureUse('bug_report.open');
     setBugReportOpen(true);
-  }, []);
-
-  const updateScrollState = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    setCanScrollLeft(el.scrollLeft > 2);
-    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 2);
   }, []);
 
   // Soft-archive the open conversation. No confirmation: archiving is
@@ -53,15 +43,6 @@ export default function MainContentHeader({
     recordFeatureUse('session.archive');
     void onArchiveSession(selectedSession.id);
   }, [onArchiveSession, selectedSession]);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    updateScrollState();
-    const observer = new ResizeObserver(updateScrollState);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [updateScrollState]);
 
   return (
     <div className="pwa-header-safe flex-shrink-0 border-b border-border/60 bg-background px-3 py-1.5 sm:px-4 sm:py-2">
@@ -101,24 +82,12 @@ export default function MainContentHeader({
             </Tooltip>
           )}
 
-          <div className="relative min-w-0 flex-shrink overflow-hidden sm:flex-shrink-0">
-            {canScrollLeft && (
-              <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-6 bg-gradient-to-r from-background to-transparent" />
-            )}
-            <div
-              ref={scrollRef}
-              onScroll={updateScrollState}
-              className="scrollbar-hide overflow-x-auto"
-            >
-              <MainContentTabSwitcher
-                activeTab={activeTab}
-                setActiveTab={setActiveTab}
-              />
-            </div>
-            {canScrollRight && (
-              <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-background to-transparent" />
-            )}
-          </div>
+          <ScrollFade containerClassName="flex-shrink overflow-hidden sm:flex-shrink-0">
+            <MainContentTabSwitcher
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+            />
+          </ScrollFade>
         </div>
       </div>
 
