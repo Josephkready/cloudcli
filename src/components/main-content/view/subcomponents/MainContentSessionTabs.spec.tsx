@@ -46,10 +46,14 @@ describe('MainContentSessionTabs — mobile hamburger (#217)', () => {
   it('renders a single collapsed trigger with the active session and a count', () => {
     renderTabs(true);
 
-    const trigger = screen.getByRole('button', { name: 'Open sessions menu' });
+    const trigger = screen.getByRole('button', { name: /open sessions menu/i });
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(trigger).toHaveTextContent('First chat');
     expect(trigger).toHaveTextContent('2');
+    // #364: on mobile this trigger is the only always-visible place the open
+    // session's title appears, so its accessible name must carry the title —
+    // a fixed "Open sessions menu" aria-label would hide it from screen readers.
+    expect(trigger).toHaveAccessibleName('First chat, open sessions menu');
 
     // The list itself is collapsed until the trigger is tapped.
     expect(screen.queryByRole('menu')).toBeNull();
@@ -60,7 +64,7 @@ describe('MainContentSessionTabs — mobile hamburger (#217)', () => {
     const user = userEvent.setup();
     renderTabs(true);
 
-    await user.click(screen.getByRole('button', { name: 'Open sessions menu' }));
+    await user.click(screen.getByRole('button', { name: /open sessions menu/i }));
 
     const menu = screen.getByRole('menu');
     expect(menu).toBeInTheDocument();
@@ -77,7 +81,7 @@ describe('MainContentSessionTabs — mobile hamburger (#217)', () => {
     const user = userEvent.setup();
     const { onSessionSelect } = renderTabs(true);
 
-    await user.click(screen.getByRole('button', { name: 'Open sessions menu' }));
+    await user.click(screen.getByRole('button', { name: /open sessions menu/i }));
     const target = screen
       .getAllByRole('menuitem')
       .find((item) => item.textContent === 'Second chat');
@@ -92,7 +96,7 @@ describe('MainContentSessionTabs — mobile hamburger (#217)', () => {
     const user = userEvent.setup();
     const { onNewSession } = renderTabs(true);
 
-    await user.click(screen.getByRole('button', { name: 'Open sessions menu' }));
+    await user.click(screen.getByRole('button', { name: /open sessions menu/i }));
     await user.click(screen.getByRole('menuitem', { name: 'New session in this space' }));
 
     expect(onNewSession).toHaveBeenCalledTimes(1);
@@ -103,7 +107,7 @@ describe('MainContentSessionTabs — mobile hamburger (#217)', () => {
     const user = userEvent.setup();
     renderTabs(true);
 
-    const trigger = screen.getByRole('button', { name: 'Open sessions menu' });
+    const trigger = screen.getByRole('button', { name: /open sessions menu/i });
     await user.click(trigger);
     expect(screen.getByRole('menu')).toBeInTheDocument();
     // Focus moves into the overlay so the menu roles are keyboard-reachable.
@@ -126,7 +130,7 @@ describe('MainContentSessionTabs — desktop strip unchanged (#217)', () => {
   it('keeps one pill per session and no hamburger trigger', () => {
     renderTabs(false);
 
-    expect(screen.queryByRole('button', { name: 'Open sessions menu' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /open sessions menu/i })).toBeNull();
     expect(screen.getByText('First chat')).toBeInTheDocument();
     expect(screen.getByText('Second chat')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'New session in this space' })).toBeInTheDocument();
@@ -143,7 +147,7 @@ describe('MainContentSessionTabs — desktop strip unchanged (#217)', () => {
       />,
     );
 
-    expect(screen.queryByRole('button', { name: 'Open sessions menu' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /open sessions menu/i })).toBeNull();
     expect(screen.getByText('Second chat')).toBeInTheDocument();
   });
 
@@ -282,7 +286,7 @@ describe('MainContentSessionTabs — CLI-origin badge (#225)', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Open sessions menu' }));
+    await user.click(screen.getByRole('button', { name: /open sessions menu/i }));
 
     // Same rule inside the collapsed overlay: only the terminal-started row is badged.
     expect(screen.getAllByLabelText('Session not driven by cloudcli')).toHaveLength(1);

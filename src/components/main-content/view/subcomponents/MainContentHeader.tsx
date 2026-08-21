@@ -54,6 +54,7 @@ export default function MainContentHeader({
             selectedProject={selectedProject}
             selectedSession={selectedSession}
             onRenameSession={onRenameSession}
+            isMobile={isMobile}
           />
         </div>
 
