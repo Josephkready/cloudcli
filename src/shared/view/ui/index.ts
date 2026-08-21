@@ -13,6 +13,7 @@ export { default as DarkModeToggle } from './DarkModeToggle';
 export { Dialog, DialogTrigger, DialogContent, DialogTitle } from './Dialog';
 export { Input } from './Input';
 export { ScrollArea } from './ScrollArea';
+export { ScrollFade, useScrollFade } from './ScrollFade';
 export { Reasoning, ReasoningTrigger, ReasoningContent, useReasoning } from './Reasoning';
 export { Shimmer } from './Shimmer';
 export { default as Tooltip } from './Tooltip';

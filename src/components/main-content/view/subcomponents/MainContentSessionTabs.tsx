@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import type { Project, ProjectSession } from '../../../../types/app';
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import { useHideCliOriginChats } from '../../../../hooks/useHideCliOriginChats';
-import { PillBar, Pill, Tooltip } from '../../../../shared/view/ui';
+import { PillBar, Pill, ScrollFade, Tooltip } from '../../../../shared/view/ui';
 import { cn } from '../../../../lib/utils';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import { filterCliOriginSessions, getAllSessions, getSessionName } from '../../../sidebar/utils/utils';
@@ -53,19 +53,9 @@ export default function MainContentSessionTabs({
   onNewSession,
 }: MainContentSessionTabsProps) {
   const { t } = useTranslation(['sidebar', 'common']);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-
-  const updateScrollState = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    setCanScrollLeft(el.scrollLeft > 2);
-    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 2);
-  }, []);
 
   // Global preference (#216): terminal-started sessions are hidden by default.
   const hideCliOriginChats = useHideCliOriginChats();
@@ -75,22 +65,6 @@ export default function MainContentSessionTabs({
     processingSessions,
     selectedId,
   );
-
-  useEffect(() => {
-    if (isMobile) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    updateScrollState();
-    // Observe both the scroll viewport and the inner pill row: the viewport's
-    // own box rarely changes, but the pill row's width does (pills added/removed
-    // or a title widening), which is what actually shifts the scroll fades.
-    const observer = new ResizeObserver(updateScrollState);
-    observer.observe(el);
-    if (el.firstElementChild) {
-      observer.observe(el.firstElementChild);
-    }
-    return () => observer.disconnect();
-  }, [updateScrollState, tabs.length, isMobile]);
 
   // Escape closes the mobile overlay and hands focus back to the trigger, which
   // is the same keyboard contract the shared ActionMenu offers. Outside taps are
@@ -249,35 +223,27 @@ export default function MainContentSessionTabs({
 
   return (
     <div className="mt-1.5 flex items-center gap-1">
-      <div className="relative min-w-0 flex-1 overflow-hidden">
-        {canScrollLeft && (
-          <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-6 bg-gradient-to-r from-background to-transparent" />
-        )}
-        <div ref={scrollRef} onScroll={updateScrollState} className="scrollbar-hide overflow-x-auto">
-          <PillBar className="w-max">
-            {tabs.map(({ id, isActive, status, session }) => {
-              const dot = SESSION_TAB_STATUS_DOT[status];
-              return (
-                <Pill
-                  key={id}
-                  isActive={isActive}
-                  onClick={() => selectSession(session)}
-                  className={cn('max-w-[180px] border', SESSION_TAB_STATUS_BORDER[status])}
-                >
-                  <SessionProviderLogo provider={session.__provider} className="h-3.5 w-3.5 flex-shrink-0" />
-                  <span className="truncate">{getSessionName(session, t)}</span>
-                  {/* Flag terminal/CLI-started tabs (#225) with the sidebar's hedged badge. */}
-                  {session.origin === 'cli' && <CliOriginBadge />}
-                  {dot && <span className={cn('h-1.5 w-1.5 flex-shrink-0 rounded-full', dot)} aria-hidden />}
-                </Pill>
-              );
-            })}
-          </PillBar>
-        </div>
-        {canScrollRight && (
-          <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-background to-transparent" />
-        )}
-      </div>
+      <ScrollFade containerClassName="flex-1 overflow-hidden" resetKey={tabs.length}>
+        <PillBar className="w-max">
+          {tabs.map(({ id, isActive, status, session }) => {
+            const dot = SESSION_TAB_STATUS_DOT[status];
+            return (
+              <Pill
+                key={id}
+                isActive={isActive}
+                onClick={() => selectSession(session)}
+                className={cn('max-w-[180px] border', SESSION_TAB_STATUS_BORDER[status])}
+              >
+                <SessionProviderLogo provider={session.__provider} className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="truncate">{getSessionName(session, t)}</span>
+                {/* Flag terminal/CLI-started tabs (#225) with the sidebar's hedged badge. */}
+                {session.origin === 'cli' && <CliOriginBadge />}
+                {dot && <span className={cn('h-1.5 w-1.5 flex-shrink-0 rounded-full', dot)} aria-hidden />}
+              </Pill>
+            );
+          })}
+        </PillBar>
+      </ScrollFade>
       <Tooltip content={newSessionLabel} position="bottom">
         <button
           type="button"
