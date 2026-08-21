@@ -53,7 +53,9 @@ function OverlayToggle({
       onClick={onClick}
       aria-pressed={isActive}
       className={cn(
-        'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-normal transition-[color,background-color,box-shadow] duration-fast',
+        // touch:hit-h-44 floors the touch height at 44px (#363); the Search /
+        // Archived toggles are ~28px tall, below the repo's touch floor.
+        'touch:hit-h-44 flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-normal transition-[color,background-color,box-shadow] duration-fast',
         isActive
           ? 'bg-background text-foreground shadow-sm ring-1 ring-border'
           : 'bg-muted/50 text-muted-foreground hover:text-foreground',

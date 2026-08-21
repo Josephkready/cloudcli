@@ -64,7 +64,7 @@ export default function MainContentHeader({
               type="button"
               onClick={handleReportBugClick}
               aria-label={t('mainContent.reportBug')}
-              className="flex-shrink-0 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+              className="touch:hit-h-44 flex-shrink-0 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
             >
               <Bug className="h-4 w-4" />
             </button>
@@ -76,7 +76,7 @@ export default function MainContentHeader({
                 type="button"
                 onClick={handleArchiveClick}
                 aria-label={t('mainContent.archiveSession')}
-                className="flex-shrink-0 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+                className="touch:hit-h-44 flex-shrink-0 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
               >
                 <Archive className="h-4 w-4" />
               </button>

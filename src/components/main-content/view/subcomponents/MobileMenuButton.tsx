@@ -4,9 +4,12 @@ import { useMobileMenuHandlers } from '../../hooks/useMobileMenuHandlers';
 export default function MobileMenuButton({ onMenuClick, compact = false }: MobileMenuButtonProps) {
   const { handleMobileMenuClick, handleMobileMenuTouchEnd } = useMobileMenuHandlers(onMenuClick);
 
+  // `touch:hit-h-44` floors the touch height at 44px (coarse-pointer ::after
+  // overlay, no reflow) — the 32px hamburger is below the repo's touch floor
+  // (#363). Height-only, matching the other header icon buttons in its row.
   const buttonClasses = compact
-    ? 'p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-accent/60 pwa-menu-button'
-    : 'p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-accent/60 touch-manipulation active:scale-95 pwa-menu-button flex-shrink-0';
+    ? 'touch:hit-h-44 p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-accent/60 pwa-menu-button'
+    : 'touch:hit-h-44 p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-accent/60 touch-manipulation active:scale-95 pwa-menu-button flex-shrink-0';
 
   return (
     <button
