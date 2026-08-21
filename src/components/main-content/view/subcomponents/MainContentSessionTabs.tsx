@@ -129,7 +129,17 @@ export default function MainContentSessionTabs({
             onClick={() => setIsMenuOpen((open) => !open)}
             aria-haspopup="menu"
             aria-expanded={isMenuOpen}
-            aria-label={t('sessions.openSessionsMenu', 'Open sessions menu')}
+            // The visible session title is inside this button, but a fixed
+            // aria-label would override it for assistive tech — and on mobile
+            // this trigger is now the only always-visible place the open
+            // session's title appears (#364), so fold the title into the name.
+            aria-label={
+              activeTab
+                ? t('sessions.openSessionsMenuFor', '{{title}}, open sessions menu', {
+                    title: triggerLabel,
+                  })
+                : t('sessions.openSessionsMenu', 'Open sessions menu')
+            }
             className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-border/60 bg-accent/30 px-2.5 py-2 text-left text-sm text-foreground transition-colors active:bg-accent/60"
           >
             <Menu className="h-4 w-4 flex-shrink-0 text-muted-foreground" />

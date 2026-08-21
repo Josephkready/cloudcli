@@ -35,7 +35,8 @@
     "loading": "Loading...",
     "showMore": "Show more sessions",
     "openSessions": "Open sessions",
-    "openSessionsMenu": "Open sessions menu"
+    "openSessionsMenu": "Open sessions menu",
+    "openSessionsMenuFor": "{{title}}, open sessions menu"
   },
   "tooltips": {
     "viewEnvironments": "View Environments",

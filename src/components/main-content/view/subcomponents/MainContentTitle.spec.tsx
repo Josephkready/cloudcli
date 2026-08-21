@@ -33,7 +33,7 @@ const session = {
   lastActivity: '2026-08-21T00:00:00Z',
 } as unknown as ProjectSession;
 
-function renderTitle(isMobile: boolean) {
+function renderTitle(isMobile: boolean, overrides: Record<string, unknown> = {}) {
   render(
     <MainContentTitle
       activeTab="chat"
@@ -41,6 +41,7 @@ function renderTitle(isMobile: boolean) {
       selectedSession={session}
       onRenameSession={vi.fn()}
       isMobile={isMobile}
+      {...overrides}
     />,
   );
 }
@@ -59,5 +60,19 @@ describe('MainContentTitle — mobile title de-duplication (#364)', () => {
     // The session title must not appear in the header on mobile — the strip below owns it.
     expect(screen.queryByText(new RegExp(LONG_TITLE))).toBeNull();
     expect(screen.queryByRole('button', { name: new RegExp(LONG_TITLE) })).toBeNull();
+    // Also catch a re-introduction of a JS-truncated prefix, not just the full title.
+    expect(screen.queryByText(/Show me a long/)).toBeNull();
+  });
+
+  it('mobile still shows the tab title (not the project) on non-chat tabs', () => {
+    // The collapse is gated on activeTab === 'chat'; a Files tab must keep its title.
+    renderTitle(true, { activeTab: 'files' });
+    expect(screen.getByText('Project Files')).toBeTruthy();
+  });
+
+  it('mobile still shows "New Session" when no session is selected', () => {
+    // The collapse is gated on a selected session; the new-session state is untouched.
+    renderTitle(true, { selectedSession: null });
+    expect(screen.getByText('New Session')).toBeTruthy();
   });
 });
