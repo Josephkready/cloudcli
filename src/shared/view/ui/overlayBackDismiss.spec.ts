@@ -31,6 +31,16 @@ describe('overlayBackDismiss (#365)', () => {
     expect(pushSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('carries the existing history state onto the sentinel so react-router idx survives', () => {
+    // react-router stamps { idx, key, usr } on its entries; a marker-only sentinel
+    // would leave idx undefined and corrupt a later navigate() into NaN.
+    window.history.replaceState({ idx: 3, key: 'abc' }, '');
+    registerBackDismiss(vi.fn());
+    const state = window.history.state as { idx?: number; __overlayBackDismiss?: boolean };
+    expect(state.__overlayBackDismiss).toBe(true);
+    expect(state.idx).toBe(3);
+  });
+
   it('Back closes only the topmost overlay, one layer per press', () => {
     const closeA = vi.fn();
     const closeB = vi.fn();
@@ -67,5 +77,29 @@ describe('overlayBackDismiss (#365)', () => {
     pressBack();
     expect(closeA).not.toHaveBeenCalled();
     expect(closeB).not.toHaveBeenCalled();
+  });
+
+  it('counts self-inflicted pops so two programmatic closes in one tick do not desync', () => {
+    const closeA = vi.fn(); // stays open at the bottom
+    const closeB = vi.fn();
+    const closeC = vi.fn();
+    registerBackDismiss(closeA);
+    const unregB = registerBackDismiss(closeB);
+    const unregC = registerBackDismiss(closeC);
+
+    // Close C then B programmatically before either popstate fires — two queued
+    // history.back()s. A single boolean guard would swallow only the first and
+    // let the second popstate wrongly close A.
+    unregC();
+    unregB();
+    expect(backSpy).toHaveBeenCalledTimes(2);
+
+    pressBack();
+    pressBack();
+    expect(closeA).not.toHaveBeenCalled();
+
+    // A genuine Back now closes the remaining topmost overlay (A).
+    pressBack();
+    expect(closeA).toHaveBeenCalledTimes(1);
   });
 });
