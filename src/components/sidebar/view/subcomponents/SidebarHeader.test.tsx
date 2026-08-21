@@ -49,6 +49,9 @@ test('the search + archived overlay toggles render when there are projects', () 
 
   assert.ok(markup.includes('Search chats'), 'expected the full-text search toggle');
   assert.ok(markup.includes('Archived'), 'expected the archived-overlay toggle');
+  // #363: the ~28px full-width toggles floor their painted height to the 44px
+  // touch floor (a real reflow, not the overlapping hit-h-44 overlay).
+  assert.ok(markup.includes('touch:min-h-44'), 'expected the Search/Archived toggles to floor the touch height (#363)');
 });
 
 test('the search tools are hidden when there is nothing to show', () => {

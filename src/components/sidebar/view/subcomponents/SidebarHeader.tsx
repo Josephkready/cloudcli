@@ -53,7 +53,11 @@ function OverlayToggle({
       onClick={onClick}
       aria-pressed={isActive}
       className={cn(
-        'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-normal transition-[color,background-color,box-shadow] duration-fast',
+        // touch:min-h-44 grows these full-width toggles to the 44px touch floor
+        // (#363). A real reflow (not the hit-h-44 overlay) because they sit only
+        // ~9px above the Spaces trigger — two centred 44px overlays there would
+        // overlap and steal each other's taps.
+        'touch:min-h-44 flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-normal transition-[color,background-color,box-shadow] duration-fast',
         isActive
           ? 'bg-background text-foreground shadow-sm ring-1 ring-border'
           : 'bg-muted/50 text-muted-foreground hover:text-foreground',

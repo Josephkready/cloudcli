@@ -784,6 +784,16 @@
       min-width: 44px;
     }
 
+    /* `min-h-44` floors the *painted* height at 44px by growing the box itself,
+       for full-width controls that can grow without stealing a neighbour's taps
+       (#363). Prefer it over the `hit-h-44` overlay wherever two short controls
+       sit close enough that their centred 44px overlays would overlap and the
+       later-painted one would win taps in the overlap band — a real reflow keeps
+       each control's hit box within its own row. */
+    .touch\:min-h-44 {
+      min-height: 44px;
+    }
+
     /* Completely disable hover states on touch devices */
     * {
       -webkit-tap-highlight-color: transparent !important;

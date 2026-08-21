@@ -104,3 +104,20 @@ describe('SidebarProjectItem — session count subtitle (#242)', () => {
     expect(screen.getAllByText(/^0 sessions/).length).toBeGreaterThanOrEqual(2);
   });
 });
+
+/*
+ * #363: the 32px favorite-toggle button is below the repo's 44px touch floor.
+ * It floors its touch height with the height-only `touch:hit-h-44` overlay
+ * (height-only because the outer card's own onClick would otherwise hijack taps
+ * in a widened star's hit zone). Pinned so a restyle can't silently drop it.
+ */
+describe('SidebarProjectItem — favorite toggle touch target (#363)', () => {
+  it('floors the favorite button at the 44px touch height', () => {
+    renderItem(makeProject(0));
+
+    const starButton = screen
+      .getAllByTitle('Add to favorites')
+      .find((el) => el.tagName === 'BUTTON');
+    expect(starButton?.className).toContain('touch:hit-h-44');
+  });
+});

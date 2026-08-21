@@ -136,7 +136,9 @@ export default function SidebarProjectItem({
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <button
                   className={cn(
-                    'w-8 h-8 rounded-lg flex items-center justify-center active:scale-90 transition-[transform,background-color,border-color] duration-fast border',
+                    // touch:hit-h-44 floors the touch height at 44px (#363); the
+                    // star is a 32px icon button, below the repo's touch floor.
+                    'touch:hit-h-44 w-8 h-8 rounded-lg flex items-center justify-center active:scale-90 transition-[transform,background-color,border-color] duration-fast border',
                     isStarred
                       ? 'bg-yellow-500/10 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800'
                       : 'bg-gray-500/10 dark:bg-gray-900/30 border-gray-200 dark:border-gray-800',

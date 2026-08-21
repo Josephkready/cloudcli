@@ -30,14 +30,18 @@ const session = {
   lastActivity: '2026-07-22T00:00:00Z',
 } as unknown as ProjectSession;
 
-function renderHeader(selectedSession: ProjectSession | null, onArchiveSession = vi.fn()) {
+function renderHeader(
+  selectedSession: ProjectSession | null,
+  onArchiveSession = vi.fn(),
+  isMobile = false,
+) {
   render(
     <MainContentHeader
       activeTab="chat"
       setActiveTab={vi.fn()}
       selectedProject={project}
       selectedSession={selectedSession}
-      isMobile={false}
+      isMobile={isMobile}
       onMenuClick={vi.fn()}
       processingSessions={new Map()}
       onSessionSelect={vi.fn()}
@@ -67,6 +71,22 @@ describe('MainContentHeader — archive action (#215)', () => {
     renderHeader(null);
 
     expect(screen.queryByRole('button', { name: 'Archive conversation' })).toBeNull();
+  });
+});
+
+/*
+ * #363: the header icon buttons are 28-32px, below the repo's 44px touch floor.
+ * They floor the touch height with `touch:hit-h-44` (height-only, since they sit
+ * in a gap-1 row where a 44px-wide overlay would steal taps from a neighbour).
+ */
+describe('MainContentHeader — touch targets (#363)', () => {
+  it('floors the header icon buttons at the 44px touch height', () => {
+    renderHeader(session, vi.fn(), true);
+
+    for (const name of ['Report a bug', 'Archive conversation', 'Open menu']) {
+      const button = screen.getByRole('button', { name });
+      expect(button.className, `"${name}" must floor its touch height`).toContain('touch:hit-h-44');
+    }
   });
 });
 
