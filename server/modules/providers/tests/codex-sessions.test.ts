@@ -300,3 +300,128 @@ test('multi-file apply_patch history attaches the shared result to exactly one E
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+/**
+ * Writes `~/.codex/session_index.jsonl`, where Codex records the `thread_name`
+ * it settles on for a thread. This is Codex's real *title*, as distinct from the
+ * prompt and agent-message text the synchronizer falls back to.
+ */
+const writeCodexSessionIndex = async (
+  homeDir: string,
+  entries: ReadonlyArray<{ id: string; thread_name: string }>,
+): Promise<void> => {
+  const codexDir = path.join(homeDir, '.codex');
+  await mkdir(codexDir, { recursive: true });
+  await writeFile(
+    path.join(codexDir, 'session_index.jsonl'),
+    `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    'utf8',
+  );
+};
+
+/*
+ * The Codex half of #379, and it is the same shape as Claude's.
+ *
+ * A session started from cloudcli is titled from the first user message and left
+ * with `name_source` NULL. The old guard treated any non-placeholder name as
+ * final, so when Codex later published a real `thread_name` into
+ * session_index.jsonl, it could never be picked up.
+ */
+test('Codex synchronizer adopts a later thread_name over an unsourced name', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codex-sync-thread-name-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    await writeCodexTranscript(tempRoot, 'codex-thread-1', workspacePath, 'Fix the login redirect bug');
+
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createAppSession('app-thread-1', 'codex', workspacePath);
+      sessionsDb.assignProviderSessionId('app-thread-1', 'codex-thread-1');
+
+      const synchronizer = new CodexSessionSynchronizer();
+      await synchronizer.synchronize();
+
+      const first = sessionsDb.getSessionById('app-thread-1');
+      assert.equal(first?.custom_name, 'Fix the login redirect bug');
+      assert.equal(first?.name_source, null);
+
+      await writeCodexSessionIndex(tempRoot, [
+        { id: 'codex-thread-1', thread_name: 'Login redirect loop on expired session' },
+      ]);
+
+      await synchronizer.synchronize();
+      assert.equal(
+        sessionsDb.getSessionById('app-thread-1')?.custom_name,
+        'Login redirect loop on expired session',
+      );
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('Codex synchronizer leaves a user rename alone', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codex-sync-user-name-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    await writeCodexTranscript(tempRoot, 'codex-user-1', workspacePath, 'Fix the login redirect bug');
+
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createAppSession('app-user-1', 'codex', workspacePath);
+      sessionsDb.assignProviderSessionId('app-user-1', 'codex-user-1');
+
+      const synchronizer = new CodexSessionSynchronizer();
+      await synchronizer.synchronize();
+
+      sessionsDb.updateSessionCustomName('app-user-1', 'Renamed by me', 'user');
+      await writeCodexSessionIndex(tempRoot, [
+        { id: 'codex-user-1', thread_name: 'A machine would have called it this' },
+      ]);
+
+      await synchronizer.synchronize();
+      assert.equal(sessionsDb.getSessionById('app-user-1')?.custom_name, 'Renamed by me');
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('Codex synchronizer keeps an existing name when no thread_name exists', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codex-sync-no-churn-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    await writeCodexTranscript(tempRoot, 'codex-churn-1', workspacePath, 'Fix the login redirect bug');
+
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createAppSession('app-churn-1', 'codex', workspacePath);
+      sessionsDb.assignProviderSessionId('app-churn-1', 'codex-churn-1');
+
+      const synchronizer = new CodexSessionSynchronizer();
+      await synchronizer.synchronize();
+
+      // Someone (or #368) put a real name on it with no provenance. With no
+      // thread_name published, re-deriving would fall back to prompt/agent text
+      // and rewrite the sidebar on every scan.
+      sessionsDb.updateSessionCustomName('app-churn-1', 'Fix the login redirect bug');
+
+      await synchronizer.synchronize();
+      assert.equal(
+        sessionsDb.getSessionById('app-churn-1')?.custom_name,
+        'Fix the login redirect bug',
+      );
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});

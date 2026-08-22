@@ -132,10 +132,39 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
     const existingSession = sessionsDb.getSessionByProviderSessionId(parsed.sessionId)
       ?? sessionsDb.getSessionById(parsed.sessionId);
     const existingSessionName = existingSession?.custom_name;
-    if (existingSessionName && existingSessionName !== 'Untitled Codex Session') {
+
+    // Provenance, not spelling, decides whether a name may be refreshed (#379) —
+    // the same rule the database enforces on write, and the same one the Claude
+    // synchronizer uses. `'user'` (a deliberate rename) and `'ai'` (a finished
+    // title from cloudcli's own worker) are final.
+    if (existingSession?.name_source) {
       return {
         ...parsed,
-        sessionName: normalizeSessionName(existingSessionName, 'Untitled Codex Session'),
+        sessionName: normalizeSessionName(existingSessionName ?? undefined, 'Untitled Codex Session'),
+      };
+    }
+
+    // Codex's real title is the `thread_name` it publishes into
+    // session_index.jsonl, which is what `nameMap` holds. A session started from
+    // cloudcli is titled from its first user message and left unsourced, so
+    // without this a later thread_name could never be adopted.
+    //
+    // Only that title may overwrite an existing name. The other two sources below
+    // are message text — the first prompt, and the *last agent message*, which
+    // changes constantly — so re-deriving them on every scan would rewrite the
+    // sidebar as the conversation moves. They stay reserved for a row with no
+    // name worth keeping yet.
+    const discoveredTitle = nameMap.get(parsed.sessionId);
+    const hasKeepableName = Boolean(existingSessionName)
+      && existingSessionName !== 'Untitled Codex Session';
+
+    if (hasKeepableName) {
+      return {
+        ...parsed,
+        sessionName: normalizeSessionName(
+          discoveredTitle ?? existingSessionName ?? undefined,
+          'Untitled Codex Session',
+        ),
       };
     }
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -201,6 +201,233 @@ test('Claude synchronizer skips sessions whose project path is excluded', { conc
       assert.equal(await synchronizer.synchronize(), 0);
       assert.equal(sessionsDb.getSessionById('claude-excluded-1'), null);
     }, '**/worktrees/**');
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Appends a title-bearing event to an existing transcript, the way Claude Code
+ * does when its own titler finishes or the user renames a session in the CLI.
+ */
+const appendTranscriptEvent = async (
+  filePath: string,
+  event: Record<string, unknown>,
+): Promise<void> => {
+  await appendFile(filePath, `${JSON.stringify(event)}\n`, 'utf8');
+};
+
+/*
+ * Whether a name may be refreshed is a question about its *provenance*, not its
+ * spelling (#379).
+ *
+ * Both synchronizers used to treat any name that wasn't the placeholder string
+ * as final. That guard predates `name_source`, the column the database already
+ * uses for exactly this decision:
+ *
+ *   custom_name = CASE WHEN name_source IS NULL THEN COALESCE(?, custom_name) ELSE custom_name END
+ *
+ * A user rename (`'user'`) and a finished AI title (`'ai'`) are deliberate acts
+ * and must survive. A synchronizer-derived name, or #368's opening-line write,
+ * has no source and should still yield to a real title event — otherwise Claude
+ * Code's own `ai-title` can never be adopted, because #368 closes the path the
+ * moment the first message is sent.
+ */
+test('Claude synchronizer adopts a later ai-title over an unsourced name', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'claude-sync-ai-title-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    const filePath = await writeClaudeTranscript(
+      tempRoot,
+      'claude-ai-title-1',
+      workspacePath,
+      'Fix the login redirect bug',
+    );
+
+    await withIsolatedDatabase(async () => {
+      const synchronizer = new ClaudeSessionSynchronizer();
+      await synchronizer.synchronize();
+
+      // The opening line, written with no provenance — exactly what #368 does at
+      // send time, and the write that closes the path this test is about.
+      sessionsDb.updateSessionCustomName('claude-ai-title-1', 'Fix the login redirect bug');
+      const first = sessionsDb.getSessionById('claude-ai-title-1');
+      assert.equal(first?.custom_name, 'Fix the login redirect bug');
+      assert.equal(first?.name_source, null);
+
+      // Claude Code's titler then writes its summary into the transcript.
+      await appendTranscriptEvent(filePath, {
+        sessionId: 'claude-ai-title-1',
+        type: 'ai-title',
+        aiTitle: 'Login redirect loop on expired session',
+      });
+
+      await synchronizer.synchronize();
+      assert.equal(
+        sessionsDb.getSessionById('claude-ai-title-1')?.custom_name,
+        'Login redirect loop on expired session',
+      );
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('Claude synchronizer leaves a user rename alone', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'claude-sync-user-name-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    const filePath = await writeClaudeTranscript(tempRoot, 'claude-user-name-1', workspacePath);
+
+    await withIsolatedDatabase(async () => {
+      const synchronizer = new ClaudeSessionSynchronizer();
+      await synchronizer.synchronize();
+
+      sessionsDb.updateSessionCustomName('claude-user-name-1', 'Renamed by me', 'user');
+      await appendTranscriptEvent(filePath, {
+        sessionId: 'claude-user-name-1',
+        type: 'ai-title',
+        aiTitle: 'A machine would have called it this',
+      });
+
+      await synchronizer.synchronize();
+      // Deliberate intent outranks any discovered title, forever.
+      assert.equal(sessionsDb.getSessionById('claude-user-name-1')?.custom_name, 'Renamed by me');
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('Claude synchronizer leaves a finished AI title alone', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'claude-sync-ai-source-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    const filePath = await writeClaudeTranscript(tempRoot, 'claude-ai-source-1', workspacePath);
+
+    await withIsolatedDatabase(async () => {
+      const synchronizer = new ClaudeSessionSynchronizer();
+      await synchronizer.synchronize();
+
+      // cloudcli's own opt-in titler has already run and marked the row done.
+      sessionsDb.updateSessionCustomName('claude-ai-source-1', 'Summarised by cloudcli', 'ai');
+      await appendTranscriptEvent(filePath, {
+        sessionId: 'claude-ai-source-1',
+        type: 'ai-title',
+        aiTitle: 'Summarised by Claude Code',
+      });
+
+      await synchronizer.synchronize();
+      // Two titlers must not fight across every scan.
+      assert.equal(
+        sessionsDb.getSessionById('claude-ai-source-1')?.custom_name,
+        'Summarised by cloudcli',
+      );
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('Claude synchronizer never downgrades a real name to the placeholder', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'claude-sync-no-downgrade-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    // A transcript that parses but carries no title-bearing event and no user
+    // message, so discovery finds nothing at all.
+    const projectDir = path.join(tempRoot, '.claude', 'projects', 'encoded-workspace');
+    await mkdir(projectDir, { recursive: true });
+    const filePath = path.join(projectDir, 'claude-no-downgrade-1.jsonl');
+    await writeFile(
+      filePath,
+      `${JSON.stringify({
+        sessionId: 'claude-no-downgrade-1',
+        cwd: workspacePath,
+        type: 'system',
+      })}\n`,
+      'utf8',
+    );
+
+    await withIsolatedDatabase(async () => {
+      const synchronizer = new ClaudeSessionSynchronizer();
+      await synchronizer.synchronize();
+
+      // An unsourced but perfectly good name — the shape #368 writes at send time.
+      sessionsDb.updateSessionCustomName('claude-no-downgrade-1', 'Fix the login redirect bug');
+
+      await synchronizer.synchronize();
+      // Falling through the provenance guard must not let "found nothing" become
+      // "call it Untitled". This is the regression the fix itself risks.
+      assert.equal(
+        sessionsDb.getSessionById('claude-no-downgrade-1')?.custom_name,
+        'Fix the login redirect bug',
+      );
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('Claude synchronizer does not let a new prompt rewrite an existing name', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'claude-sync-churn-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    const filePath = await writeClaudeTranscript(tempRoot, 'claude-churn-1', workspacePath);
+
+    await withIsolatedDatabase(async () => {
+      const synchronizer = new ClaudeSessionSynchronizer();
+      await synchronizer.synchronize();
+      sessionsDb.updateSessionCustomName('claude-churn-1', 'Fix the login redirect bug');
+
+      // A `last-prompt` is not a title — it is just whatever was typed most
+      // recently. An app-created session has no history.jsonl entry, so nothing
+      // outranks it in `pickDiscoveredSessionName`, and re-deriving on every scan
+      // would march the sidebar name along with the conversation.
+      await appendTranscriptEvent(filePath, {
+        sessionId: 'claude-churn-1',
+        type: 'last-prompt',
+        lastPrompt: 'now also check the logout path',
+      });
+
+      await synchronizer.synchronize();
+      assert.equal(
+        sessionsDb.getSessionById('claude-churn-1')?.custom_name,
+        'Fix the login redirect bug',
+      );
+
+      // ...but a real title event still wins, which is the whole point of #379.
+      await appendTranscriptEvent(filePath, {
+        sessionId: 'claude-churn-1',
+        type: 'ai-title',
+        aiTitle: 'Login redirect loop on expired session',
+      });
+
+      await synchronizer.synchronize();
+      assert.equal(
+        sessionsDb.getSessionById('claude-churn-1')?.custom_name,
+        'Login redirect loop on expired session',
+      );
+    });
   } finally {
     restoreHomeDir();
     await rm(tempRoot, { recursive: true, force: true });

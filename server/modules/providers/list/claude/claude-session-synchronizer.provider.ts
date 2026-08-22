@@ -186,10 +186,25 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
     const existingSession = sessionsDb.getSessionByProviderSessionId(parsed.sessionId)
       ?? sessionsDb.getSessionById(parsed.sessionId);
     const existingSessionName = existingSession?.custom_name;
-    if (existingSessionName && existingSessionName !== 'Untitled Claude Session') {
+
+    // Whether a name may be refreshed is a question about its provenance, not its
+    // spelling (#379).
+    //
+    // `name_source` records who set it, and the database already enforces exactly
+    // this rule on write:
+    //   custom_name = CASE WHEN name_source IS NULL THEN COALESCE(?, custom_name) ELSE custom_name END
+    // A user rename (`'user'`) and a finished title from cloudcli's own worker
+    // (`'ai'`) are deliberate acts and are final here too.
+    //
+    // The guard this replaced compared against the placeholder string instead, so
+    // *any* real-looking name was terminal. That was survivable while app-created
+    // sessions sat at NULL, but #368 writes the opening line at send time, which
+    // closed the path immediately — and Claude Code's own `ai-title`, written into
+    // the transcript later, could never be adopted.
+    if (existingSession?.name_source) {
       return {
         ...parsed,
-        sessionName: normalizeSessionName(existingSessionName, 'Untitled Claude Session'),
+        sessionName: normalizeSessionName(existingSessionName ?? undefined, 'Untitled Claude Session'),
       };
     }
 
@@ -198,6 +213,28 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
     // `display` (nameMap) so the sidebar reads as summaries, not opening lines; the
     // first prompt stays the fallback when no title event exists.
     const titleCandidates = await this.extractSessionTitleCandidatesFromEnd(filePath, parsed.sessionId);
+
+    // Only a genuine *title* event may overwrite a name that already exists.
+    //
+    // `pickDiscoveredSessionName` also falls back to prompts, and prompts move: an
+    // app-created session has no history.jsonl entry, so nothing outranks
+    // `last-prompt`, and re-deriving on every scan would march the sidebar name
+    // along with the conversation. Prompt fallbacks are therefore reserved for a
+    // row that has no name worth keeping yet.
+    const discoveredTitle = titleCandidates.customTitle ?? titleCandidates.aiTitle;
+    const hasKeepableName = Boolean(existingSessionName)
+      && existingSessionName !== 'Untitled Claude Session';
+
+    if (hasKeepableName) {
+      return {
+        ...parsed,
+        sessionName: normalizeSessionName(
+          discoveredTitle ?? existingSessionName ?? undefined,
+          'Untitled Claude Session',
+        ),
+      };
+    }
+
     const sessionName = pickDiscoveredSessionName(titleCandidates, nameMap.get(parsed.sessionId));
 
     return {
