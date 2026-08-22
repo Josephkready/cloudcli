@@ -137,6 +137,27 @@ test('a keyboard height that was never published is distinguishable from zero', 
   }
 });
 
+test('a report still gets filed when the keyboard height cannot be read at all', () => {
+  // The reporter is what you reach for when the app is already misbehaving, and
+  // it is now read during the press that opens it. An engine that refuses
+  // `getComputedStyle` must cost this one row, not the whole report.
+  const restore = installFakeWindow({
+    innerWidth: 390,
+    innerHeight: 797,
+    visualHeight: 461,
+    published: '336px',
+    computedStyleThrows: true,
+  });
+  try {
+    const environment = readBrowserEnvironment();
+    assert.equal(environment.keyboardInset, undefined);
+    assert.equal(environment.viewport, '390×797');
+    assert.equal(environment.visualViewport, '390×461');
+  } finally {
+    restore();
+  }
+});
+
 /** Minimal `window` stand-in; returns a teardown that restores the global. */
 function installFakeWindow(input: {
   innerWidth: number;
@@ -144,6 +165,8 @@ function installFakeWindow(input: {
   visualHeight: number;
   /** Value of `--keyboard-height`, as the app would have published it. */
   published: string;
+  /** Stands in for an engine that refuses the call outright. */
+  computedStyleThrows?: boolean;
 }): () => void {
   const globals = globalThis as unknown as Record<string, unknown>;
   const previous = globals.window;
@@ -155,10 +178,13 @@ function installFakeWindow(input: {
     navigator: { userAgent: 'test', language: 'en-US' },
     location: { pathname: '/', search: '' },
     document: { documentElement },
-    getComputedStyle: (element: unknown) => ({
-      getPropertyValue: (property: string) =>
-        element === documentElement && property === '--keyboard-height' ? input.published : '',
-    }),
+    getComputedStyle: (element: unknown) => {
+      if (input.computedStyleThrows) throw new Error('getComputedStyle is unavailable');
+      return {
+        getPropertyValue: (property: string) =>
+          element === documentElement && property === '--keyboard-height' ? input.published : '',
+      };
+    },
   };
   return () => {
     if (previous === undefined) delete globals.window;

@@ -62,6 +62,30 @@ function present(value: unknown): string | undefined {
 }
 
 /**
+ * The keyboard height the app has published, read back off `--keyboard-height`.
+ *
+ * `'unset'` when the variable has never been written, which is a distinct
+ * finding: `installKeyboardViewportSync` writes it on resize and on focus and
+ * nowhere else, so its absence means that publisher never ran at all — not that
+ * it ran and measured nothing.
+ *
+ * `undefined`, never a throw, when the reading is impossible. This runs on the
+ * press that opens the bug reporter, which is the tool of last resort for an app
+ * that is already misbehaving, so a hostile `getComputedStyle` must cost one row
+ * of the report rather than the whole report.
+ */
+function readPublishedKeyboardHeight(): string | undefined {
+  try {
+    const root = window.document?.documentElement;
+    if (!root) return undefined;
+    const published = window.getComputedStyle(root).getPropertyValue('--keyboard-height');
+    return published.trim() || 'unset';
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Reads the live browser environment. Impure by design — the caller passes the
  * result into {@link buildBugReportMetadata}.
  */
@@ -96,10 +120,6 @@ export function readBrowserEnvironment(): BrowserEnvironment {
   // three sources collapse into one. The published variable is the only reading
   // that can disagree with the other two, which is the entire point of it.
   const visual = window.visualViewport;
-  const root = window.document?.documentElement;
-  const published = root
-    ? window.getComputedStyle(root).getPropertyValue('--keyboard-height').trim()
-    : '';
 
   return {
     userAgent: window.navigator?.userAgent,
@@ -107,10 +127,7 @@ export function readBrowserEnvironment(): BrowserEnvironment {
     timezone,
     viewport: `${window.innerWidth}×${window.innerHeight}`,
     visualViewport: visual ? `${Math.round(visual.width)}×${Math.round(visual.height)}` : undefined,
-    // `unset` rather than `0px`: the variable is only ever written by
-    // `installKeyboardViewportSync`, so its absence means that publisher has not
-    // run at all — a different fault from one that ran and produced zero.
-    keyboardInset: root ? published || 'unset' : undefined,
+    keyboardInset: readPublishedKeyboardHeight(),
     route: `${window.location?.pathname ?? ''}${window.location?.search ?? ''}`,
   };
 }
