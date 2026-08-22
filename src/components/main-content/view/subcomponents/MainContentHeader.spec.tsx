@@ -140,75 +140,61 @@ describe('MainContentHeader — bug reporter', () => {
    * comment on `handleReportBugPointerDown`. `userEvent.click` fires the full
    * pointer sequence, so these exercise the same ordering a tap does.
    *
-   * jsdom ships no Visual Viewport API, and `readBrowserEnvironment` omits the
-   * keyboard rows entirely without one, so the tests below install a minimal
-   * stand-in whose height they can move. That makes them a check on *when* the
-   * read happens, which is the defect; whether iOS shrinks the viewport at all is
-   * a separate question, settled on a real engine in `e2e/bug-report-capture`.
+   * The keyboard is driven through `--keyboard-height` — the variable the app
+   * publishes and `readBrowserEnvironment` reads back — rather than through a
+   * faked visual viewport, because that is now the field's actual source. What
+   * these pin is *when* the read happens, which is the defect. Whether iOS
+   * shrinks the viewport at all is a separate question, settled on a real engine
+   * in `e2e/bug-report-capture`.
    */
   const KEYBOARD = 336;
 
-  function installVisualViewport() {
-    const viewport = {
-      width: window.innerWidth,
-      height: window.innerHeight,
-      offsetTop: 0,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    };
-    Object.defineProperty(window, 'visualViewport', {
-      configurable: true,
-      value: viewport,
-    });
-    return viewport;
+  function publishKeyboardHeight(value: string) {
+    document.documentElement.style.setProperty('--keyboard-height', value);
   }
 
   afterEach(() => {
-    Reflect.deleteProperty(window, 'visualViewport');
+    document.documentElement.style.removeProperty('--keyboard-height');
   });
 
   it('captures the viewport on press, before opening the dialog can disturb it', async () => {
     renderHeader(session);
-    const viewport = installVisualViewport();
 
-    // Stands in for the keyboard: shrunk while a field holds focus, and sprung
-    // back the instant the press moves focus away. A reader that runs at open
-    // time sees only the second value, which is the whole defect.
-    viewport.height = window.innerHeight - KEYBOARD;
+    // Published while a field holds focus, and republished as zero the instant
+    // the press moves focus away and the app sees the keyboard go. A reader that
+    // runs at open time sees only the second value, which is the whole defect.
+    publishKeyboardHeight(`${KEYBOARD}px`);
     const button = screen.getByRole('button', { name: 'Report a bug' });
 
-    // Restored on `mousedown`, which is both where the real focus change (and so
-    // the real keyboard dismissal) lands, and strictly after the `pointerdown`
-    // React delegates from the root. Hanging it on `pointerdown` instead would
-    // race the handler under test — a native listener on the element runs before
-    // React's delegated one, so the restore would land first and the test would
-    // fail against correct code.
-    button.addEventListener('mousedown', () => {
-      viewport.height = window.innerHeight;
-    });
+    // Hung on `mousedown`, which is both where the real focus change (and so the
+    // real keyboard dismissal) lands, and strictly after the `pointerdown` React
+    // delegates from the root. Hanging it on `pointerdown` instead would race the
+    // handler under test — a native listener on the element runs before React's
+    // delegated one, so the republish would land first and the test would fail
+    // against correct code.
+    button.addEventListener('mousedown', () => publishKeyboardHeight('0px'));
 
     await userEvent.click(button);
     await userEvent.click(screen.getByRole('button', { name: /Session details attached/ }));
 
-    // The listener restores the height during the very same press, so a row
-    // reading `0px` here would mean the snapshot was taken too late.
+    // The listener republishes during the very same press, so a row reading
+    // `0px` here would mean the snapshot was taken too late.
     expect(screen.getByText(`${KEYBOARD}px`)).toBeInTheDocument();
   });
 
   it("does not let a keyboard-opened report inherit an earlier tap's viewport", async () => {
     renderHeader(session);
-    const viewport = installVisualViewport();
 
-    // First open is a real tap, taken while the viewport is shrunk.
-    viewport.height = window.innerHeight - KEYBOARD;
+    // First open is a real tap, taken while a keyboard height is published.
+    publishKeyboardHeight(`${KEYBOARD}px`);
     await userEvent.click(screen.getByRole('button', { name: 'Report a bug' }));
     await userEvent.click(screen.getByRole('button', { name: 'Close bug report' }));
-    viewport.height = window.innerHeight;
+    publishKeyboardHeight('0px');
 
     // Second open is a bare `click` with no preceding `pointerdown` — what
     // activating the button from the keyboard produces. Nothing was pressed, so
     // there is no fresh snapshot, and without the reset this would reuse the
-    // shrunk one above and report a keyboard that is not there.
+    // stale one above and report a keyboard that is not there.
     fireEvent.click(screen.getByRole('button', { name: 'Report a bug' }));
     await userEvent.click(screen.getByRole('button', { name: /Session details attached/ }));
 

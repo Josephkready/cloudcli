@@ -16,7 +16,11 @@ export type BrowserEnvironment = {
    * Absent where the Visual Viewport API is.
    */
   visualViewport?: string;
-  /** What the app currently believes the keyboard is covering. */
+  /**
+   * What the app *published* as the keyboard height — the `--keyboard-height`
+   * custom property, read back, not recomputed from the two viewports above.
+   * `'unset'` when the app has never published one at all.
+   */
   keyboardInset?: string;
   route?: string;
 };
@@ -58,6 +62,30 @@ function present(value: unknown): string | undefined {
 }
 
 /**
+ * The keyboard height the app has published, read back off `--keyboard-height`.
+ *
+ * `'unset'` when the variable has never been written, which is a distinct
+ * finding: `installKeyboardViewportSync` writes it on resize and on focus and
+ * nowhere else, so its absence means that publisher never ran at all — not that
+ * it ran and measured nothing.
+ *
+ * `undefined`, never a throw, when the reading is impossible. This runs on the
+ * press that opens the bug reporter, which is the tool of last resort for an app
+ * that is already misbehaving, so a hostile `getComputedStyle` must cost one row
+ * of the report rather than the whole report.
+ */
+function readPublishedKeyboardHeight(): string | undefined {
+  try {
+    const root = window.document?.documentElement;
+    if (!root) return undefined;
+    const published = window.getComputedStyle(root).getPropertyValue('--keyboard-height');
+    return published.trim() || 'unset';
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Reads the live browser environment. Impure by design — the caller passes the
  * result into {@link buildBugReportMetadata}.
  */
@@ -73,18 +101,24 @@ export function readBrowserEnvironment(): BrowserEnvironment {
     // Intl is optional in exotic runtimes; the field is simply omitted.
   }
 
-  // Deliberately three separate numbers, from three separate sources.
+  // Deliberately three separate numbers, from three genuinely separate sources.
   //
   // `viewport` is the layout viewport, and on iOS it is identical whether or not
   // the keyboard is up — which is why #354 and #357 both reported `390×797` and
   // neither could be diagnosed from the report. `visualViewport` is what is
-  // actually visible, and `keyboardInset` is what the app *believes* is covered.
+  // actually visible. `keyboardInset` is what the app *published*, read back off
+  // `--keyboard-height`.
   //
   // Their disagreement is the diagnosis. Layout and visual equal while the user
-  // says the keyboard is up means the app was never told. Visual short but
-  // inset 0 means the app was told and failed to publish. Both correct, field
-  // still buried, means a surface is ignoring the offset. Collapsing any two of
-  // these into one source would destroy exactly that discrimination.
+  // says the keyboard is up means the app was never told. Visual short but inset
+  // 0 means the app was told and failed to publish. Both correct, field still
+  // buried, means a surface is ignoring the offset.
+  //
+  // That middle row is why the inset must NOT be `innerHeight - visual.height`,
+  // however tempting: derived that way, a short visible viewport forces a
+  // non-zero inset, the row becomes arithmetically unreachable, and two of the
+  // three sources collapse into one. The published variable is the only reading
+  // that can disagree with the other two, which is the entire point of it.
   const visual = window.visualViewport;
 
   return {
@@ -93,9 +127,7 @@ export function readBrowserEnvironment(): BrowserEnvironment {
     timezone,
     viewport: `${window.innerWidth}×${window.innerHeight}`,
     visualViewport: visual ? `${Math.round(visual.width)}×${Math.round(visual.height)}` : undefined,
-    keyboardInset: visual
-      ? `${Math.max(0, Math.round(window.innerHeight - visual.height))}px`
-      : undefined,
+    keyboardInset: readPublishedKeyboardHeight(),
     route: `${window.location?.pathname ?? ''}${window.location?.search ?? ''}`,
   };
 }
