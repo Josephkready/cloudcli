@@ -59,7 +59,12 @@ test('readBrowserEnvironment reports a keyboard-covered viewport distinctly', ()
   // The exact iOS signature: layout viewport unchanged, visual viewport short by
   // the keyboard. Asserted through the real reader so the two values cannot be
   // wired to the same source — which is the bug this test exists to prevent.
-  const restore = installFakeWindow({ innerWidth: 390, innerHeight: 797, visualHeight: 461 });
+  const restore = installFakeWindow({
+    innerWidth: 390,
+    innerHeight: 797,
+    visualHeight: 461,
+    published: '336px',
+  });
   try {
     const environment = readBrowserEnvironment();
     assert.equal(environment.viewport, '390×797');
@@ -71,9 +76,62 @@ test('readBrowserEnvironment reports a keyboard-covered viewport distinctly', ()
 });
 
 test('readBrowserEnvironment reports no keyboard when the two viewports agree', () => {
-  const restore = installFakeWindow({ innerWidth: 390, innerHeight: 797, visualHeight: 797 });
+  const restore = installFakeWindow({
+    innerWidth: 390,
+    innerHeight: 797,
+    visualHeight: 797,
+    published: '0px',
+  });
   try {
     assert.equal(readBrowserEnvironment().keyboardInset, '0px');
+  } finally {
+    restore();
+  }
+});
+
+/*
+ * The three rows only diagnose anything if they come from three sources.
+ *
+ * `keyboardInset` is documented as what the app *believes* is covered, and the
+ * table on #354 leans on that: "visible short, inset 0" is supposed to mean the
+ * app was told and failed to publish. Computing the inset as
+ * `innerHeight - visualViewport.height` makes that row arithmetically
+ * unreachable — a short visible viewport forces a non-zero inset — so two of the
+ * three rows become the same measurement and the middle case can never be seen.
+ *
+ * The published `--keyboard-height` is the only independent source, so that is
+ * what this field must read.
+ */
+test('readBrowserEnvironment reports what the app published, not a difference it recomputed', () => {
+  const restore = installFakeWindow({
+    innerWidth: 390,
+    innerHeight: 797,
+    visualHeight: 461,
+    published: '0px',
+  });
+  try {
+    const environment = readBrowserEnvironment();
+    // Told (the visible viewport is 336px short) and yet publishing zero. This
+    // is the diagnosis a recomputed inset can never express.
+    assert.equal(environment.visualViewport, '390×461');
+    assert.equal(environment.keyboardInset, '0px');
+  } finally {
+    restore();
+  }
+});
+
+test('a keyboard height that was never published is distinguishable from zero', () => {
+  // `installKeyboardViewportSync` sets the variable on resize and on focus, and
+  // on nothing else. So "never set" means the publisher has not run at all —
+  // a different fault from "ran and produced 0", and worth telling apart.
+  const restore = installFakeWindow({
+    innerWidth: 390,
+    innerHeight: 797,
+    visualHeight: 797,
+    published: '',
+  });
+  try {
+    assert.equal(readBrowserEnvironment().keyboardInset, 'unset');
   } finally {
     restore();
   }
@@ -84,15 +142,23 @@ function installFakeWindow(input: {
   innerWidth: number;
   innerHeight: number;
   visualHeight: number;
+  /** Value of `--keyboard-height`, as the app would have published it. */
+  published: string;
 }): () => void {
   const globals = globalThis as unknown as Record<string, unknown>;
   const previous = globals.window;
+  const documentElement = {};
   globals.window = {
     innerWidth: input.innerWidth,
     innerHeight: input.innerHeight,
     visualViewport: { width: input.innerWidth, height: input.visualHeight, offsetTop: 0 },
     navigator: { userAgent: 'test', language: 'en-US' },
     location: { pathname: '/', search: '' },
+    document: { documentElement },
+    getComputedStyle: (element: unknown) => ({
+      getPropertyValue: (property: string) =>
+        element === documentElement && property === '--keyboard-height' ? input.published : '',
+    }),
   };
   return () => {
     if (previous === undefined) delete globals.window;
