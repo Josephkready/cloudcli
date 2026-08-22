@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 
+import { registerBackDismiss } from './overlayBackDismiss';
 import { useOverlayLayer } from './overlayLayers';
 
 /**
@@ -61,6 +62,16 @@ export function useOverlayDismiss({ isActive, onDismiss }: UseOverlayDismissOpti
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isActive, isTopmost]);
+
+  // Back-to-dismiss (#365): while open, own a sentinel history entry so the
+  // phone's Back gesture closes this overlay instead of leaving the app. The
+  // shared controller handles the topmost-only + stacked-overlay bookkeeping.
+  useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+    return registerBackDismiss(() => onDismissRef.current());
+  }, [isActive]);
 
   const handleBackdropMouseDown = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     // Only a press that starts on the backdrop itself counts. Using mousedown

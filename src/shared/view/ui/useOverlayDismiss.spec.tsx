@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { __resetBackDismissForTest } from './overlayBackDismiss';
 import { useOverlayDismiss } from './useOverlayDismiss';
 
 /*
@@ -35,6 +36,20 @@ function Overlay({
 }
 
 describe('useOverlayDismiss (#243)', () => {
+  // The Back-to-dismiss controller (#365) is a module singleton that mutates
+  // window.history; reset it and stub the cleanup back() between cases so tests
+  // don't pollute each other's history stack.
+  beforeEach(() => {
+    __resetBackDismissForTest();
+    vi.spyOn(window.history, 'back').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    __resetBackDismissForTest();
+  });
+
+  const pressBack = () => window.dispatchEvent(new PopStateEvent('popstate'));
+
   it('dismisses on Escape', async () => {
     const user = userEvent.setup();
     const onDismiss = vi.fn();
@@ -101,6 +116,41 @@ describe('useOverlayDismiss (#243)', () => {
 
     expect(onDismissInner).toHaveBeenCalledTimes(1);
     expect(onDismissOuter).not.toHaveBeenCalled();
+  });
+
+  it('dismisses on the Back gesture (popstate) — the #365 wiring', () => {
+    const onDismiss = vi.fn();
+    render(<Overlay label="a" isActive onDismiss={onDismiss} />);
+
+    pressBack();
+
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('Back only dismisses the topmost overlay when two are stacked', () => {
+    const onDismissOuter = vi.fn();
+    const onDismissInner = vi.fn();
+
+    render(
+      <>
+        <Overlay label="outer" isActive onDismiss={onDismissOuter} />
+        <Overlay label="inner" isActive onDismiss={onDismissInner} />
+      </>,
+    );
+
+    pressBack();
+
+    expect(onDismissInner).toHaveBeenCalledTimes(1);
+    expect(onDismissOuter).not.toHaveBeenCalled();
+  });
+
+  it('does not respond to Back while inactive', () => {
+    const onDismiss = vi.fn();
+    render(<Overlay label="a" isActive={false} onDismiss={onDismiss} />);
+
+    pressBack();
+
+    expect(onDismiss).not.toHaveBeenCalled();
   });
 
   it('releases its slot on unmount so the overlay beneath becomes dismissable', async () => {
