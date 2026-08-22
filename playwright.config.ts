@@ -26,8 +26,14 @@ import { defineConfig, devices } from '@playwright/test';
  * `/tmp/cloudcli-fix-mobile-keyboard-.../e2e/chat.spec.ts` and silently emptied
  * the desktop project. A config that quietly runs nothing is far worse than one
  * that fails, so the leading separator and trailing `$` are load-bearing.
+ *
+ * `bug-report-capture` belongs here rather than with the desktop specs even
+ * though it files a report rather than laying one out: what it asserts is that
+ * the reporter's viewport snapshot survives the blur that opening it causes,
+ * which is only a question where a soft keyboard exists.
  */
-const KEYBOARD_SPECS = /[\\/]mobile-keyboard(-publisher)?\.spec\.ts$/;
+const KEYBOARD_SPECS =
+  /[\\/](mobile-keyboard(-publisher)?|bug-report-capture)\.spec\.ts$/;
 
 /**
  * Specs that must run on every engine, desktop and mobile alike.

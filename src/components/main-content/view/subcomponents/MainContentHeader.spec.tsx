@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import MainContentHeader from './MainContentHeader';
 
@@ -133,6 +133,87 @@ describe('MainContentHeader — bug reporter', () => {
     renderHeader(null);
 
     expect(screen.getByRole('button', { name: 'Report a bug' })).toBeInTheDocument();
+  });
+
+  /*
+   * The press, not the open, is when the environment is worth reading — see the
+   * comment on `handleReportBugPointerDown`. `userEvent.click` fires the full
+   * pointer sequence, so these exercise the same ordering a tap does.
+   *
+   * jsdom ships no Visual Viewport API, and `readBrowserEnvironment` omits the
+   * keyboard rows entirely without one, so the tests below install a minimal
+   * stand-in whose height they can move. That makes them a check on *when* the
+   * read happens, which is the defect; whether iOS shrinks the viewport at all is
+   * a separate question, settled on a real engine in `e2e/bug-report-capture`.
+   */
+  const KEYBOARD = 336;
+
+  function installVisualViewport() {
+    const viewport = {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      offsetTop: 0,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: viewport,
+    });
+    return viewport;
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'visualViewport');
+  });
+
+  it('captures the viewport on press, before opening the dialog can disturb it', async () => {
+    renderHeader(session);
+    const viewport = installVisualViewport();
+
+    // Stands in for the keyboard: shrunk while a field holds focus, and sprung
+    // back the instant the press moves focus away. A reader that runs at open
+    // time sees only the second value, which is the whole defect.
+    viewport.height = window.innerHeight - KEYBOARD;
+    const button = screen.getByRole('button', { name: 'Report a bug' });
+
+    // Restored on `mousedown`, which is both where the real focus change (and so
+    // the real keyboard dismissal) lands, and strictly after the `pointerdown`
+    // React delegates from the root. Hanging it on `pointerdown` instead would
+    // race the handler under test — a native listener on the element runs before
+    // React's delegated one, so the restore would land first and the test would
+    // fail against correct code.
+    button.addEventListener('mousedown', () => {
+      viewport.height = window.innerHeight;
+    });
+
+    await userEvent.click(button);
+    await userEvent.click(screen.getByRole('button', { name: /Session details attached/ }));
+
+    // The listener restores the height during the very same press, so a row
+    // reading `0px` here would mean the snapshot was taken too late.
+    expect(screen.getByText(`${KEYBOARD}px`)).toBeInTheDocument();
+  });
+
+  it("does not let a keyboard-opened report inherit an earlier tap's viewport", async () => {
+    renderHeader(session);
+    const viewport = installVisualViewport();
+
+    // First open is a real tap, taken while the viewport is shrunk.
+    viewport.height = window.innerHeight - KEYBOARD;
+    await userEvent.click(screen.getByRole('button', { name: 'Report a bug' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Close bug report' }));
+    viewport.height = window.innerHeight;
+
+    // Second open is a bare `click` with no preceding `pointerdown` — what
+    // activating the button from the keyboard produces. Nothing was pressed, so
+    // there is no fresh snapshot, and without the reset this would reuse the
+    // shrunk one above and report a keyboard that is not there.
+    fireEvent.click(screen.getByRole('button', { name: 'Report a bug' }));
+    await userEvent.click(screen.getByRole('button', { name: /Session details attached/ }));
+
+    expect(screen.getByText('0px')).toBeInTheDocument();
+    expect(screen.queryByText(`${KEYBOARD}px`)).toBeNull();
   });
 });
 

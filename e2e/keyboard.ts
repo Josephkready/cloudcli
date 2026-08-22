@@ -182,6 +182,51 @@ export async function restoreVisualViewport(page: Page): Promise<void> {
 }
 
 /**
+ * Makes the synthetic keyboard retract when the focused field blurs, the way a
+ * real one does.
+ *
+ * ## Why a test needs this
+ *
+ * {@link shrinkVisualViewport} pins a synthetic height that stays put until
+ * something restores it. So in a test, tapping a button while a field is focused
+ * leaves the keyboard up forever — and any code that samples the viewport
+ * *after* that tap reads a keyboard which, on a real device, is already gone.
+ *
+ * That fiction is exactly what let #354's diagnostic ship broken. The bug
+ * reporter snapshots the environment when its dialog opens, which is after the
+ * tap that blurred the composer, so on a device it always records
+ * `keyboardInset: 0px` no matter what the keyboard was doing. No harness could
+ * see the difference, because in every harness the keyboard never left.
+ *
+ * ## What this does and does not model
+ *
+ * Modelled: focus loss dismisses the keyboard, and the viewport returns to full
+ * height. That is not in dispute on any platform, which is what makes it safe to
+ * bake into a fixture.
+ *
+ * Not modelled, deliberately: whether iOS fires `resize` at all, and when. That
+ * is #354's open question and no local harness can answer it — see
+ * {@link shrinkVisualViewport}. Nothing here should be read as evidence either
+ * way.
+ *
+ * Install after `goto`; a navigation drops the listener with the document.
+ */
+export async function retractKeyboardOnBlur(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    document.addEventListener(
+      'focusout',
+      () => {
+        const viewport = window.visualViewport;
+        if (!viewport) return;
+        delete (viewport as unknown as Record<string, unknown>).height;
+        viewport.dispatchEvent(new Event('resize'));
+      },
+      true,
+    );
+  });
+}
+
+/**
  * Focuses an element the way a tap does, so `focusin` reaches the app's
  * listener. `Locator.focus()` is not enough on its own for elements the app
  * only reacts to via bubbled focus events.

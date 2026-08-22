@@ -11,6 +11,7 @@ import type { AppTab, Project, ProjectSession } from '../../types/app';
 import {
   buildBugReportMetadata,
   readBrowserEnvironment,
+  type BrowserEnvironment,
   type BugReportMetadata,
 } from './buildBugReportMetadata';
 
@@ -26,6 +27,11 @@ type BugReportDialogProps = {
   activeTab: AppTab;
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
+  /**
+   * Environment sampled by whoever summoned the reporter, at the moment they
+   * summoned it. Preferred over reading it here — see the snapshot comment below.
+   */
+  capturedEnvironment?: BrowserEnvironment | null;
 };
 
 type SubmitState =
@@ -37,7 +43,11 @@ type SubmitState =
 /** One metadata row in the "what gets sent" disclosure. */
 function MetadataRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 py-1">
+    <div
+      className="flex items-baseline justify-between gap-3 py-1"
+      data-testid="bug-report-metadata-row"
+      data-metadata-key={label}
+    >
       <span className="shrink-0 text-muted-foreground">{label}</span>
       <span className="truncate font-mono text-[11px] text-foreground" title={value}>
         {value}
@@ -59,6 +69,7 @@ export default function BugReportDialog({
   activeTab,
   selectedProject,
   selectedSession,
+  capturedEnvironment,
 }: BugReportDialogProps) {
   const { t } = useTranslation();
   const { currentVersion, runningVersion } = useVersionCheck();
@@ -66,8 +77,20 @@ export default function BugReportDialog({
   const [submitState, setSubmitState] = useState<SubmitState>({ status: 'idle' });
   const [showMetadata, setShowMetadata] = useState(false);
 
-  // Snapshot the environment when the dialog opens: the viewport the user is
-  // reporting from is the one at open time, not after they resize to type.
+  // Prefer the caller's snapshot; only read the environment here if there isn't
+  // one.
+  //
+  // Open time is too late for anything the keyboard touches. Summoning this
+  // dialog means pressing something, pressing something blurs the focused field,
+  // and a blurred field on iOS takes the keyboard — and the shrunken visual
+  // viewport — with it. Reading here recorded `keyboardInset: 0px` on every
+  // report ever filed, which is the exact signature of "the app never noticed
+  // the keyboard" and made #358's new rows unable to diagnose #354, the bug they
+  // were added for. `MainContentHeader` now samples on `pointerdown`, before the
+  // focus change.
+  //
+  // The fallback is still correct for any caller that opens the dialog without a
+  // press to hang a snapshot on; there is no keyboard to lose in that case.
   const metadata = useMemo<BugReportMetadata>(() => {
     if (!open) return {};
     return buildBugReportMetadata({
@@ -76,10 +99,18 @@ export default function BugReportDialog({
       activeTab,
       project: selectedProject,
       session: selectedSession,
-      environment: readBrowserEnvironment(),
+      environment: capturedEnvironment ?? readBrowserEnvironment(),
     });
     // `open` is the intended trigger for re-snapshotting.
-  }, [open, currentVersion, runningVersion, activeTab, selectedProject, selectedSession]);
+  }, [
+    open,
+    currentVersion,
+    runningVersion,
+    activeTab,
+    selectedProject,
+    selectedSession,
+    capturedEnvironment,
+  ]);
 
   // Reset between openings so a previous success or error never greets the next report.
   useEffect(() => {

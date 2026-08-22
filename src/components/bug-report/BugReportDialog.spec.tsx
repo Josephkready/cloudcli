@@ -150,4 +150,47 @@ describe('BugReportDialog', () => {
     renderDialog(false);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
+
+  /*
+   * Whoever opens the reporter may know something it cannot find out for itself.
+   *
+   * The keyboard is the case that forced this: opening the dialog means pressing
+   * a button, pressing a button blurs the focused field, and on iOS that
+   * dismisses the keyboard. Anything measured here is measured after the fact.
+   * The press site samples first and passes the result down, so these two tests
+   * pin the preference in both directions — the e2e suite proves it matters on a
+   * real engine, and these prove the wiring cannot silently invert.
+   */
+  it('prefers the environment captured by whoever opened it', async () => {
+    render(
+      <BugReportDialog
+        open
+        onOpenChange={vi.fn()}
+        activeTab="chat"
+        selectedProject={project}
+        selectedSession={session}
+        capturedEnvironment={{
+          viewport: '390×797',
+          visualViewport: '390×461',
+          keyboardInset: '336px',
+        }}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /Session details attached/ }));
+
+    expect(screen.getByText('336px')).toBeInTheDocument();
+    expect(screen.getByText('390×461')).toBeInTheDocument();
+  });
+
+  it('falls back to reading the environment when nothing was captured', async () => {
+    renderDialog();
+
+    await userEvent.click(screen.getByRole('button', { name: /Session details attached/ }));
+
+    // jsdom's window, but the point is only that *something* was read rather
+    // than the row vanishing: a caller with no press to hang a snapshot on has
+    // no keyboard to lose either.
+    expect(screen.getByText(`${window.innerWidth}×${window.innerHeight}`)).toBeInTheDocument();
+  });
 });
