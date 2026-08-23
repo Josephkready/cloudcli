@@ -105,6 +105,41 @@ test('Codex synchronizer titles app-created sessions from the first user message
   }
 });
 
+test('Codex synchronizer finds titles in bounded windows of a large transcript', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codex-session-sync-large-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  const sessionsDir = path.join(tempRoot, '.codex', 'sessions', '2026', '07', '07');
+  await Promise.all([
+    mkdir(workspacePath, { recursive: true }),
+    mkdir(sessionsDir, { recursive: true }),
+  ]);
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    const filePath = path.join(sessionsDir, 'rollout-codex-large-1.jsonl');
+    const lines = [
+      JSON.stringify({ type: 'session_meta', payload: { id: 'codex-large-1', cwd: workspacePath } }),
+      JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'Head title' } }),
+      JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', output: 'x'.repeat(600_000) } }),
+      JSON.stringify({
+        type: 'event_msg',
+        payload: { type: 'task_complete', last_agent_message: 'Tail title' },
+      }),
+    ];
+    await writeFile(filePath, `${lines.join('\n')}\n`, 'utf8');
+
+    await withIsolatedDatabase(async () => {
+      const synchronizer = new CodexSessionSynchronizer();
+      await synchronizer.synchronize();
+
+      assert.equal(sessionsDb.getSessionById('codex-large-1')?.custom_name, 'Tail title');
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('Codex synchronizer skips sub-agent rollout files', { concurrency: false }, async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codex-session-sync-subagent-'));
   const workspacePath = path.join(tempRoot, 'workspace');

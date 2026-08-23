@@ -365,34 +365,32 @@ export async function getArchivedProjectsWithSessions(
     isStarred?: number;
   }>;
 
-  const archivedProjects: ArchivedProjectListItem[] = [];
-
-  for (const row of projectRows) {
-    const displayName =
-      row.custom_project_name && row.custom_project_name.trim().length > 0
-        ? row.custom_project_name
-        : await generateDisplayName(path.basename(row.project_path) || row.project_path, row.project_path);
-
+  return mapWithConcurrency(projectRows, PROJECT_BUILD_CONCURRENCY, async (row) => {
     const sessionsPage = readProjectSessionsIncludingArchived(row.project_path);
+    const [displayName, isRepository, isWorktree] = await Promise.all([
+      row.custom_project_name && row.custom_project_name.trim().length > 0
+        ? Promise.resolve(row.custom_project_name)
+        : generateDisplayName(path.basename(row.project_path) || row.project_path, row.project_path),
+      isGitRepositoryRoot(row.project_path),
+      isGitWorktree(row.project_path),
+    ]);
 
-    archivedProjects.push({
+    return {
       projectId: row.project_id,
       path: row.project_path,
       displayName,
       fullPath: row.project_path,
       isStarred: Boolean(row.isStarred),
-      isRepository: await isGitRepositoryRoot(row.project_path),
-      isWorktree: await isGitWorktree(row.project_path),
+      isRepository,
+      isWorktree,
       isArchived: true,
       sessions: sessionsPage.sessions,
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
         total: sessionsPage.total,
       },
-    });
-  }
-
-  return archivedProjects;
+    } satisfies ArchivedProjectListItem;
+  });
 }
 
 /**

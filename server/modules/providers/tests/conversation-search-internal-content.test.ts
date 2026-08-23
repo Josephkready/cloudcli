@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   extractClaudeSearchableMessage,
   isInternalCodexContent,
+  normalizeSearchableSessions,
 } from '@/modules/providers/services/session-conversations-search.service.js';
 
 /*
@@ -139,4 +140,16 @@ test('codex injected boilerplate is treated as internal content', () => {
 
 test('an ordinary codex message is not treated as internal', () => {
   assert.equal(isInternalCodexContent('please refactor the parser'), false);
+});
+
+test('search normalization does not synchronously stat every transcript path', () => {
+  const missingPath = '/definitely/missing/cloudcli-session.jsonl';
+  const rows = normalizeSearchableSessions([{
+    provider: 'claude',
+    jsonl_path: missingPath,
+    project_path: '',
+  } as never]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.jsonl_path, missingPath);
 });

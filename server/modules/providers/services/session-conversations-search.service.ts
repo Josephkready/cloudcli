@@ -495,7 +495,7 @@ function extractCodexText(content: unknown): string {
     .join(' ');
 }
 
-function normalizeSearchableSessions(rows: SessionRepositoryRow[]): SearchableSessionRow[] {
+export function normalizeSearchableSessions(rows: SessionRepositoryRow[]): SearchableSessionRow[] {
   const normalizedRows: SearchableSessionRow[] = [];
   const projectArchiveStateByPath = new Map<string, boolean>();
 
@@ -511,10 +511,6 @@ function normalizeSearchableSessions(rows: SessionRepositoryRow[]): SearchableSe
     }
 
     const absoluteJsonlPath = path.resolve(rawJsonlPath);
-    if (!fsSync.existsSync(absoluteJsonlPath)) {
-      continue;
-    }
-
     /**
      * Active session rows can still belong to an archived project because
      * project archiving intentionally preserves the underlying session data.

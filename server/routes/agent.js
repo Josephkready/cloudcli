@@ -15,6 +15,7 @@ import { IS_PLATFORM } from '../constants/config.js';
 import { normalizeProjectPath } from '../shared/utils.js';
 import { ResponseCollector } from './response-collector.js';
 import { runMockAgentProvider } from './mock-agent-provider.js';
+import { buildGitHubCloneEnvironment } from './git-clone-auth.js';
 
 const router = express.Router();
 
@@ -368,20 +369,15 @@ async function cloneGitHubRepo(githubUrl, githubToken = null, projectPath) {
       // Ensure parent directory exists
       await fs.mkdir(path.dirname(cloneDir), { recursive: true });
 
-      // Prepare the git clone URL with authentication if token is provided
-      let cloneUrl = githubUrl;
-      if (githubToken) {
-        // Convert HTTPS URL to authenticated URL
-        // Example: https://github.com/user/repo -> https://token@github.com/user/repo
-        cloneUrl = githubUrl.replace('https://github.com', `https://${githubToken}@github.com`);
-      }
+      const cloneEnvironment = buildGitHubCloneEnvironment(githubToken);
 
       console.log('🔄 Cloning repository:', githubUrl);
       console.log('📁 Destination:', cloneDir);
 
       // Execute git clone
-      const gitProcess = spawn('git', ['clone', '--depth', '1', cloneUrl, cloneDir], {
-        stdio: ['pipe', 'pipe', 'pipe']
+      const gitProcess = spawn('git', ['clone', '--depth', '1', githubUrl, cloneDir], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: cloneEnvironment
       });
 
       let stdout = '';

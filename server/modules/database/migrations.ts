@@ -262,9 +262,9 @@ const rebuildSessionsTableWithProjectSchema = (db: Database): void => {
     addColumnToTableIfNotExists(db, 'sessions', columnNames, 'isArchived', 'BOOLEAN DEFAULT 0');
     addColumnToTableIfNotExists(db, 'sessions', columnNames, 'created_at', 'DATETIME');
     addColumnToTableIfNotExists(db, 'sessions', columnNames, 'updated_at', 'DATETIME');
-    db.exec('UPDATE sessions SET isArchived = COALESCE(isArchived, 0)');
-    db.exec('UPDATE sessions SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
-    db.exec('UPDATE sessions SET updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)');
+    db.exec('UPDATE sessions SET isArchived = 0 WHERE isArchived IS NULL');
+    db.exec('UPDATE sessions SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL');
+    db.exec('UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL');
     return;
   }
 

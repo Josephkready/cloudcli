@@ -327,3 +327,19 @@ test('getArchivedProjectsWithSessions flags repository roots too', async () => {
     await rm(workspace, { recursive: true, force: true });
   });
 });
+
+test('getArchivedProjectsWithSessions preserves database order across concurrent builds', async () => {
+  await withIsolatedDatabase(async () => {
+    const paths = Array.from({ length: 9 }, (_, index) => `/workspace/archived-order-${index}`);
+    paths.forEach((projectPath, index) => {
+      projectsDb.createProjectPath(projectPath, index % 2 === 0 ? `Archived ${index}` : null);
+      projectsDb.updateProjectIsArchived(projectPath, true);
+    });
+    const expectedOrder = (projectsDb.getArchivedProjectPaths() as Array<{ project_path: string }>)
+      .map((row) => row.project_path);
+
+    const projects = await getArchivedProjectsWithSessions({ skipSynchronization: true });
+
+    assert.deepEqual(projects.map((project) => project.path), expectedOrder);
+  });
+});

@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import { shouldExcludeProjectPath } from '@/shared/project-exclude.js';
@@ -9,9 +9,13 @@ import {
   extractFirstValidJsonlData,
   findFilesRecursivelyModifiedAfter,
   normalizeSessionName,
+  readFileHead,
+  readFileTail,
   readFileTimestamps,
 } from '@/shared/utils.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
+
+import { FileFingerprintCache } from '../claude/session-summary-cache.js';
 
 type ParsedSession = {
   sessionId: string;
@@ -19,12 +23,20 @@ type ParsedSession = {
   sessionName?: string;
 };
 
+type CodexTitleCandidates = {
+  firstUserMessage?: string;
+  lastAgentMessage?: string;
+};
+
+const CODEX_TITLE_SCAN_BYTES = 256 * 1024;
+
 /**
  * Session indexer for Codex transcript artifacts.
  */
 export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
   private readonly provider = 'codex' as const;
   private readonly codexHome = path.join(os.homedir(), '.codex');
+  private readonly titleCandidatesCache = new FileFingerprintCache<CodexTitleCandidates>();
 
   /**
    * Scans ~/.codex/sessions and upserts discovered sessions into DB.
@@ -179,14 +191,18 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
       existingSession.provider_session_id != null &&
       existingSession.session_id !== existingSession.provider_session_id;
 
-    let sessionName = isAppCreated
-      ? await this.extractFirstUserMessageFromStart(filePath)
-      : undefined;
+    let sessionName = isAppCreated ? undefined : nameMap.get(parsed.sessionId);
+    const titleCandidates = (isAppCreated || !sessionName)
+      ? await this.extractTitleCandidates(filePath)
+      : {};
+    if (isAppCreated) {
+      sessionName = titleCandidates.firstUserMessage;
+    }
     if (!sessionName) {
       sessionName = nameMap.get(parsed.sessionId);
     }
     if (!sessionName) {
-      sessionName = await this.extractLastAgentMessageFromEnd(filePath);
+      sessionName = titleCandidates.lastAgentMessage;
     }
 
     return {
@@ -221,76 +237,86 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
    * Reads the `event_msg`/`user_message` payload rather than the raw
    * `response_item` user turn so injected `<environment_context>` boilerplate is
    * never mistaken for the user's prompt.
-   */
-  private async extractFirstUserMessageFromStart(filePath: string): Promise<string | undefined> {
-    try {
-      const content = await readFile(filePath, 'utf8');
-      const lines = content.split(/\r?\n/);
-
-      for (const rawLine of lines) {
-        const line = rawLine.trim();
-        if (!line) {
-          continue;
-        }
-
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          continue;
-        }
-
-        const data = parsed as Record<string, unknown>;
-        const eventType = typeof data.type === 'string' ? data.type : undefined;
-        const payload = data.payload as Record<string, unknown> | undefined;
-        const payloadType = typeof payload?.type === 'string' ? payload.type : undefined;
-        const message = typeof payload?.message === 'string' ? payload.message : undefined;
-
-        if (eventType === 'event_msg' && payloadType === 'user_message' && message?.trim()) {
-          return message;
-        }
+  */
+  private extractFirstUserMessageFromStart(content: string): string | undefined {
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) {
+        continue;
       }
-    } catch {
-      // Ignore missing/unreadable files so sync can continue.
-    }
 
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      const data = parsed as Record<string, unknown>;
+      const eventType = typeof data.type === 'string' ? data.type : undefined;
+      const payload = data.payload as Record<string, unknown> | undefined;
+      const payloadType = typeof payload?.type === 'string' ? payload.type : undefined;
+      const message = typeof payload?.message === 'string' ? payload.message : undefined;
+
+      if (eventType === 'event_msg' && payloadType === 'user_message' && message?.trim()) {
+        return message;
+      }
+    }
     return undefined;
   }
 
-  private async extractLastAgentMessageFromEnd(filePath: string): Promise<string | undefined> {
-    try {
-      const content = await readFile(filePath, 'utf8');
-      const lines = content.split(/\r?\n/);
+  private extractLastAgentMessageFromEnd(content: string): string | undefined {
+    const lines = content.split(/\r?\n/);
 
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const line = lines[index]?.trim();
-        if (!line) {
-          continue;
-        }
-
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          continue;
-        }
-
-        const data = parsed as Record<string, unknown>;
-        const eventType = typeof data.type === 'string' ? data.type : undefined;
-        const payload = data.payload as Record<string, unknown> | undefined;
-        const payloadType = typeof payload?.type === 'string' ? payload.type : undefined;
-        const lastAgentMessage = typeof payload?.last_agent_message === 'string'
-          ? payload.last_agent_message
-          : undefined;
-
-        if (eventType === 'event_msg' && payloadType === 'task_complete' && lastAgentMessage?.trim()) {
-          return lastAgentMessage;
-        }
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index]?.trim();
+      if (!line) {
+        continue;
       }
-    } catch {
-      // Ignore missing/unreadable files so sync can continue.
-    }
 
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      const data = parsed as Record<string, unknown>;
+      const eventType = typeof data.type === 'string' ? data.type : undefined;
+      const payload = data.payload as Record<string, unknown> | undefined;
+      const payloadType = typeof payload?.type === 'string' ? payload.type : undefined;
+      const lastAgentMessage = typeof payload?.last_agent_message === 'string'
+        ? payload.last_agent_message
+        : undefined;
+
+      if (eventType === 'event_msg' && payloadType === 'task_complete' && lastAgentMessage?.trim()) {
+        return lastAgentMessage;
+      }
+    }
     return undefined;
+  }
+
+  private async extractTitleCandidates(filePath: string): Promise<CodexTitleCandidates> {
+    try {
+      const fileStat = await stat(filePath);
+      const fingerprint = { mtimeMs: fileStat.mtimeMs, size: fileStat.size };
+      const cached = this.titleCandidatesCache.get(filePath, fingerprint);
+      if (cached) {
+        return cached;
+      }
+
+      const head = await readFileHead(filePath, CODEX_TITLE_SCAN_BYTES);
+      const tail = fileStat.size <= CODEX_TITLE_SCAN_BYTES
+        ? head
+        : await readFileTail(filePath, CODEX_TITLE_SCAN_BYTES);
+      const candidates = {
+        firstUserMessage: this.extractFirstUserMessageFromStart(head),
+        lastAgentMessage: this.extractLastAgentMessageFromEnd(tail),
+      };
+      this.titleCandidatesCache.set(filePath, fingerprint, candidates);
+      return candidates;
+    } catch {
+      return {};
+    }
   }
 }
