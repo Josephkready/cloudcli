@@ -167,4 +167,41 @@ test('clone progress uses an authenticated POST body and consumes the completion
   assert.deepEqual(project, { id: 'p1' });
 });
 
+test('clone progress rejects server error events and dropped streams', async (t) => {
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: () => null, setItem: () => {} },
+  });
+  t.after(() => {
+    if (originalStorage) Object.defineProperty(globalThis, 'localStorage', originalStorage);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  });
+
+  const fetchMock = t.mock.method(globalThis, 'fetch', async () => new Response(
+    'data: {"type":"error","message":"Clone rejected"}\n\n',
+    { headers: { 'content-type': 'text/event-stream' } },
+  ));
+  const params = {
+    workspacePath: '/workspace',
+    githubUrl: 'https://github.com/org/repo.git',
+    tokenMode: 'stored' as const,
+    selectedGithubToken: '42',
+    newGithubToken: '',
+  };
+
+  await assert.rejects(
+    cloneWorkspaceWithProgress(params, { onProgress: () => {} }),
+    /Clone rejected/,
+  );
+
+  fetchMock.mock.mockImplementation(async () => new Response('', {
+    headers: { 'content-type': 'text/event-stream' },
+  }));
+  await assert.rejects(
+    cloneWorkspaceWithProgress(params, { onProgress: () => {} }),
+    /Connection lost during clone/,
+  );
+});
+
 mock.reset();
