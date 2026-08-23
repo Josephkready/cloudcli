@@ -1325,7 +1325,12 @@ export async function buildLookupMap(
         continue;
       }
 
-      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
       const key = parsed[keyField];
       const value = parsed[valueField];
 
@@ -1361,8 +1366,12 @@ export async function extractFirstValidJsonlData<T>(
         continue;
       }
 
-      const parsed = JSON.parse(trimmed);
-      const extracted = extractor(parsed);
+      let extracted: T | null | undefined;
+      try {
+        extracted = extractor(JSON.parse(trimmed));
+      } catch {
+        continue;
+      }
       if (extracted) {
         lineReader.close();
         fileStream.close();

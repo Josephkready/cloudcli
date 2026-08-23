@@ -56,8 +56,18 @@ function validateCommitRef(commit) {
   return commit;
 }
 
-function validateBranchName(branch) {
-  if (!/^[a-zA-Z0-9._\/-]+$/.test(branch)) {
+export function validateBranchName(branch) {
+  const segments = typeof branch === 'string' ? branch.split('/') : [];
+  if (
+    typeof branch !== 'string'
+    || !/^[a-zA-Z0-9._\/-]+$/.test(branch)
+    || branch.startsWith('-')
+    || branch.startsWith('/')
+    || branch.endsWith('/')
+    || branch.endsWith('.')
+    || branch.includes('..')
+    || segments.some((segment) => !segment || segment.startsWith('.') || segment.endsWith('.lock'))
+  ) {
     throw new Error('Invalid branch name');
   }
   return branch;
@@ -805,7 +815,7 @@ router.post('/checkout', async (req, res) => {
     
     // Checkout the branch
     validateBranchName(branch);
-    const { stdout } = await spawnAsync('git', ['checkout', branch], { cwd: projectPath });
+    const { stdout } = await spawnAsync('git', ['checkout', branch, '--'], { cwd: projectPath });
     
     res.json({ success: true, output: stdout });
   } catch (error) {
@@ -847,6 +857,7 @@ router.post('/delete-branch', async (req, res) => {
   try {
     const projectPath = await getActualProjectPath(project);
     await validateGitRepository(projectPath);
+    validateBranchName(branch);
 
     // Safety: cannot delete the currently checked-out branch
     const { stdout: currentBranch } = await spawnAsync('git', ['branch', '--show-current'], { cwd: projectPath });
@@ -854,7 +865,7 @@ router.post('/delete-branch', async (req, res) => {
       return res.status(400).json({ error: 'Cannot delete the currently checked-out branch' });
     }
 
-    const { stdout } = await spawnAsync('git', ['branch', '-d', branch], { cwd: projectPath });
+    const { stdout } = await spawnAsync('git', ['branch', '-d', '--', branch], { cwd: projectPath });
     res.json({ success: true, output: stdout });
   } catch (error) {
     console.error('Git delete branch error:', error);

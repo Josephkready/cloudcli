@@ -125,7 +125,7 @@ test('Antigravity synchronizer indexes transcript rows from history metadata', {
       display: 'Fix Antigravity history',
       workspace: workspacePath,
       conversationId: sessionId,
-    })}\n`, 'utf8');
+    })}\n{partially-written\n`, 'utf8');
 
     await withIsolatedDatabase(async () => {
       await new AntigravitySessionSynchronizer().synchronize();
@@ -215,6 +215,34 @@ test('Antigravity history reader normalizes messages and skips malformed lines',
       assert.equal(search.totalMatches, 1);
       assert.equal(search.results[0]?.sessions[0]?.provider, 'antigravity');
       assert.equal(search.results[0]?.sessions[0]?.sessionId, 'agy-session-2');
+    });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('Antigravity history read failures remain distinguishable from empty sessions', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'antigravity-history-error-'));
+  try {
+    await withIsolatedDatabase(async () => {
+      const missingPath = path.join(tempRoot, 'missing-transcript.jsonl');
+      sessionsDb.createSession(
+        'agy-missing',
+        'antigravity',
+        tempRoot,
+        'Missing history',
+        undefined,
+        undefined,
+        missingPath,
+      );
+
+      await assert.rejects(
+        new AntigravitySessionsProvider().fetchHistory('agy-missing'),
+        (error: unknown) => {
+          assert.equal((error as { code?: string }).code, 'SESSION_TRANSCRIPT_UNREADABLE');
+          return true;
+        },
+      );
     });
   } finally {
     await rm(tempRoot, { recursive: true, force: true });

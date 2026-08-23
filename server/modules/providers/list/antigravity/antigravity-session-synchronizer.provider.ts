@@ -163,7 +163,13 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
         if (!line) {
           continue;
         }
-        const entry = readObjectRecord(JSON.parse(line));
+        let entry: Record<string, unknown> | null;
+        try {
+          entry = readObjectRecord(JSON.parse(line));
+        } catch {
+          // The history can be observed while agy is appending a partial line.
+          continue;
+        }
         if (readOptionalString(entry?.conversationId) !== sessionId) {
           continue;
         }
