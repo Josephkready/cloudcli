@@ -31,6 +31,8 @@ const OTHER_SESSION = 'session-2';
 function makeSessionStore(): SessionStore {
   return {
     appendRealtime: vi.fn(),
+    updateStreaming: vi.fn(),
+    finalizeStreaming: vi.fn(),
     refreshFromServer: vi.fn(),
     getSessionSlot: vi.fn(),
     has: vi.fn(),
@@ -45,6 +47,8 @@ function makeSessionStore(): SessionStore {
  */
 function setup() {
   let listener: ((event: ServerEvent) => void) | null = null;
+  let activeSessionId = SESSION;
+  const sessionStore = makeSessionStore();
   const subscribe = (fn: (event: ServerEvent) => void) => {
     listener = fn;
     return () => {
@@ -52,30 +56,33 @@ function setup() {
     };
   };
 
-  renderHook(() => {
-    const streamTimerRef = useRef<number | null>(null);
-    const accumulatedStreamRef = useRef('');
+  const { rerender } = renderHook(() => {
+    const streamingStatesRef = useRef(new Map());
     const lastSeqRef = useRef(new Map<string, number>());
     const statusCheckSentAtRef = useRef(new Map<string, number>());
 
     useChatRealtimeHandlers({
       subscribe,
       provider: 'claude' as LLMProvider,
-      selectedSession: { id: SESSION } as ProjectSession,
-      currentSessionId: SESSION,
+      selectedSession: { id: activeSessionId } as ProjectSession,
+      currentSessionId: activeSessionId,
       setTokenBudget: vi.fn(),
       pendingPermissionRequests: [],
       setPendingPermissionRequests: vi.fn(),
-      streamTimerRef,
-      accumulatedStreamRef,
+      streamingStatesRef,
       lastSeqRef,
       statusCheckSentAtRef,
-      sessionStore: makeSessionStore(),
+      sessionStore,
     });
   });
 
   return {
     deliver: (event: ServerEvent) => listener?.(event),
+    sessionStore,
+    selectSession: (sessionId: string) => {
+      activeSessionId = sessionId;
+      rerender();
+    },
   };
 }
 
@@ -95,7 +102,54 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   localStorage.clear();
+});
+
+describe('stream buffering', () => {
+  it('keeps interleaved sessions in separate accumulated messages', () => {
+    vi.useFakeTimers();
+    const { deliver, sessionStore } = setup();
+
+    deliver({ kind: 'stream_delta', sessionId: SESSION, content: 'A1' });
+    deliver({ kind: 'stream_delta', sessionId: OTHER_SESSION, content: 'B1' });
+    deliver({ kind: 'stream_delta', sessionId: SESSION, content: 'A2' });
+    vi.advanceTimersByTime(100);
+
+    expect(sessionStore.updateStreaming).toHaveBeenCalledWith(SESSION, 'A1A2', 'claude');
+    expect(sessionStore.updateStreaming).toHaveBeenCalledWith(OTHER_SESSION, 'B1', 'claude');
+    expect(sessionStore.appendRealtime).not.toHaveBeenCalled();
+  });
+
+  it('keeps a pending background-session buffer when the active view changes', () => {
+    vi.useFakeTimers();
+    const { deliver, selectSession, sessionStore } = setup();
+
+    deliver({ kind: 'stream_delta', sessionId: SESSION, content: 'before switch' });
+    selectSession(OTHER_SESSION);
+    vi.advanceTimersByTime(100);
+
+    expect(sessionStore.updateStreaming).toHaveBeenCalledWith(
+      SESSION,
+      'before switch',
+      'claude',
+    );
+  });
+
+  it('finalizes only the session named by stream_end', () => {
+    vi.useFakeTimers();
+    const { deliver, sessionStore } = setup();
+
+    deliver({ kind: 'stream_delta', sessionId: SESSION, content: 'A' });
+    deliver({ kind: 'stream_delta', sessionId: OTHER_SESSION, content: 'B' });
+    deliver({ kind: 'stream_end', sessionId: SESSION });
+    vi.advanceTimersByTime(100);
+
+    expect(sessionStore.updateStreaming).toHaveBeenCalledWith(SESSION, 'A', 'claude');
+    expect(sessionStore.finalizeStreaming).toHaveBeenCalledWith(SESSION);
+    expect(sessionStore.updateStreaming).toHaveBeenCalledWith(OTHER_SESSION, 'B', 'claude');
+    expect(sessionStore.finalizeStreaming).not.toHaveBeenCalledWith(OTHER_SESSION);
+  });
 });
 
 describe('chat_send_accepted', () => {

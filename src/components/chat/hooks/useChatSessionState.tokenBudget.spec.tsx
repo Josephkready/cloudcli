@@ -52,7 +52,6 @@ function renderSessionState(selectedSession: ProjectSession | null) {
   // effect (and its reset) on every commit.
   const sessionStore = makeSessionStore();
   const sendMessage = vi.fn();
-  const resetStreamingState = vi.fn();
   const statusCheckSentAtRef = { current: new Map<string, number>() };
   const lastSeqRef = { current: new Map<string, number>() };
 
@@ -63,7 +62,6 @@ function renderSessionState(selectedSession: ProjectSession | null) {
         selectedSession: session,
         ws: null,
         sendMessage,
-        resetStreamingState,
         statusCheckSentAtRef,
         lastSeqRef,
         sessionStore,

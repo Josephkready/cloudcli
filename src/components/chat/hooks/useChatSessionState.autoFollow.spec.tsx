@@ -117,7 +117,6 @@ function renderChat(container: HTMLDivElement) {
   } as unknown as SessionStore;
 
   const sendMessage = vi.fn();
-  const resetStreamingState = vi.fn();
   const statusCheckSentAtRef = { current: new Map<string, number>() };
   const lastSeqRef = { current: new Map<string, number>() };
 
@@ -127,7 +126,6 @@ function renderChat(container: HTMLDivElement) {
       selectedSession: session,
       ws: null,
       sendMessage,
-      resetStreamingState,
       statusCheckSentAtRef,
       lastSeqRef,
       sessionStore,
