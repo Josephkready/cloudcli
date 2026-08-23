@@ -266,6 +266,7 @@ export function useChatComposerState({
     ((event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>) => Promise<boolean>) | null
   >(null);
   const inputValueRef = useRef(input);
+  const submitInFlightRef = useRef(false);
   const selectedProjectId = selectedProject?.projectId;
   // Prefer the stable backend-allocated id (selectedSession.id) but fall back
   // to currentSessionId for a just-established session that hasn't been
@@ -681,6 +682,12 @@ export function useChatComposerState({
         return false;
       }
 
+      if (submitInFlightRef.current) {
+        return false;
+      }
+      submitInFlightRef.current = true;
+
+      try {
       // A turn is already in flight: stash this message instead of sending it.
       // Appended to the tail of the queue (not overwriting the existing one), so
       // multiple messages queue in order and each is auto-flushed once the prior
@@ -932,6 +939,9 @@ export function useChatComposerState({
       safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
       // A chat.send was dispatched: a run has started.
       return true;
+      } finally {
+        submitInFlightRef.current = false;
+      }
     },
     [
       selectedSession,

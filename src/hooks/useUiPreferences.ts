@@ -26,7 +26,11 @@ export function useUiPreferences(storageKey = 'uiPreferences') {
       return;
     }
 
-    localStorage.setItem(storageKey, JSON.stringify(state));
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+    } catch {
+      // Keep preferences usable in memory when storage is blocked or full.
+    }
 
     window.dispatchEvent(
       new CustomEvent<SyncEventDetail>(SYNC_EVENT, {

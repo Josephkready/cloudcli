@@ -12,6 +12,22 @@ function setThemeColor(color) {
     .forEach((meta) => meta.setAttribute('content', color));
 }
 
+function readStoredTheme() {
+  try {
+    return localStorage.getItem('theme');
+  } catch {
+    return null;
+  }
+}
+
+function persistTheme(theme) {
+  try {
+    localStorage.setItem('theme', theme);
+  } catch {
+    // Theme selection still works in memory when storage is unavailable.
+  }
+}
+
 export const useTheme = () => {
   const context = useContext(ThemeContext);
   if (!context) {
@@ -24,7 +40,7 @@ export const ThemeProvider = ({ children }) => {
   // Check for saved theme preference or default to system preference
   const [isDarkMode, setIsDarkMode] = useState(() => {
     // Check localStorage first
-    const savedTheme = localStorage.getItem('theme');
+    const savedTheme = readStoredTheme();
     if (savedTheme) {
       return savedTheme === 'dark';
     }
@@ -41,7 +57,7 @@ export const ThemeProvider = ({ children }) => {
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
+      persistTheme('dark');
       
       // Update iOS status bar style and theme color for dark mode
       const statusBarMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
@@ -54,7 +70,7 @@ export const ThemeProvider = ({ children }) => {
       setThemeColor('#141414');
     } else {
       document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
+      persistTheme('light');
 
       // Update iOS status bar style and theme color for light mode
       const statusBarMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
@@ -73,7 +89,7 @@ export const ThemeProvider = ({ children }) => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (e) => {
       // Only update if user hasn't manually set a preference
-      const savedTheme = localStorage.getItem('theme');
+      const savedTheme = readStoredTheme();
       if (!savedTheme) {
         setIsDarkMode(e.matches);
       }
