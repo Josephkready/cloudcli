@@ -11,6 +11,7 @@ type NotificationsSettingsTabProps = {
   pushPermission: NotificationPermission | 'unsupported';
   isPushSubscribed: boolean;
   isPushLoading: boolean;
+  pushError: string | null;
   onEnablePush: () => void;
   onDisablePush: () => void;
 };
@@ -21,6 +22,7 @@ export default function NotificationsSettingsTab({
   pushPermission,
   isPushSubscribed,
   isPushLoading,
+  pushError,
   onEnablePush,
   onDisablePush,
 }: NotificationsSettingsTabProps) {
@@ -82,6 +84,9 @@ export default function NotificationsSettingsTab({
               </span>
             )}
           </div>
+        )}
+        {pushError && (
+          <p role="alert" className="text-sm text-destructive">{pushError}</p>
         )}
       </div>
 
