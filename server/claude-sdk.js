@@ -423,6 +423,15 @@ function getAllSessions() {
   return Array.from(activeSessions.keys());
 }
 
+/** Bind a Claude query's interrupt method to the gateway writer for early aborts. */
+export function registerClaudeQueryAbort(writer, queryInstance) {
+  writer.setAbortHandler?.(async () => {
+    await queryInstance.interrupt();
+    return true;
+  });
+  return () => writer.clearAbortHandler?.();
+}
+
 /**
  * Transforms SDK messages to WebSocket format expected by frontend
  * @param {Object} sdkMessage - SDK message object
@@ -673,6 +682,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
   const { sessionId, sessionSummary } = options;
   let capturedSessionId = sessionId;
   let sessionCreatedSent = false;
+  let clearRuntimeAbort = () => {};
 
   const emitNotification = (event) => {
     notifyUserIfEnabled({
@@ -858,10 +868,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       }
 
       // Track the query instance for abort capability
-      ws.setAbortHandler?.(async () => {
-        await queryInstance.interrupt();
-        return true;
-      });
+      clearRuntimeAbort = registerClaudeQueryAbort(ws, queryInstance);
       if (capturedSessionId) {
         addSession(capturedSessionId, queryInstance, ws);
       }
@@ -962,8 +969,6 @@ async function queryClaudeSDK(command, options = {}, ws) {
     // Complete
 
   } catch (error) {
-    console.error('SDK query error:', error);
-
     // Clean up session on error
     if (capturedSessionId) {
       removeSession(capturedSessionId);
@@ -976,6 +981,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
       // caused by interrupt() is expected noise, not a user-facing error.
       return;
     }
+
+    console.error('SDK query error:', error);
 
     // Check if Claude CLI is installed for a clearer error message
     const installed = await providerAuthService.isProviderInstalled('claude');
@@ -994,7 +1001,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       error
     });
   } finally {
-    ws.clearAbortHandler?.();
+    clearRuntimeAbort();
   }
 }
 

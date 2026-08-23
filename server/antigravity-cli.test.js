@@ -139,6 +139,21 @@ test('Antigravity abort escalates to SIGKILL when a child ignores SIGTERM', (t) 
   assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
 });
 
+test('Antigravity abort cancels escalation when the child closes during grace', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const child = new EventEmitter();
+  const signals = [];
+  child.kill = (signal) => {
+    signals.push(signal);
+    return true;
+  };
+
+  assert.equal(terminateAntigravityChild(child, 25), true);
+  child.emit('close', null, 'SIGTERM');
+  t.mock.timers.tick(25);
+  assert.deepEqual(signals, ['SIGTERM']);
+});
+
 test('spawnAntigravity streams NDJSON deltas and captures the native conversation id', { concurrency: false }, async () => {
   await withFakeAgy(async (tempRoot) => {
     const capturePath = path.join(tempRoot, 'args.json');

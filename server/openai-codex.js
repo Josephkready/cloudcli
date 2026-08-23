@@ -25,6 +25,15 @@ import { sendMessage } from './codex-send-message.js';
 
 const activeCodexSessions = new Map();
 
+/** Bind a Codex turn's AbortController to the gateway writer for early aborts. */
+export function registerCodexAbort(writer, abortController) {
+  writer.setAbortHandler?.(() => {
+    abortController.abort();
+    return true;
+  });
+  return () => writer.clearAbortHandler?.();
+}
+
 function readUsageNumber(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -256,10 +265,7 @@ export async function queryCodex(command, options = {}, ws) {
   let sessionCreatedSent = false;
   let terminalFailure = null;
   const abortController = new AbortController();
-  ws.setAbortHandler?.(() => {
-    abortController.abort();
-    return true;
-  });
+  const clearRuntimeAbort = registerCodexAbort(ws, abortController);
 
   try {
     codex = new Codex();
@@ -426,7 +432,7 @@ export async function queryCodex(command, options = {}, ws) {
     }
 
   } finally {
-    ws.clearAbortHandler?.();
+    clearRuntimeAbort();
     // Update session status
     if (capturedSessionId) {
       const session = activeCodexSessions.get(capturedSessionId);
