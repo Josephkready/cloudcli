@@ -1,4 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { WebSocketProvider, useWebSocket } from './WebSocketContext';
@@ -322,6 +323,50 @@ describe('probe frames stay out of the application', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  // The attribution must survive other traffic. An unrelated push landing
+  // between the probe and an old server's rejection used to clear the flag that
+  // identified the rejection, letting it through into the chat.
+  it('still swallows an untyped rejection after an unrelated frame arrives first', async () => {
+    const { listener } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await advance(IDLE_BEFORE_PROBE_MS + LIVENESS_CHECK_INTERVAL_MS);
+    expect(socket.pings()).toHaveLength(1);
+
+    // A sidebar delta races ahead of the rejection.
+    await act(async () => socket.deliver({ kind: 'session_upserted', sessionId: 's1' }));
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    await act(async () => socket.deliver({
+      kind: 'protocol_error',
+      code: 'UNKNOWN_MESSAGE_TYPE',
+      sessionId: null,
+      error: 'Unknown message type "chat.ping".',
+    }));
+
+    expect(listener).toHaveBeenCalledTimes(1); // still just the sidebar delta
+  });
+
+  it('does not swallow an untyped rejection long after any probe', async () => {
+    const { listener } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await advance(IDLE_BEFORE_PROBE_MS + LIVENESS_CHECK_INTERVAL_MS);
+    await act(async () => socket.deliver({ kind: 'pong' }));
+
+    // Well outside the window in which a rejection could be answering a probe.
+    await advance(PONG_TIMEOUT_MS + LIVENESS_CHECK_INTERVAL_MS);
+    await act(async () => socket.deliver({
+      kind: 'protocol_error',
+      code: 'UNKNOWN_MESSAGE_TYPE',
+      error: 'Unknown message type "chat.whatever".',
+    }));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
   it('still dispatches an unknown-type error that is NOT answering a probe', async () => {
     const { listener } = setup();
     const socket = latestSocket();
@@ -477,6 +522,60 @@ describe('socket identity', () => {
   });
 });
 
+describe('the auth token stays out of logs', () => {
+  it('logs only the error type, never the raw Event', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    // The raw Event's `target` is the socket, whose `url` carries `?token=...`.
+    // Serializing it anywhere (devtools, log shipping) leaks the token.
+    await act(async () => {
+      socket.onerror?.(new Event('error'));
+    });
+
+    expect(consoleError).toHaveBeenCalled();
+    for (const call of consoleError.mock.calls) {
+      for (const arg of call) {
+        expect(arg).not.toBeInstanceOf(Event);
+        expect(String(arg)).not.toContain('token');
+      }
+    }
+    consoleError.mockRestore();
+  });
+});
+
+describe('under StrictMode', () => {
+  it('settles on exactly one live socket after the double mount', async () => {
+    // React runs effects twice in StrictMode, and the real app renders inside
+    // it. That mount -> cleanup -> mount cycle is precisely what used to leave a
+    // still-CONNECTING socket orphaned and able to hijack the provider's slot.
+    const view = renderHook(() => useWebSocket(), {
+      wrapper: ({ children }) => (
+        <StrictMode>
+          <WebSocketProvider>{children}</WebSocketProvider>
+        </StrictMode>
+      ),
+    });
+
+    const live = latestSocket();
+    await act(async () => live.open());
+
+    expect(view.result.current.isConnected).toBe(true);
+    expect(view.result.current.sendMessage({ type: 'chat.send' })).toBe(true);
+    expect(live.frames().some((frame) => frame.type === 'chat.send')).toBe(true);
+
+    // Any socket created and discarded by the first effect pass must have been
+    // closed, not left connecting in the background.
+    for (const socket of FakeWebSocket.instances) {
+      if (socket !== live) {
+        expect(socket.closeCalls).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
 describe('a handshake that never completes', () => {
   it('abandons a socket stuck in CONNECTING and tries again', async () => {
     const { result } = setup();
@@ -503,6 +602,20 @@ describe('a handshake that never completes', () => {
     expect(socket.closeCalls).toBe(0);
     expect(result.current.isConnected).toBe(true);
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it('clears the handshake timer on open rather than relying on its guard', async () => {
+    setup();
+    const socket = latestSocket();
+    const whileConnecting = vi.getTimerCount();
+
+    await act(async () => socket.open());
+
+    // Opening swaps one pending timeout for the recurring liveness interval; if
+    // the explicit clear were dropped, the abandoned timeout would still be
+    // queued here. The readyState guard inside it would make that harmless
+    // today, which is exactly why the behavioural test alone cannot catch it.
+    expect(vi.getTimerCount()).toBeLessThanOrEqual(whileConnecting);
   });
 });
 

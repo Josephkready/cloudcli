@@ -3,7 +3,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
-import { chatRunRegistry } from '@/modules/websocket/index.js';
+import { chatRunRegistry, forgetSeenClientMessages } from '@/modules/websocket/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import type {
   FetchHistoryOptions,
@@ -361,6 +361,10 @@ export const sessionsService = {
         statusCode: 404,
       });
     }
+
+    // The send-dedupe bucket is keyed by session id and would otherwise outlive
+    // the session for the life of the process (#389).
+    forgetSeenClientMessages(sessionId);
 
     return {
       sessionId,

@@ -111,7 +111,11 @@ const isProbeRejection = (data: ServerEvent | null, answersProbe: boolean): bool
   if (data?.kind !== 'protocol_error' || data?.code !== 'UNKNOWN_MESSAGE_TYPE') {
     return false;
   }
+  // Conclusive on its own: this server names types, and it named ours.
   if (data?.type === 'chat.ping') return true;
+  // No `type` at all means the server predates that field — the only server
+  // that needs this branch. A current server always sends the key (even when
+  // empty), so an absent one is unambiguous.
   return data?.type === undefined && answersProbe;
 };
 
@@ -140,6 +144,18 @@ const useWebSocketProviderState = (): WebSocketContextType => {
   const lastFrameAtRef = useRef(0);
   /** When the outstanding liveness probe was sent, or 0 when none is in flight. */
   const probeSentAtRef = useRef(0);
+  /**
+   * When a probe was last written, regardless of what has arrived since.
+   *
+   * Deliberately separate from `probeSentAtRef`, which any inbound frame clears
+   * because any frame proves the socket is alive. That is right for liveness and
+   * wrong for attribution: an unrelated push (a sidebar delta, a stream event on
+   * another subscribed run) landing between the probe and an OLD server's
+   * untyped rejection would clear the flag, and the rejection would then be
+   * dispatched into the chat as a fake error. This one answers a different
+   * question — "did we recently ask?" — so it survives that.
+   */
+  const lastProbeAtRef = useRef(0);
   const livenessTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** Abandons a handshake that never completes. Cleared the moment one does. */
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -233,6 +249,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     try {
       socket.send(JSON.stringify({ type: 'chat.ping' }));
       probeSentAtRef.current = Date.now();
+      lastProbeAtRef.current = probeSentAtRef.current;
     } catch {
       // A throwing send is unambiguous: the socket is gone.
       teardown(socket, 'probe could not be written');
@@ -304,20 +321,29 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       };
 
       websocket.onmessage = (event) => {
-        // Whether this frame could be the answer to a probe. Captured BEFORE the
-        // reset below, because the reset is what makes the probe no longer
-        // outstanding.
-        const answersProbe = probeSentAtRef.current !== 0;
+        const now = Date.now();
+        // Whether a probe went out recently enough that this frame could be its
+        // rejection. Based on when we last ASKED, not on whether a reply is
+        // still outstanding, so an unrelated frame arriving first cannot make an
+        // old server's rejection look unsolicited.
+        const answersProbe = lastProbeAtRef.current !== 0
+          && now - lastProbeAtRef.current <= PONG_TIMEOUT_MS;
         // Proof of life regardless of what the frame turns out to be — recorded
         // before parsing so even a malformed frame counts.
-        lastFrameAtRef.current = Date.now();
+        lastFrameAtRef.current = now;
         probeSentAtRef.current = 0;
         try {
           const data = JSON.parse(event.data) as ServerEvent;
           // The probe's own answer carries no application meaning; everything
           // needed from it (the timestamps above) is already recorded.
-          if (data?.kind === 'pong') return;
-          if (isProbeRejection(data, answersProbe)) return;
+          if (data?.kind === 'pong') {
+            lastProbeAtRef.current = 0; // answered; nothing left to attribute
+            return;
+          }
+          if (isProbeRejection(data, answersProbe)) {
+            lastProbeAtRef.current = 0;
+            return;
+          }
           dispatch(data);
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);

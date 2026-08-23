@@ -7,7 +7,8 @@ import test from 'node:test';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
-import { forgetSeenClientMessages, handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
+import { forgetSeenClientMessages } from '@/modules/websocket/services/chat-send-dedupe.service.js';
+import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
 import { connectedClients } from '@/modules/websocket/services/websocket-state.service.js';
 
 /**

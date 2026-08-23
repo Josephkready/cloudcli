@@ -5,6 +5,7 @@ import type { WebSocket } from 'ws';
 import { activeRunsDb, sessionsDb } from '@/modules/database/index.js';
 import { broadcastSessionUpserted } from '@/modules/providers/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
+import { hasSeenClientMessage, rememberClientMessage } from '@/modules/websocket/services/chat-send-dedupe.service.js';
 import { deriveOpeningName, needsOpeningName } from '@/modules/websocket/utils/sessionOpeningName.js';
 import type { ChatRun, QueuedChatMessage } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
@@ -134,7 +135,12 @@ function sendProtocolError(
     code,
     error,
     sessionId: sessionId ?? null,
-    ...(type ? { type } : {}),
+    // `!== undefined`, not truthiness: a malformed frame with no `type` field
+    // yields the empty string, and omitting the key for that case would make a
+    // CURRENT server's rejection wire-identical to an OLD server's rejection of
+    // `chat.ping`. A client would then be entitled to swallow a real error.
+    // Present-but-empty says "this server names types"; absent says "it cannot".
+    ...(type !== undefined ? { type } : {}),
     timestamp: new Date().toISOString(),
   });
 }
@@ -514,92 +520,6 @@ function sendChatSendAccepted(ws: WebSocket, sessionId: string, clientMessageId:
   });
 }
 
-/**
- * How long a `clientMessageId` is remembered for duplicate suppression.
- *
- * Comfortably longer than the client's own resend grace
- * (`DISPATCHED_RESEND_GRACE_MS`, 30s) plus a reconnect, because the whole point
- * is to still recognise the id when a retry finally arrives.
- */
-const SEEN_MESSAGE_TTL_MS = 10 * 60 * 1000;
-/** Bound per session so a long-lived chat cannot grow this without limit. */
-const SEEN_MESSAGE_MAX_PER_SESSION = 200;
-
-/**
- * Recently accepted `clientMessageId`s, per session.
- *
- * WHY THIS EXISTS. The ack alone makes a duplicate *unlikely*, not impossible:
- * it is just another outbound frame, and it can be lost exactly the way #389
- * loses sends. A socket whose uplink still works but whose downlink is dead
- * delivers the `chat.send`, starts or queues the run, and never gets the ack
- * back. The client then reconnects, finds no transcript echo (the message may
- * still be sitting in the FIFO behind a long turn), and resends — and without
- * this the server would happily run it a second time.
- *
- * Deduping on the id the client already sends closes that hole, and makes
- * `chat.send` idempotent per id rather than merely acknowledged.
- */
-const seenClientMessageIds = new Map<string, Map<string, number>>();
-
-/** Drops expired ids and enforces the per-session cap, oldest first. */
-function pruneSeenMessages(seen: Map<string, number>, now: number): void {
-  for (const [id, at] of seen) {
-    if (now - at > SEEN_MESSAGE_TTL_MS) {
-      seen.delete(id);
-    }
-  }
-  // Map preserves insertion order, and entries are inserted in arrival order,
-  // so the first keys are the oldest.
-  while (seen.size > SEEN_MESSAGE_MAX_PER_SESSION) {
-    const oldest = seen.keys().next();
-    if (oldest.done) break;
-    seen.delete(oldest.value);
-  }
-}
-
-/**
- * Whether this id has already been accepted for the session.
- *
- * An empty id (a client predating the ack) is never a duplicate — those clients
- * get exactly the old behaviour.
- */
-function hasSeenClientMessage(sessionId: string, clientMessageId: string): boolean {
-  if (!clientMessageId) return false;
-  const seen = seenClientMessageIds.get(sessionId);
-  if (!seen) return false;
-  pruneSeenMessages(seen, Date.now());
-  return seen.has(clientMessageId);
-}
-
-/**
- * Records an id as accepted.
- *
- * Deliberately called only once the server has actually taken ownership — after
- * `submitMessage` returns `queued` or `start`, never before. Recording earlier
- * would mean a send REJECTED for draining or a full queue still poisoned its
- * own id, so the client's perfectly legitimate retry would come back as a
- * duplicate, get a false ack, and drop the only copy of the message.
- */
-function rememberClientMessage(sessionId: string, clientMessageId: string): void {
-  if (!clientMessageId) return;
-  const now = Date.now();
-  let seen = seenClientMessageIds.get(sessionId);
-  if (!seen) {
-    seen = new Map<string, number>();
-    seenClientMessageIds.set(sessionId, seen);
-  }
-  seen.set(clientMessageId, now);
-  pruneSeenMessages(seen, now);
-}
-
-/** Forgets a session's accepted ids. Exported for tests and session teardown. */
-export function forgetSeenClientMessages(sessionId?: string): void {
-  if (sessionId === undefined) {
-    seenClientMessageIds.clear();
-    return;
-  }
-  seenClientMessageIds.delete(sessionId);
-}
 
 /**
  * Parses a persisted `options_json` blob back into a chat.send options object,

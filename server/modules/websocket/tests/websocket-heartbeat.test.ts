@@ -120,6 +120,54 @@ test('closing the socket stops the heartbeat', () => {
   assert.equal(ws.pings, 0, 'a closed socket must not still be pinged');
 });
 
+test('terminating is logged, and names the socket', () => {
+  const ws = new FakeSocket();
+  const { scheduler, beat } = makeScheduler();
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(' '));
+  };
+
+  try {
+    attachHeartbeat(ws, 30_000, scheduler as never, '/shell');
+    beat();
+    beat(); // terminates
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(ws.terminated, 1);
+  // Without this line a heartbeat kill is invisible: the shell and plugin
+  // paths log nothing at all on close, so an operator debugging "my socket
+  // keeps dropping" would have no trace of the cause.
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? '', /Heartbeat/);
+  assert.match(warnings[0] ?? '', /\/shell/);
+});
+
+test('a healthy socket logs nothing — pings are not log spam', () => {
+  const ws = new FakeSocket();
+  const { scheduler, beat } = makeScheduler();
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(' '));
+  };
+
+  try {
+    attachHeartbeat(ws, 30_000, scheduler as never, '/ws');
+    for (let i = 0; i < 10; i += 1) {
+      beat();
+      ws.emit('pong');
+    }
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warnings.length, 0, 'a ping every 30s per client must stay quiet');
+});
+
 test('a socket that is not OPEN is not pinged', () => {
   const ws = new FakeSocket();
   ws.readyState = 0; // CONNECTING
