@@ -65,6 +65,34 @@ test('a url already inside the text is not appended twice', () => {
   assert.equal(intent.sharedText, 'look at https://example.com ok');
 });
 
+test('a url at the very end of the text is recognised', () => {
+  const intent = parseLaunchParams(
+    '?share_text=see%20https%3A%2F%2Fexample.com&share_url=https%3A%2F%2Fexample.com',
+  );
+  assert.equal(intent.sharedText, 'see https://example.com');
+});
+
+// The shared URL is the one field the Share Target contract actually
+// guarantees, so a dedupe that is merely a substring test drops real data: the
+// shared link is a prefix of a DIFFERENT link that happens to appear in the
+// text.
+test('a url that is only a prefix of another link in the text is still appended', () => {
+  const intent = parseLaunchParams(
+    '?share_text=read%20https%3A%2F%2Fexample.com%2Ffoo2%20first&share_url=https%3A%2F%2Fexample.com%2Ffoo',
+  );
+  assert.equal(
+    intent.sharedText,
+    'read https://example.com/foo2 first\n\nhttps://example.com/foo',
+  );
+});
+
+test('a url followed by punctuation counts as present', () => {
+  const intent = parseLaunchParams(
+    '?share_text=see%20https%3A%2F%2Fexample.com%2Fa%2C%20then%20go&share_url=https%3A%2F%2Fexample.com%2Fa',
+  );
+  assert.equal(intent.sharedText, 'see https://example.com/a, then go');
+});
+
 test('blank and whitespace-only shares are nothing', () => {
   assert.equal(parseLaunchParams('?share_text=%20%20').sharedText, null);
   assert.equal(parseLaunchParams('?share_title=&share_text=&share_url=').sharedText, null);

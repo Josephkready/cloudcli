@@ -33,10 +33,22 @@ export function useLaunchIntent(startNewConversation: (() => void) | null): void
   const intentRef = useRef<LaunchIntent | null>(null);
   const startedRef = useRef(false);
 
+  // Read during the FIRST render and never again, which is the only point at
+  // which the URL is guaranteed to still carry the parameters.
+  //
+  // Parsing inside the effect instead looks equivalent and is not: React
+  // StrictMode double-invokes mount effects, and this effect strips the URL. The
+  // second invocation would therefore parse an already-stripped URL, overwrite
+  // the intent with an empty one, and the shortcut would silently do nothing —
+  // the app really does render inside StrictMode (src/main.jsx), so this is the
+  // dev-mode behaviour, not a hypothetical.
+  if (intentRef.current === null) {
+    intentRef.current = parseLaunchParams(window.location.search);
+  }
+
   useEffect(() => {
-    const intent = parseLaunchParams(window.location.search);
-    intentRef.current = intent;
-    if (!hasLaunchIntent(intent)) {
+    const intent = intentRef.current;
+    if (!intent || !hasLaunchIntent(intent)) {
       return;
     }
 

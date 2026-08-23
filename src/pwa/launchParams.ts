@@ -38,6 +38,30 @@ function readParam(params: URLSearchParams, name: string): string {
 }
 
 /**
+ * Whether `text` already contains `url` as a whole link rather than as a prefix
+ * of a longer one.
+ *
+ * A plain `text.includes(url)` is wrong in the one direction that loses data:
+ * sharing `https://example.com/foo` from a page whose text mentions
+ * `https://example.com/foo2` would see the shorter URL "already present" and
+ * drop it — and the URL is the one field the Share Target contract actually
+ * guarantees. So a match only counts when what follows is a boundary.
+ */
+function textContainsUrl(text: string, url: string): boolean {
+  for (let from = 0; ; from += 1) {
+    const at = text.indexOf(url, from);
+    if (at === -1) {
+      return false;
+    }
+    const next = text[at + url.length];
+    if (next === undefined || /[\s)>\]"',]/.test(next)) {
+      return true;
+    }
+    from = at;
+  }
+}
+
+/**
  * Assembles the shared fields into one block of composer text.
  *
  * The Web Share Target spec lets a sender populate any combination of `title`,
@@ -55,7 +79,7 @@ function composeSharedText(title: string, text: string, url: string): string | n
   if (text) {
     parts.push(text);
   }
-  if (url && !text.includes(url)) {
+  if (url && !textContainsUrl(text, url)) {
     parts.push(url);
   }
 
