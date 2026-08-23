@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThemeProvider, useTheme } from './ThemeContext';
 
@@ -45,6 +45,7 @@ describe('ThemeContext theme-color sync (#371)', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     cleanup();
     document.head.innerHTML = '';
     localStorage.clear();
@@ -68,5 +69,29 @@ describe('ThemeContext theme-color sync (#371)', () => {
     // Dark: both metas + the status bar follow.
     expect(themeColorContents()).toEqual(['#141414', '#141414']);
     expect(statusBarStyle()).toBe('black-translucent');
+  });
+
+  it('falls back to the system theme when storage access is blocked', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('Blocked', 'SecurityError');
+    });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Blocked', 'SecurityError');
+    });
+    vi.spyOn(window, 'matchMedia').mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList);
+
+    render(
+      <ThemeProvider>
+        <Consumer />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByRole('button')).toHaveTextContent('dark');
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByRole('button')).toHaveTextContent('light');
   });
 });

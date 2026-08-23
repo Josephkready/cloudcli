@@ -254,6 +254,7 @@ export const useFileTreeUpload = ({
   const [uploadProgress, setUploadProgress] = useState<FileTreeUploadProgressState | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);
   const clearProgressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const uploadInFlightRef = useRef(false);
 
   const clearProgressTimer = useCallback(() => {
     if (clearProgressTimerRef.current) {
@@ -297,6 +298,11 @@ export const useFileTreeUpload = ({
         return;
       }
 
+      if (uploadInFlightRef.current) {
+        setDropTarget(null);
+        return;
+      }
+
       recordFeatureUse('files.upload');
       const fileName = files.length === 1 ? getFileDisplayName(files[0]) : undefined;
 
@@ -315,6 +321,7 @@ export const useFileTreeUpload = ({
       }
 
       clearProgressTimer();
+      uploadInFlightRef.current = true;
       setOperationLoading(true);
       setUploadProgress({
         status: 'uploading',
@@ -363,6 +370,7 @@ export const useFileTreeUpload = ({
         showToast(message, 'error');
         setUploadError(message, files.length, targetPath, fileName, latestProgress);
       } finally {
+        uploadInFlightRef.current = false;
         setOperationLoading(false);
         setDropTarget(null);
       }
