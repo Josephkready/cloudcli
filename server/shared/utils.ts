@@ -322,6 +322,79 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
   }
 }
 
+export type ProjectPathValidationResult = {
+  valid: boolean;
+  resolved?: string;
+  error?: string;
+};
+
+/**
+ * Validate a project-relative filesystem target without allowing an existing
+ * symlink (including a broken one) or a symlinked parent to escape the project.
+ * Non-existent leaf paths are supported by resolving their deepest existing
+ * ancestor, which is required by create/upload endpoints.
+ */
+export async function validateProjectPath(
+  projectRoot: string,
+  targetPath: string,
+): Promise<ProjectPathValidationResult> {
+  const lexicalRoot = path.resolve(projectRoot);
+  const lexicalTarget = path.isAbsolute(targetPath)
+    ? path.resolve(targetPath)
+    : path.resolve(lexicalRoot, targetPath);
+  if (lexicalTarget !== lexicalRoot && !lexicalTarget.startsWith(`${lexicalRoot}${path.sep}`)) {
+    return { valid: false, error: 'Path must be under project root' };
+  }
+
+  try {
+    const realRoot = await realpath(lexicalRoot);
+    let probe = lexicalTarget;
+
+    while (true) {
+      try {
+        const realProbe = await realpath(probe);
+        if (realProbe !== realRoot && !realProbe.startsWith(`${realRoot}${path.sep}`)) {
+          return { valid: false, error: 'Symlink target must be under project root' };
+        }
+        return { valid: true, resolved: lexicalTarget };
+      } catch (error) {
+        const fileError = error as NodeJS.ErrnoException;
+        if (fileError.code !== 'ENOENT' && fileError.code !== 'ENOTDIR') {
+          throw fileError;
+        }
+
+        // realpath reports ENOENT for a broken symlink. lstat still sees the
+        // link itself, so reject it instead of treating it as a safe new leaf.
+        try {
+          const stats = await lstat(probe);
+          if (stats.isSymbolicLink()) {
+            return { valid: false, error: 'Symlink target must be under project root' };
+          }
+        } catch (lstatError) {
+          const lstatFileError = lstatError as NodeJS.ErrnoException;
+          if (lstatFileError.code !== 'ENOENT' && lstatFileError.code !== 'ENOTDIR') {
+            throw lstatFileError;
+          }
+        }
+
+        if (probe === lexicalRoot) {
+          throw fileError;
+        }
+        const parent = path.dirname(probe);
+        if (parent === probe || (parent !== lexicalRoot && !parent.startsWith(`${lexicalRoot}${path.sep}`))) {
+          return { valid: false, error: 'Path must be under project root' };
+        }
+        probe = parent;
+      }
+    }
+  } catch (error) {
+    return {
+      valid: false,
+      error: `Path validation failed: ${(error as Error).message}`,
+    };
+  }
+}
+
 // ---------------------------
 //----------------- NORMALIZED PROVIDER MESSAGE UTILITIES ------------
 /**

@@ -1,9 +1,23 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
+
 import jwt from 'jsonwebtoken';
 import { userDb, appConfigDb } from '../modules/database/index.js';
 import { IS_PLATFORM, AUTH_DISABLED } from '../constants/config.js';
 
 // Use env var if set, otherwise auto-generate a unique secret per installation
 const JWT_SECRET = process.env.JWT_SECRET || appConfigDb.getOrCreateJwtSecret();
+
+export function apiKeysMatch(providedKey, expectedKey) {
+  const provided = typeof providedKey === 'string' ? providedKey : '';
+  const expected = typeof expectedKey === 'string' ? expectedKey : '';
+  const providedDigest = createHash('sha256').update(provided, 'utf8').digest();
+  const expectedDigest = createHash('sha256').update(expected, 'utf8').digest();
+  const digestMatches = timingSafeEqual(providedDigest, expectedDigest);
+  return typeof providedKey === 'string'
+    && typeof expectedKey === 'string'
+    && expectedKey.length > 0
+    && digestMatches;
+}
 
 // Optional API key middleware
 const validateApiKey = (req, res, next) => {
@@ -13,7 +27,7 @@ const validateApiKey = (req, res, next) => {
   }
   
   const apiKey = req.headers['x-api-key'];
-  if (apiKey !== process.env.API_KEY) {
+  if (!apiKeysMatch(apiKey, process.env.API_KEY)) {
     return res.status(401).json({ error: 'Invalid API key' });
   }
   next();

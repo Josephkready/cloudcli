@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { apiKeysMatch } from './auth.js';
+
+test('apiKeysMatch accepts only the exact configured API key', () => {
+  assert.equal(apiKeysMatch('correct-key', 'correct-key'), true);
+  assert.equal(apiKeysMatch('correct-kex', 'correct-key'), false);
+  assert.equal(apiKeysMatch('correct-key-extra', 'correct-key'), false);
+  assert.equal(apiKeysMatch(undefined, 'correct-key'), false);
+  assert.equal(apiKeysMatch(['correct-key'], 'correct-key'), false);
+  assert.equal(apiKeysMatch('', ''), false);
+});

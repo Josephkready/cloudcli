@@ -10,7 +10,13 @@ import express from 'express';
 import cors from 'cors';
 import mime from 'mime-types';
 
-import { AppError, WORKSPACES_ROOT, isGitRepositoryRoot, validateWorkspacePath } from '@/shared/utils.js';
+import {
+    AppError,
+    WORKSPACES_ROOT,
+    isGitRepositoryRoot,
+    validateProjectPath,
+    validateWorkspacePath,
+} from '@/shared/utils.js';
 import { shouldExcludeFileTreeEntry } from '@/shared/file-tree-excludes.js';
 import {
     annotateRepositoryFlags,
@@ -499,14 +505,11 @@ app.get('/api/projects/:projectId/file', authenticateToken, async (req, res) => 
             return res.status(404).json({ error: 'Project not found' });
         }
 
-        // Handle both absolute and relative paths
-        const resolved = path.isAbsolute(filePath)
-            ? path.resolve(filePath)
-            : path.resolve(projectRoot, filePath);
-        const normalizedRoot = path.resolve(projectRoot) + path.sep;
-        if (!resolved.startsWith(normalizedRoot)) {
-            return res.status(403).json({ error: 'Path must be under project root' });
+        const validation = await validateProjectPath(projectRoot, filePath);
+        if (!validation.valid) {
+            return res.status(403).json({ error: validation.error });
         }
+        const resolved = validation.resolved;
 
         const content = await fsPromises.readFile(resolved, 'utf8');
         res.json({ content, path: resolved });
@@ -540,15 +543,11 @@ app.get('/api/projects/:projectId/files/content', authenticateToken, async (req,
             return res.status(404).json({ error: 'Project not found' });
         }
 
-        // Match the text reader endpoint so callers can pass either project-relative
-        // or absolute paths without changing how the bytes are served.
-        const resolved = path.isAbsolute(filePath)
-            ? path.resolve(filePath)
-            : path.resolve(projectRoot, filePath);
-        const normalizedRoot = path.resolve(projectRoot) + path.sep;
-        if (!resolved.startsWith(normalizedRoot)) {
-            return res.status(403).json({ error: 'Path must be under project root' });
+        const validation = await validateProjectPath(projectRoot, filePath);
+        if (!validation.valid) {
+            return res.status(403).json({ error: validation.error });
         }
+        const resolved = validation.resolved;
 
         // Check if file exists
         try {
@@ -602,14 +601,11 @@ app.put('/api/projects/:projectId/file', authenticateToken, async (req, res) => 
             return res.status(404).json({ error: 'Project not found' });
         }
 
-        // Handle both absolute and relative paths
-        const resolved = path.isAbsolute(filePath)
-            ? path.resolve(filePath)
-            : path.resolve(projectRoot, filePath);
-        const normalizedRoot = path.resolve(projectRoot) + path.sep;
-        if (!resolved.startsWith(normalizedRoot)) {
-            return res.status(403).json({ error: 'Path must be under project root' });
+        const validation = await validateProjectPath(projectRoot, filePath);
+        if (!validation.valid) {
+            return res.status(403).json({ error: validation.error });
         }
+        const resolved = validation.resolved;
 
         // Write the new content
         await fsPromises.writeFile(resolved, content, 'utf8');
@@ -661,23 +657,6 @@ app.get('/api/projects/:projectId/files', authenticateToken, async (req, res) =>
 // ============================================================================
 // FILE OPERATIONS API ENDPOINTS
 // ============================================================================
-
-/**
- * Validate that a path is within the project root
- * @param {string} projectRoot - The project root path
- * @param {string} targetPath - The path to validate
- * @returns {{ valid: boolean, resolved?: string, error?: string }}
- */
-function validatePathInProject(projectRoot, targetPath) {
-    const resolved = path.isAbsolute(targetPath)
-        ? path.resolve(targetPath)
-        : path.resolve(projectRoot, targetPath);
-    const normalizedRoot = path.resolve(projectRoot) + path.sep;
-    if (!resolved.startsWith(normalizedRoot)) {
-        return { valid: false, error: 'Path must be under project root' };
-    }
-    return { valid: true, resolved };
-}
 
 /**
  * Validate filename - check for invalid characters
@@ -734,7 +713,7 @@ app.post('/api/projects/:projectId/files/create', authenticateToken, async (req,
         // Build and validate target path
         const targetDir = parentPath || '';
         const targetPath = targetDir ? path.join(targetDir, name) : name;
-        const validation = validatePathInProject(projectRoot, targetPath);
+        const validation = await validateProjectPath(projectRoot, targetPath);
         if (!validation.valid) {
             return res.status(403).json({ error: validation.error });
         }
@@ -805,7 +784,7 @@ app.put('/api/projects/:projectId/files/rename', authenticateToken, async (req, 
         }
 
         // Validate old path
-        const oldValidation = validatePathInProject(projectRoot, oldPath);
+        const oldValidation = await validateProjectPath(projectRoot, oldPath);
         if (!oldValidation.valid) {
             return res.status(403).json({ error: oldValidation.error });
         }
@@ -822,7 +801,7 @@ app.put('/api/projects/:projectId/files/rename', authenticateToken, async (req, 
         // Build and validate new path
         const parentDir = path.dirname(resolvedOldPath);
         const resolvedNewPath = path.join(parentDir, newName);
-        const newValidation = validatePathInProject(projectRoot, resolvedNewPath);
+        const newValidation = await validateProjectPath(projectRoot, resolvedNewPath);
         if (!newValidation.valid) {
             return res.status(403).json({ error: newValidation.error });
         }
@@ -877,7 +856,7 @@ app.delete('/api/projects/:projectId/files', authenticateToken, async (req, res)
         }
 
         // Validate path
-        const validation = validatePathInProject(projectRoot, targetPath);
+        const validation = await validateProjectPath(projectRoot, targetPath);
         if (!validation.valid) {
             return res.status(403).json({ error: validation.error });
         }
@@ -927,27 +906,33 @@ app.delete('/api/projects/:projectId/files', authenticateToken, async (req, res)
 // POST /api/projects/:projectId/files/upload - Upload files
 // Dynamic import of multer for file uploads
 const uploadFilesHandler = async (req, res) => {
-    // Dynamic import of multer
-    const multer = (await import('multer')).default;
+    let uploadMiddleware;
+    try {
+        // Dynamic import of multer
+        const multer = (await import('multer')).default;
 
-    const uploadMiddleware = multer({
-        storage: multer.diskStorage({
-            destination: (req, file, cb) => {
-                cb(null, os.tmpdir());
-            },
-            filename: (req, file, cb) => {
-                // Use a unique temp name, but preserve original name in file.originalname
-                // Note: file.originalname may contain path separators for folder uploads
-                const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-                // For temp file, just use a safe unique name without the path
-                cb(null, `upload-${uniqueSuffix}`);
+        uploadMiddleware = multer({
+            storage: multer.diskStorage({
+                destination: (req, file, cb) => {
+                    cb(null, os.tmpdir());
+                },
+                filename: (req, file, cb) => {
+                    // Use a unique temp name, but preserve original name in file.originalname
+                    // Note: file.originalname may contain path separators for folder uploads
+                    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+                    // For temp file, just use a safe unique name without the path
+                    cb(null, `upload-${uniqueSuffix}`);
+                }
+            }),
+            limits: {
+                fileSize: MAX_FILE_UPLOAD_SIZE_BYTES,
+                files: MAX_FILE_UPLOAD_COUNT
             }
-        }),
-        limits: {
-            fileSize: MAX_FILE_UPLOAD_SIZE_BYTES,
-            files: MAX_FILE_UPLOAD_COUNT
-        }
-    });
+        });
+    } catch (error) {
+        console.error('Failed to initialize file upload:', error);
+        return res.status(500).json({ error: 'Failed to initialize file upload' });
+    }
 
     // Use multer middleware
     uploadMiddleware.array('files', MAX_FILE_UPLOAD_COUNT)(req, res, async (err) => {
@@ -1013,7 +998,7 @@ const uploadFilesHandler = async (req, res) => {
                 resolvedTargetDir = path.resolve(projectRoot);
                 console.log('[DEBUG] Using project root as target:', resolvedTargetDir);
             } else {
-                const validation = validatePathInProject(projectRoot, targetDir);
+                const validation = await validateProjectPath(projectRoot, targetDir);
                 if (!validation.valid) {
                     console.log('[DEBUG] Path validation failed:', validation.error);
                     return res.status(403).json({ error: validation.error });
@@ -1040,7 +1025,7 @@ const uploadFilesHandler = async (req, res) => {
                 const destPath = path.join(resolvedTargetDir, fileName);
 
                 // Validate destination path
-                const destValidation = validatePathInProject(projectRoot, destPath);
+                const destValidation = await validateProjectPath(projectRoot, destPath);
                 if (!destValidation.valid) {
                     console.log('[DEBUG] Destination validation failed for:', destPath);
                     // Clean up temp file

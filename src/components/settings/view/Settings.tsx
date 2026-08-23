@@ -53,6 +53,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
     permission: pushPermission,
     isSubscribed: isPushSubscribed,
     isLoading: isPushLoading,
+    error: pushError,
     subscribe: pushSubscribe,
     unsubscribe: pushUnsubscribe,
   } = useWebPush();
@@ -61,7 +62,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
 
   const handleEnablePush = async () => {
     recordFeatureUse('notifications.push');
-    await pushSubscribe();
+    const subscribed = await pushSubscribe();
+    if (!subscribed) return;
     // Server sets webPush: true in preferences on subscribe; sync local state
     setNotificationPreferences({
       ...notificationPreferences,
@@ -170,6 +172,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
                   pushPermission={pushPermission}
                   isPushSubscribed={isPushSubscribed}
                   isPushLoading={isPushLoading}
+                  pushError={pushError}
                   onEnablePush={handleEnablePush}
                   onDisablePush={handleDisablePush}
                 />
