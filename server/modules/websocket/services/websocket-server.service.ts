@@ -16,6 +16,78 @@ type WebSocketServerDependencies = {
 };
 
 /**
+ * Keep WebSocket alive across reverse-proxy idle timeouts (Cloudflare ~100s,
+ * AWS ALB 60s, nginx 60s, etc.). Without app-level pings these connections are
+ * silently torn down even when the UI is active, causing repeated reconnect
+ * cycles. ws library heartbeat is opt-in.
+ */
+export const HEARTBEAT_INTERVAL_MS = 30_000;
+
+/** The subset of a `ws` socket the heartbeat drives. */
+type HeartbeatSocket = {
+  readyState: number;
+  OPEN: number;
+  on: (event: string, listener: () => void) => unknown;
+  ping: () => void;
+  terminate: () => void;
+};
+
+/**
+ * Pings a socket on an interval and terminates it when a ping goes unanswered.
+ *
+ * The pong half is what makes this a heartbeat rather than a keepalive (#389).
+ * Pinging alone proves nothing: a client whose connection has black-holed — a
+ * laptop that slept, a network handover — never sends a FIN, so without a reply
+ * deadline the server pings into the void forever and keeps a dead socket in
+ * `connectedClients`, still holding the writer for any run fanning out to it.
+ * Browsers answer protocol pings automatically, so this direction needs no
+ * client cooperation.
+ *
+ * Exported (and parameterised on the timer) so the terminate-on-silence rule is
+ * unit-testable without standing up a real server and a real socket.
+ */
+export function attachHeartbeat(
+  ws: HeartbeatSocket,
+  intervalMs: number = HEARTBEAT_INTERVAL_MS,
+  scheduler: {
+    setInterval: (handler: () => void, ms: number) => unknown;
+    clearInterval: (handle: never) => void;
+  } = globalThis as never,
+): () => void {
+  let awaitingPong = false;
+  ws.on('pong', () => {
+    awaitingPong = false;
+  });
+
+  const heartbeat = scheduler.setInterval(() => {
+    if (awaitingPong) {
+      // A full interval elapsed with no pong: the peer is gone. `terminate()`
+      // rather than `close()` because a closing handshake needs a live
+      // connection — `close()` on a black-holed socket waits for a reply that
+      // cannot come, which is the very stall this exists to end. Terminating
+      // fires the 'close' handlers that stop this timer and unsubscribe the
+      // socket from every run.
+      ws.terminate();
+      return;
+    }
+    if (ws.readyState === ws.OPEN) {
+      try {
+        awaitingPong = true;
+        ws.ping();
+      } catch {
+        // Socket closed concurrently — the stop below clears the timer.
+        awaitingPong = false;
+      }
+    }
+  }, intervalMs);
+
+  const stopHeartbeat = () => scheduler.clearInterval(heartbeat as never);
+  ws.on('close', stopHeartbeat);
+  ws.on('error', stopHeartbeat);
+  return stopHeartbeat;
+}
+
+/**
  * Creates and wires the server-wide websocket gateway used for chat, shell, and
  * plugin proxy routes.
  */
@@ -31,23 +103,7 @@ export function createWebSocketServer(
   });
 
   wss.on('connection', (ws, request) => {
-    // Keep WebSocket alive across reverse-proxy idle timeouts (Cloudflare ~100s,
-    // AWS ALB 60s, nginx 60s, etc.). Without app-level pings these connections
-    // are silently torn down even when the UI is active, causing repeated
-    // reconnect cycles. ws library heartbeat is opt-in.
-    const HEARTBEAT_INTERVAL_MS = 30_000;
-    const heartbeat = setInterval(() => {
-      if (ws.readyState === ws.OPEN) {
-        try {
-          ws.ping();
-        } catch {
-          // socket may have been closed concurrently — interval will be cleared below
-        }
-      }
-    }, HEARTBEAT_INTERVAL_MS);
-    const stopHeartbeat = () => clearInterval(heartbeat);
-    ws.on('close', stopHeartbeat);
-    ws.on('error', stopHeartbeat);
+    attachHeartbeat(ws as unknown as HeartbeatSocket);
 
     const incomingRequest = request as AuthenticatedWebSocketRequest;
     const url = incomingRequest.url ?? '/';
