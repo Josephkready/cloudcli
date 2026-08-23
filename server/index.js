@@ -997,21 +997,40 @@ const uploadFilesHandler = async (req, res) => {
                 await fsPromises.mkdir(resolvedTargetDir, { recursive: true });
             }
 
-            // Move uploaded files from temp to target directory
-            const uploadedFiles = [];
+            // Validate every destination before moving any files so a rejected
+            // path cannot produce an apparently successful partial upload.
+            const uploadPlans = [];
+            const rejectedFiles = [];
             for (let i = 0; i < req.files.length; i++) {
                 const file = req.files[i];
                 // Use relative path if provided (for folder uploads), otherwise use originalname
                 const fileName = (filePaths && filePaths[i]) ? filePaths[i] : file.originalname;
                 const destPath = path.join(resolvedTargetDir, fileName);
-
-                // Validate destination path
                 const destValidation = await validateProjectPath(projectRoot, destPath);
                 if (!destValidation.valid) {
-                    // Clean up temp file
-                    await fsPromises.unlink(file.path).catch(() => {});
+                    rejectedFiles.push(fileName);
                     continue;
                 }
+                uploadPlans.push({ file, fileName, destPath: destValidation.resolved });
+            }
+
+            if (rejectedFiles.length > 0) {
+                console.warn('Rejected file upload paths outside project root', {
+                    projectId,
+                    rejectedFileCount: rejectedFiles.length
+                });
+                for (const file of req.files) {
+                    await fsPromises.unlink(file.path).catch(() => {});
+                }
+                return res.status(403).json({
+                    error: 'One or more upload paths must be under project root',
+                    rejectedFiles
+                });
+            }
+
+            // Move uploaded files from temp to target directory
+            const uploadedFiles = [];
+            for (const { file, fileName, destPath } of uploadPlans) {
 
                 // Ensure parent directory exists (for nested files from folder upload)
                 const parentDir = path.dirname(destPath);
