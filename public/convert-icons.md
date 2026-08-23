@@ -50,3 +50,46 @@ They are kept only as a design artifact. Running `generate-icons.js` rewrites
 those SVGs and changes nothing the app loads. Converting them to PNG would
 **replace the app's icon with a different design**, which is a visual change that
 wants a human decision, not a build step.
+
+## Launch images (iOS)
+
+`public/icons/launch/` holds the `apple-touch-startup-image` set declared in
+`index.html` (issue #373). iOS has no manifest-driven splash: without an image
+matching the device's exact geometry AND orientation, an installed home-screen
+app shows a blank white screen for the whole cold start. A near-miss does not
+apply — it falls back to the blank screen — which is why there are thirty of
+them.
+
+They are **generated**, from the same `icon-512x512.png` that backs the app
+icons:
+
+```bash
+python3 scripts/generate-launch-images.py
+```
+
+It rewrites the directory and prints the `<link>` tags to paste into
+`index.html`. Re-run it after changing the source artwork; the mark is keyed out
+of the icon rather than redrawn, so there is no second copy of the design to keep
+in sync.
+
+The background is the manifest's `background_color`, not a light/dark pair.
+`prefers-color-scheme` does work in these media queries, but honouring it doubles
+both the files and the `<link>` tags in `<head>` — and this app self-hosts its
+fonts specifically to keep first paint off the network, so unconditional head
+markup is not free. `pwaAssets.test.ts` asserts the generator's `BACKGROUND` and
+the manifest's `background_color` have not drifted apart.
+
+## Install screenshots
+
+`public/icons/screenshots/` backs the manifest's `screenshots`, which is what
+makes Chrome show its richer install dialog instead of the minimal one. They are
+real pictures of the running app, captured by an opt-in e2e spec:
+
+```bash
+CAPTURE_PWA_SCREENSHOTS=1 npx playwright test e2e/pwa-screenshots.spec.ts --project=chromium
+```
+
+That boots a real server with a seeded project and the deterministic mock
+provider, so the conversation in the shot is reproducible. The spec is skipped
+without the env var, because it writes binaries into `public/`. Re-capture when
+the chat surface changes enough that the install dialog would be showing a lie.

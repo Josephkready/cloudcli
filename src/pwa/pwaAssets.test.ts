@@ -21,6 +21,16 @@ const PUBLIC_DIR = path.join(REPO_ROOT, 'public');
 const INDEX_HTML = readFileSync(path.join(REPO_ROOT, 'index.html'), 'utf8');
 const SW_JS = readFileSync(path.join(PUBLIC_DIR, 'sw.js'), 'utf8');
 const MANIFEST = JSON.parse(readFileSync(path.join(PUBLIC_DIR, 'manifest.json'), 'utf8')) as {
+    id?: string;
+    start_url?: string;
+    orientation?: string;
+    background_color?: string;
+    display?: string;
+    display_override?: string[];
+    launch_handler?: { client_mode?: string };
+    shortcuts?: { name: string; url: string; icons?: { src: string; sizes: string }[] }[];
+    share_target?: { action: string; method: string; params: Record<string, string> };
+    screenshots?: { src: string; sizes: string; type: string; form_factor?: string; label?: string }[];
     icons: { src: string; sizes: string; type: string; purpose?: string }[];
 };
 
@@ -265,5 +275,226 @@ test('the service worker is registered from exactly one place', () => {
         registering.sort(),
         ['src/main.jsx'],
         'service worker registration must live in src/main.jsx and nowhere else (#372)',
+    );
+});
+
+/* ------------------------------------------------------------------ */
+/*  Install quality: shortcuts, share target, screenshots (issue #370) */
+/* ------------------------------------------------------------------ */
+
+test('the manifest declares an explicit id', () => {
+    // Without `id`, app identity is derived from `start_url` — so changing
+    // `start_url` later installs a SECOND app beside the first rather than
+    // updating it, and every installed copy is orphaned. It is one line now and
+    // unfixable afterwards.
+    assert.ok(MANIFEST.id, 'manifest has no "id"');
+});
+
+test('the installed app is not locked to one orientation', () => {
+    // A locked orientation cannot be overridden by the user, and this app's main
+    // surfaces are a terminal, a file tree, a diff and an editor — all of which
+    // are legitimately useful in landscape on a phone and on any tablet.
+    assert.notEqual(
+        MANIFEST.orientation,
+        'portrait-primary',
+        'orientation is hard-locked to portrait; use "any" and let the device rotation lock decide',
+    );
+});
+
+test('shortcuts point at real in-app routes and reuse a real icon', () => {
+    const shortcuts = MANIFEST.shortcuts ?? [];
+    assert.ok(shortcuts.length > 0, 'manifest declares no shortcuts');
+
+    for (const shortcut of shortcuts) {
+        assert.ok(shortcut.name, 'a shortcut has no name');
+        assert.ok(shortcut.url.startsWith('/'), `shortcut url must be root-relative: ${shortcut.url}`);
+
+        for (const icon of shortcut.icons ?? []) {
+            const file = publicPathFor(icon.src);
+            assert.ok(existsSync(file), `shortcut icon ${icon.src} does not exist under public/`);
+            const { width, height } = pngSize(file);
+            assert.equal(
+                icon.sizes,
+                `${width}x${height}`,
+                `shortcut icon declares ${icon.sizes} but ${icon.src} is ${width}x${height}`,
+            );
+        }
+    }
+});
+
+test('the New conversation shortcut asks for a new conversation', () => {
+    // The URL is the whole contract: nothing calls into the app, so a shortcut
+    // pointing at a bare "/" would just reopen wherever the user already was.
+    // `src/pwa/launchParams.ts` parses this parameter and `useLaunchIntent` acts
+    // on it — if the parameter name drifts, the shortcut silently does nothing.
+    const shortcut = (MANIFEST.shortcuts ?? []).find((entry) => /new/i.test(entry.name));
+    assert.ok(shortcut, 'no shortcut named for starting a new conversation');
+    assert.match(
+        shortcut.url,
+        /[?&]new=1(&|$)/,
+        `the new-conversation shortcut must carry ?new=1, got ${shortcut.url}`,
+    );
+});
+
+test('the share target routes into the app with the parameters it parses', () => {
+    const share = MANIFEST.share_target;
+    assert.ok(share, 'manifest declares no share_target');
+
+    // GET, because the app is a static SPA behind the API server: a POST share
+    // target would need a service-worker fetch handler to catch it, and the
+    // service worker here is deliberately network-first with no POST handling.
+    assert.equal(share.method.toUpperCase(), 'GET');
+    assert.ok(share.action.startsWith('/'), `share_target action must be root-relative: ${share.action}`);
+
+    // These names are the contract with `parseLaunchParams`.
+    assert.deepEqual(share.params, {
+        title: 'share_title',
+        text: 'share_text',
+        url: 'share_url',
+    });
+});
+
+test('every declared screenshot exists at the size it claims', () => {
+    const screenshots = MANIFEST.screenshots ?? [];
+    assert.ok(screenshots.length > 0, 'manifest declares no screenshots');
+
+    for (const shot of screenshots) {
+        const file = publicPathFor(shot.src);
+        assert.ok(existsSync(file), `screenshot ${shot.src} does not exist under public/`);
+
+        const { width, height } = pngSize(file);
+        assert.equal(
+            shot.sizes,
+            `${width}x${height}`,
+            `screenshot declares ${shot.sizes} but ${shot.src} is ${width}x${height} — Chrome drops the richer install dialog on a mismatch`,
+        );
+    }
+});
+
+test('screenshots cover both form factors, which is what unlocks the rich install UI', () => {
+    // Chrome only shows the richer install dialog when it has a screenshot for
+    // the form factor it is installing on. One of each is the minimum that
+    // actually buys anything.
+    const factors = new Set((MANIFEST.screenshots ?? []).map((shot) => shot.form_factor));
+    for (const required of ['wide', 'narrow']) {
+        assert.ok(factors.has(required), `no screenshot declares form_factor "${required}"`);
+    }
+});
+
+/* ------------------------------------------------------------------ */
+/*  iOS launch images (issue #373)                                     */
+/* ------------------------------------------------------------------ */
+
+/** `<link rel="apple-touch-startup-image">` tags with their media query. */
+function launchImages(): { raw: string; href: string; media: string }[] {
+    return [...stripHtmlComments(INDEX_HTML).matchAll(/<link\b[^>]*>/g)]
+        .map((match) => match[0])
+        .filter((raw) => /rel=["']apple-touch-startup-image["']/.test(raw))
+        .map((raw) => {
+            const href = /href=["']([^"']+)["']/.exec(raw)?.[1];
+            const media = /media=["']([^"']+)["']/.exec(raw)?.[1];
+            assert.ok(href, `apple-touch-startup-image has no href: ${raw}`);
+            assert.ok(media, `apple-touch-startup-image has no media query: ${raw}`);
+            return { raw, href, media };
+        });
+}
+
+test('iOS launch images are declared at all', () => {
+    // Without these an installed iOS app shows a blank white screen for the
+    // whole cold start — iOS has no manifest-driven splash to fall back on.
+    assert.ok(launchImages().length > 0, 'index.html declares no apple-touch-startup-image');
+});
+
+test('every launch image exists and is exactly the resolution its media query implies', () => {
+    for (const image of launchImages()) {
+        const file = publicPathFor(image.href);
+        assert.ok(existsSync(file), `launch image ${image.href} does not exist under public/`);
+
+        const width = Number(/\(device-width:\s*(\d+)px\)/.exec(image.media)?.[1]);
+        const height = Number(/\(device-height:\s*(\d+)px\)/.exec(image.media)?.[1]);
+        const ratio = Number(/\(-webkit-device-pixel-ratio:\s*(\d+)\)/.exec(image.media)?.[1]);
+        const isLandscape = /orientation:\s*landscape/.test(image.media);
+        assert.ok(
+            Number.isFinite(width) && Number.isFinite(height) && Number.isFinite(ratio),
+            `launch image media query is missing device metrics: ${image.raw}`,
+        );
+
+        // The media query always describes the device in portrait; only the
+        // image is rotated. Getting that backwards is the usual way these
+        // silently never apply, and iOS gives no diagnostic — it just shows the
+        // blank screen this exists to remove.
+        const expected = isLandscape
+            ? { width: height * ratio, height: width * ratio }
+            : { width: width * ratio, height: height * ratio };
+
+        const actual = pngSize(file);
+        assert.deepEqual(
+            actual,
+            expected,
+            `${image.href} is ${actual.width}x${actual.height} but its media query implies ${expected.width}x${expected.height}`,
+        );
+    }
+});
+
+test('each launch image declares both orientations for its device', () => {
+    // A device with only a portrait image shows the blank screen when launched
+    // in landscape, which is exactly the bug being fixed — half-fixed.
+    const byDevice = new Map<string, Set<string>>();
+    for (const image of launchImages()) {
+        const device = /\(device-width:\s*(\d+)px\)\s*and\s*\(device-height:\s*(\d+)px\)\s*and\s*\(-webkit-device-pixel-ratio:\s*(\d+)\)/.exec(image.media);
+        assert.ok(device, `unparseable launch media query: ${image.media}`);
+        const key = `${device[1]}x${device[2]}@${device[3]}`;
+        const orientation = /orientation:\s*(portrait|landscape)/.exec(image.media)?.[1];
+        assert.ok(orientation, `launch image declares no orientation: ${image.raw}`);
+        byDevice.set(key, (byDevice.get(key) ?? new Set()).add(orientation));
+    }
+
+    for (const [device, orientations] of byDevice) {
+        assert.deepEqual(
+            [...orientations].sort(),
+            ['landscape', 'portrait'],
+            `device ${device} is missing a launch image for one orientation`,
+        );
+    }
+});
+
+test('no two launch images are byte-identical for different resolutions', () => {
+    // The #369 failure mode, one directory over: a set of files that look like a
+    // complete matrix but are one image copied under many names.
+    const images = launchImages();
+    const bySize = new Map<string, string>();
+    for (const image of images) {
+        const { width, height } = pngSize(publicPathFor(image.href));
+        const key = `${width}x${height}`;
+        const existing = bySize.get(key);
+        if (existing) {
+            assert.equal(existing, image.href, `two different files both claim ${key}`);
+            continue;
+        }
+        bySize.set(key, image.href);
+    }
+    assert.ok(bySize.size > 1, 'every launch image is the same resolution');
+});
+
+test('the launch images use the background colour the manifest promises', () => {
+    // iOS shows the launch image; Android composites `background_color`. If they
+    // disagree the same app flashes two different colours on two platforms, and
+    // the whole point of the launch image is that the start looks deliberate.
+    assert.ok(MANIFEST.background_color, 'manifest declares no background_color');
+
+    const generator = readFileSync(
+        path.join(REPO_ROOT, 'scripts', 'generate-launch-images.py'),
+        'utf8',
+    );
+    const declared = /BACKGROUND\s*=\s*\((\d+),\s*(\d+),\s*(\d+)\)/.exec(generator);
+    assert.ok(declared, 'could not read BACKGROUND out of the launch-image generator');
+
+    const hex = `#${[declared[1], declared[2], declared[3]]
+        .map((channel) => Number(channel).toString(16).padStart(2, '0'))
+        .join('')}`;
+    assert.equal(
+        hex,
+        MANIFEST.background_color!.toLowerCase(),
+        'the generator background and the manifest background_color have drifted',
     );
 });

@@ -16,6 +16,7 @@ import { useQueuedMessageAutoSend } from '../../hooks/useQueuedMessageAutoSend';
 import { useRunningSessionsPoll } from '../../hooks/useRunningSessionsPoll';
 import { useArchiveSession } from '../../hooks/useArchiveSession';
 import { api } from '../../utils/api';
+import { useLaunchIntent } from '../../pwa/useLaunchIntent';
 
 import { installKeyboardViewportSync, keyboardAwareBottomStyle } from './keyboardViewport';
 
@@ -69,6 +70,13 @@ function AppContentInner() {
     isMobile,
     activeSessions: processingSessions,
   });
+
+  // Home-screen shortcut ("New conversation") and shared text arriving from
+  // another app both come in as launch parameters (#370). `null` until a project
+  // is available, so a cold launch holds the shortcut rather than dropping it.
+  useLaunchIntent(
+    selectedProject ? () => handleNewSession(selectedProject) : null,
+  );
 
   // Soft-archive from the chat view's header. Reuses the same handler the
   // sidebar rows use; `onSessionDelete` drops the session from the tree and

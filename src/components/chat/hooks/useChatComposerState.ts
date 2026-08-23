@@ -12,6 +12,7 @@ import type {
 
 import { authenticatedFetch } from '../../../utils/api';
 import { recordFeatureUse } from '../../../utils/featureUsage';
+import { SHARED_TEXT_KEY } from '../../../pwa/launchParams';
 import type { MarkSessionProcessing } from '../../../hooks/useSessionProtection';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
 import {
@@ -1094,8 +1095,21 @@ export function useChatComposerState({
       return;
     }
     const savedInput = safeLocalStorage.getItem(`draft_input_${selectedProjectId}`) || '';
+    // Text shared into the app from elsewhere lands here, the first moment there
+    // is a project to attach it to (#370). It is claimed exactly once — read and
+    // cleared together — so switching projects afterwards does not paste it a
+    // second time. It appends rather than replaces so it can never eat a draft
+    // the user had already typed.
+    const shared = safeLocalStorage.getItem(SHARED_TEXT_KEY) || '';
+    if (shared) {
+      safeLocalStorage.removeItem(SHARED_TEXT_KEY);
+    }
+    const seeded = shared
+      ? [savedInput.trim(), shared].filter(Boolean).join('\n\n')
+      : savedInput;
+
     setInput((previous) => {
-      const next = previous === savedInput ? previous : savedInput;
+      const next = previous === seeded ? previous : seeded;
       inputValueRef.current = next;
       return next;
     });
