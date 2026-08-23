@@ -182,6 +182,48 @@ describe('useProjectsState — projects_snapshot_stale', () => {
     expect(result.current.selectedSession?.id).toBe('optimistic');
   });
 
+  it('does not apply a refresh after the selection moves away and back', async () => {
+    respondWith(['s1']);
+    const { result } = mountHook();
+    await waitFor(() => expect(result.current.isLoadingProjects).toBe(false));
+
+    act(() => {
+      result.current.handleProjectSelect(result.current.projects[0]);
+    });
+
+    let resolveRefresh: (value: unknown) => void = () => {};
+    projectsFetch.mockReturnValueOnce(new Promise((resolve) => {
+      resolveRefresh = resolve;
+    }));
+
+    let refreshPromise: Promise<void> = Promise.resolve();
+    await act(async () => {
+      refreshPromise = result.current.handleSidebarRefresh();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      result.current.handleProjectSelect({
+        ...result.current.projects[0],
+        projectId: 'p2',
+        displayName: 'P2',
+      });
+    });
+    act(() => {
+      result.current.handleProjectSelect({
+        ...result.current.projects[0],
+        displayName: 'P1 selected again',
+      });
+    });
+
+    await act(async () => {
+      resolveRefresh({ ok: true, json: async () => projectPayload(['s1']) });
+      await refreshPromise;
+    });
+
+    expect(result.current.selectedProject?.displayName).toBe('P1 selected again');
+  });
+
   it('drops a session deleted by another client when manually refreshed', async () => {
     respondWith(['s1', 'deleted', 's3']);
     const { result } = mountHook();

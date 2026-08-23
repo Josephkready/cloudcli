@@ -198,6 +198,22 @@ export function useProjectsState({
   projectsRef.current = projects;
   const selectedProjectRef = useRef(selectedProject);
   selectedProjectRef.current = selectedProject;
+  const selectionGenerationRef = useRef(0);
+  const selectionIdentityRef = useRef({
+    projectId: selectedProject?.projectId ?? null,
+    sessionId: selectedSession?.id ?? null,
+  });
+  const selectionIdentity = selectionIdentityRef.current;
+  if (
+    selectionIdentity.projectId !== (selectedProject?.projectId ?? null)
+    || selectionIdentity.sessionId !== (selectedSession?.id ?? null)
+  ) {
+    selectionGenerationRef.current += 1;
+    selectionIdentityRef.current = {
+      projectId: selectedProject?.projectId ?? null,
+      sessionId: selectedSession?.id ?? null,
+    };
+  }
   const activeSessionsRef = useRef(activeSessions);
   activeSessionsRef.current = activeSessions;
 
@@ -716,6 +732,7 @@ export function useProjectsState({
     const requestProjects = projectsRef.current;
     const requestedProjectId = selectedProjectRef.current?.projectId ?? null;
     const requestedSessionId = selectedSessionRef.current?.id ?? null;
+    const requestedSelectionGeneration = selectionGenerationRef.current;
     try {
       const freshProjects = await fetchProjectsSnapshot(requestProjects);
       const mergedProjects = mergeExpandedSessionPages(projectsRef.current, freshProjects, requestProjects);
@@ -726,7 +743,11 @@ export function useProjectsState({
       });
 
       const currentSelectedProject = selectedProjectRef.current;
-      if (!currentSelectedProject || currentSelectedProject.projectId !== requestedProjectId) {
+      if (
+        selectionGenerationRef.current !== requestedSelectionGeneration
+        || !currentSelectedProject
+        || currentSelectedProject.projectId !== requestedProjectId
+      ) {
         return;
       }
 
