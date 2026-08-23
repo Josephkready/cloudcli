@@ -39,6 +39,7 @@ type CloneProjectDependencies = {
   validatePath: (requestedPath: string) => Promise<WorkspacePathValidationResult>;
   ensureDirectory: (directoryPath: string) => Promise<void>;
   pathExists: (targetPath: string) => Promise<boolean>;
+  claimClonePath: (targetPath: string) => Promise<boolean>;
   removePath: (targetPath: string) => Promise<void>;
   getGithubTokenById: (
     tokenId: number,
@@ -114,6 +115,17 @@ const defaultDependencies: CloneProjectDependencies = {
     await mkdir(directoryPath, { recursive: true });
   },
   pathExists: defaultPathExists,
+  claimClonePath: async (targetPath: string): Promise<boolean> => {
+    try {
+      await mkdir(targetPath);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        return false;
+      }
+      throw error;
+    }
+  },
   removePath: async (targetPath: string): Promise<void> => {
     await rm(targetPath, { recursive: true, force: true });
   },
@@ -237,8 +249,28 @@ export async function startCloneProject(
     }
   }
 
+  // Claim the deterministic destination atomically. The earlier existence
+  // check gives a fast error, but only mkdir without `recursive` closes the
+  // check-to-spawn race between duplicate clone requests. Git accepts an
+  // existing empty destination directory.
+  if (!await dependencies.claimClonePath(clonePath)) {
+    throw new AppError(
+      `Directory "${repoName}" already exists. Please choose a different location or remove the existing directory.`,
+      {
+        code: 'CLONE_TARGET_ALREADY_EXISTS',
+        statusCode: 409,
+      },
+    );
+  }
+
   handlers.onProgress(`Cloning into '${repoName}'...`);
-  const gitProcess = dependencies.spawnGitClone(cloneUrl, clonePath);
+  let gitProcess: GitCloneProcess;
+  try {
+    gitProcess = dependencies.spawnGitClone(cloneUrl, clonePath);
+  } catch (error) {
+    await dependencies.removePath(clonePath);
+    throw error;
+  }
   let lastError = '';
 
   gitProcess.stdout?.on('data', (data: Buffer | string) => {
@@ -257,7 +289,21 @@ export async function startCloneProject(
   });
 
   const waitForCompletion = new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const cleanOwnedClonePath = async (): Promise<void> => {
+      try {
+        await dependencies.removePath(clonePath);
+      } catch (cleanupError) {
+        dependencies.logError('Failed to clean up after clone failure:', cleanupError);
+      }
+    };
+
     gitProcess.on('close', async (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+
       if (code === 0) {
         try {
           const createdProject = await dependencies.registerProject(clonePath, repoName);
@@ -280,11 +326,7 @@ export async function startCloneProject(
       const sanitizedError = sanitizeGitError(lastError, githubToken);
       const errorMessage = resolveCloneFailureMessage(lastError, sanitizedError);
 
-      try {
-        await dependencies.removePath(clonePath);
-      } catch (cleanupError) {
-        dependencies.logError('Failed to clean up after clone failure:', cleanupError);
-      }
+      await cleanOwnedClonePath();
 
       reject(
         new AppError(errorMessage, {
@@ -294,7 +336,13 @@ export async function startCloneProject(
       );
     });
 
-    gitProcess.on('error', (error) => {
+    gitProcess.on('error', async (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      await cleanOwnedClonePath();
+
       if (error.code === 'ENOENT') {
         reject(
           new AppError('Git is not installed or not in PATH', {

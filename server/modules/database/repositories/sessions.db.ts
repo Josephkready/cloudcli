@@ -254,6 +254,15 @@ export const sessionsDb = {
         .get(providerSessionId, providerSessionId, sessionId) as SessionRow | undefined;
 
       if (duplicate) {
+        // Re-key crash-recovery journal rows before deleting the duplicate.
+        // `active_runs.session_id` cascades on session deletion, so reversing
+        // these statements would silently discard resumable work.
+        db.prepare(
+          `UPDATE active_runs
+           SET session_id = ?,
+               provider_session_id = COALESCE(provider_session_id, ?)
+           WHERE session_id = ?`
+        ).run(sessionId, providerSessionId, duplicate.session_id);
         db.prepare('DELETE FROM sessions WHERE session_id = ?').run(duplicate.session_id);
         db.prepare(
           `UPDATE sessions SET

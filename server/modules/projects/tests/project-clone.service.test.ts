@@ -14,6 +14,7 @@ function buildDependencies(overrides: Partial<NonNullable<TestDependencies>> = {
     validatePath: async () => ({ valid: true, resolvedPath: '/workspace/root' }),
     ensureDirectory: async () => undefined,
     pathExists: async () => false,
+    claimClonePath: async () => true,
     removePath: async () => undefined,
     getGithubTokenById: async () => ({ github_token: 'token-value' }),
     spawnGitClone: () => {
@@ -180,4 +181,71 @@ test('startCloneProject completes and emits complete payload when git exits succ
   };
   assert.equal(resolvedCompletePayload.message, 'Repository cloned successfully');
   assert.equal((resolvedCompletePayload.project.projectId as string) || '', 'project-1');
+});
+
+test('startCloneProject atomically rejects a duplicate target without spawning or cleaning it', async () => {
+  let spawnCalls = 0;
+  let removeCalls = 0;
+
+  await assert.rejects(
+    startCloneProject(
+      {
+        workspacePath: '/workspace/root',
+        githubUrl: 'https://github.com/example/repo.git',
+        userId: 1,
+      },
+      {
+        onProgress: () => undefined,
+        onComplete: () => undefined,
+      },
+      buildDependencies({
+        // Simulate another request claiming the path after the fast pre-check.
+        pathExists: async () => false,
+        claimClonePath: async () => false,
+        spawnGitClone: () => {
+          spawnCalls += 1;
+          return createMockGitProcess() as any;
+        },
+        removePath: async () => {
+          removeCalls += 1;
+        },
+      }),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, 'CLONE_TARGET_ALREADY_EXISTS');
+      return true;
+    },
+  );
+
+  assert.equal(spawnCalls, 0);
+  assert.equal(removeCalls, 0, 'the losing request must never delete the winner\'s path');
+});
+
+test('startCloneProject cleans only its claimed path when git fails', async () => {
+  const gitProcess = createMockGitProcess();
+  const removedPaths: string[] = [];
+  const operation = await startCloneProject(
+    {
+      workspacePath: '/workspace/root',
+      githubUrl: 'https://github.com/example/repo.git',
+      userId: 1,
+    },
+    {
+      onProgress: () => undefined,
+      onComplete: () => undefined,
+    },
+    buildDependencies({
+      spawnGitClone: () => gitProcess as any,
+      removePath: async (targetPath) => {
+        removedPaths.push(targetPath);
+      },
+    }),
+  );
+
+  gitProcess.stderr.write('fatal: clone failed');
+  gitProcess.emit('close', 128);
+
+  await assert.rejects(operation.waitForCompletion, /clone failed/);
+  assert.deepEqual(removedPaths, ['/workspace/root/repo']);
 });

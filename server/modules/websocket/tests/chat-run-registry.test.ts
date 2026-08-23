@@ -630,6 +630,41 @@ test('the eviction timer never removes the session\'s newer, still-running run',
   });
 });
 
+test('the eviction timer never shortens a newer completed run\'s retention window', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('reused-completed', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const input = {
+      appSessionId: 'reused-completed',
+      provider: 'claude' as const,
+      providerSessionId: null,
+      connection: connection as never,
+      userId: null,
+    };
+
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      assert.ok(chatRunRegistry.startRun(input));
+      chatRunRegistry.completeRun('reused-completed', { exitCode: 0 });
+
+      mock.timers.tick(RETENTION_MS / 2);
+      const second = chatRunRegistry.startRun(input);
+      assert.ok(second);
+      chatRunRegistry.completeRun('reused-completed', { exitCode: 0 });
+
+      // The first run's timer fires here. The second completed run still owns
+      // the map entry and must retain its buffer for its own full window.
+      mock.timers.tick(RETENTION_MS / 2 + 1);
+      assert.equal(chatRunRegistry.getRun('reused-completed'), second);
+
+      mock.timers.tick(RETENTION_MS / 2);
+      assert.equal(chatRunRegistry.getRun('reused-completed'), undefined);
+    } finally {
+      mock.timers.reset();
+    }
+  });
+});
+
 // --- Stale-run reaper: force-complete a run whose provider generator wedged
 // without ever emitting a terminal `complete`, so a finished session can't show
 // "running" forever (nothing else reaps a non-blocked run). ---
