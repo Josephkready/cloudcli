@@ -72,7 +72,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
   };
 
   const handleDisablePush = async () => {
-    await pushUnsubscribe();
+    const unsubscribed = await pushUnsubscribe();
+    if (!unsubscribed) return;
     // Server sets webPush: false in preferences on unsubscribe; sync local state
     setNotificationPreferences({
       ...notificationPreferences,

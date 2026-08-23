@@ -956,18 +956,8 @@ const uploadFilesHandler = async (req, res) => {
             if (relativePaths) {
                 try {
                     filePaths = JSON.parse(relativePaths);
-                } catch (e) {
-                    console.log('[DEBUG] Failed to parse relativePaths:', relativePaths);
-                }
+                } catch {}
             }
-
-            console.log('[DEBUG] File upload request:', {
-                projectId,
-                targetPath: JSON.stringify(targetPath),
-                targetPathType: typeof targetPath,
-                filesCount: req.files?.length,
-                relativePaths: filePaths
-            });
 
             if (!req.files || req.files.length === 0) {
                 return res.status(400).json({ error: 'No files provided' });
@@ -984,27 +974,20 @@ const uploadFilesHandler = async (req, res) => {
                 return res.status(404).json({ error: 'Project not found' });
             }
 
-            console.log('[DEBUG] Project root:', projectRoot);
-
             // Validate and resolve target path
             // If targetPath is empty or '.', use project root directly
             const targetDir = targetPath || '';
             let resolvedTargetDir;
 
-            console.log('[DEBUG] Target dir:', JSON.stringify(targetDir));
-
             if (!targetDir || targetDir === '.' || targetDir === './') {
                 // Empty path means upload to project root
                 resolvedTargetDir = path.resolve(projectRoot);
-                console.log('[DEBUG] Using project root as target:', resolvedTargetDir);
             } else {
                 const validation = await validateProjectPath(projectRoot, targetDir);
                 if (!validation.valid) {
-                    console.log('[DEBUG] Path validation failed:', validation.error);
                     return res.status(403).json({ error: validation.error });
                 }
                 resolvedTargetDir = validation.resolved;
-                console.log('[DEBUG] Resolved target dir:', resolvedTargetDir);
             }
 
             // Ensure target directory exists
@@ -1016,18 +999,15 @@ const uploadFilesHandler = async (req, res) => {
 
             // Move uploaded files from temp to target directory
             const uploadedFiles = [];
-            console.log('[DEBUG] Processing files:', req.files.map(f => ({ originalname: f.originalname, path: f.path })));
             for (let i = 0; i < req.files.length; i++) {
                 const file = req.files[i];
                 // Use relative path if provided (for folder uploads), otherwise use originalname
                 const fileName = (filePaths && filePaths[i]) ? filePaths[i] : file.originalname;
-                console.log('[DEBUG] Processing file:', fileName, '(originalname:', file.originalname + ')');
                 const destPath = path.join(resolvedTargetDir, fileName);
 
                 // Validate destination path
                 const destValidation = await validateProjectPath(projectRoot, destPath);
                 if (!destValidation.valid) {
-                    console.log('[DEBUG] Destination validation failed for:', destPath);
                     // Clean up temp file
                     await fsPromises.unlink(file.path).catch(() => {});
                     continue;

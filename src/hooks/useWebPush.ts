@@ -8,8 +8,14 @@ type WebPushState = {
   isLoading: boolean;
   error: string | null;
   subscribe: () => Promise<boolean>;
-  unsubscribe: () => Promise<void>;
+  unsubscribe: () => Promise<boolean>;
 };
+
+export function ensureSuccessfulPushResponse(response: Response, action: string): void {
+  if (!response.ok) {
+    throw new Error(`${action} (HTTP ${response.status}).`);
+  }
+}
 
 export async function readVapidPublicKey(response: Response): Promise<string> {
   if (!response.ok) {
@@ -97,9 +103,7 @@ export function useWebPush(): WebPushState {
           keys: subJson.keys,
         }),
       });
-      if (!subscribeResponse.ok) {
-        throw new Error(`Could not save the push subscription (HTTP ${subscribeResponse.status}).`);
-      }
+      ensureSuccessfulPushResponse(subscribeResponse, 'Could not save the push subscription');
 
       setIsSubscribed(true);
       return true;
@@ -120,16 +124,19 @@ export function useWebPush(): WebPushState {
       const subscription = await registration.pushManager.getSubscription();
       if (subscription) {
         const endpoint = subscription.endpoint;
-        await subscription.unsubscribe();
-        await authenticatedFetch('/api/settings/push/unsubscribe', {
+        const unsubscribeResponse = await authenticatedFetch('/api/settings/push/unsubscribe', {
           method: 'POST',
           body: JSON.stringify({ endpoint }),
         });
+        ensureSuccessfulPushResponse(unsubscribeResponse, 'Could not remove the push subscription');
+        await subscription.unsubscribe();
       }
       setIsSubscribed(false);
+      return true;
     } catch (err) {
       console.error('Push unsubscribe failed:', err);
       setError(err instanceof Error ? err.message : 'Push unsubscribe failed.');
+      return false;
     } finally {
       setIsLoading(false);
     }

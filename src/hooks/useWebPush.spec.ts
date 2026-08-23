@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
-import { readVapidPublicKey } from './useWebPush';
+import { ensureSuccessfulPushResponse, readVapidPublicKey } from './useWebPush';
+
+describe('ensureSuccessfulPushResponse', () => {
+  it('rejects failed subscription API responses with their status', () => {
+    expect(() => ensureSuccessfulPushResponse(
+      new Response(null, { status: 503 }),
+      'Could not remove the push subscription',
+    )).toThrow('Could not remove the push subscription (HTTP 503).');
+  });
+
+  it('accepts successful subscription API responses', () => {
+    expect(() => ensureSuccessfulPushResponse(
+      new Response(null, { status: 204 }),
+      'Could not remove the push subscription',
+    )).not.toThrow();
+  });
+});
 
 describe('readVapidPublicKey', () => {
   it('rejects a non-OK response before reading it as a success payload', async () => {
