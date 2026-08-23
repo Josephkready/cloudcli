@@ -934,7 +934,7 @@ router.post('/', validateExternalApiKey, async (req, res) => {
             if (!repoUrl.includes('github.com')) {
               throw new Error('Project does not have a GitHub remote configured');
             }
-            console.log(`✅ Found GitHub remote: ${repoUrl}`);
+            console.log(`✅ Found GitHub remote: ${redactGitHubUrlCredentials(repoUrl)}`);
           } catch (error) {
             throw new Error(`Failed to get GitHub remote URL: ${error.message}`);
           }

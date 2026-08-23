@@ -23,6 +23,16 @@ type SearchSnippetHighlight = {
   end: number;
 };
 
+export function isIgnorableRipgrepMissingFileError(code: number | null, stderr: string): boolean {
+  if (code !== 2) return false;
+  const lines = stderr.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.length > 0 && lines.every((line) => (
+    /no such file or directory/i.test(line)
+    || /os error 2/i.test(line)
+    || /the system cannot find the file/i.test(line)
+  ));
+}
+
 type SessionConversationMatch = {
   role: string;
   snippet: string;
@@ -677,8 +687,8 @@ async function runRipgrepFilesWithMatches(
         return;
       }
 
-      if (code !== 0 && code !== 1) {
-        const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
+      const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
+      if (code !== 0 && code !== 1 && !isIgnorableRipgrepMissingFileError(code, stderr)) {
         reject(new Error(`ripgrep failed with code ${String(code)}: ${stderr}`));
         return;
       }

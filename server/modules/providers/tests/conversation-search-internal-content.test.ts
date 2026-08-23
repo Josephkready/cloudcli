@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   extractClaudeSearchableMessage,
+  isIgnorableRipgrepMissingFileError,
   isInternalCodexContent,
   normalizeSearchableSessions,
 } from '@/modules/providers/services/session-conversations-search.service.js';
@@ -151,4 +152,18 @@ test('search normalization filters stale transcript paths asynchronously', async
   } as never]);
 
   assert.equal(rows.length, 0);
+});
+
+test('ripgrep missing-file races are non-fatal but other I/O errors remain visible', () => {
+  assert.equal(
+    isIgnorableRipgrepMissingFileError(
+      2,
+      'rg: /tmp/gone.jsonl: IO error for operation: No such file or directory (os error 2)',
+    ),
+    true,
+  );
+  assert.equal(
+    isIgnorableRipgrepMissingFileError(2, 'rg: /private/file: Permission denied (os error 13)'),
+    false,
+  );
 });
