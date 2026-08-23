@@ -95,12 +95,17 @@ export const mergeSessionProviderLists = (baseSessions: ProjectSession[], additi
   return merged;
 };
 
-export const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects: Project[]): Project[] => {
+export const mergeExpandedSessionPages = (
+  previousProjects: Project[],
+  incomingProjects: Project[],
+  requestProjects: Project[] = previousProjects,
+): Project[] => {
   if (previousProjects.length === 0) {
     return incomingProjects;
   }
 
   const previousByProjectId = new Map(previousProjects.map((project) => [project.projectId, project]));
+  const requestByProjectId = new Map(requestProjects.map((project) => [project.projectId, project]));
 
   return incomingProjects.map((incomingProject) => {
     const previousProject = previousByProjectId.get(incomingProject.projectId);
@@ -108,18 +113,85 @@ export const mergeExpandedSessionPages = (previousProjects: Project[], incomingP
       return incomingProject;
     }
 
-    const previousLoadedCount = countLoadedProjectSessions(previousProject);
+    const requestProject = requestByProjectId.get(incomingProject.projectId);
+    const requestSessions = requestProject?.sessions ?? [];
+    const requestBySessionId = new Map(requestSessions.map((session) => [String(session.id), session]));
+    const previousSessions = previousProject.sessions ?? [];
+    const previousBySessionId = new Map(previousSessions.map((session) => [String(session.id), session]));
+    const incomingSessions = incomingProject.sessions ?? [];
+    const incomingSessionIds = new Set(incomingSessions.map((session) => String(session.id)));
+
+    // Preserve only changes that landed after this refresh started. Missing
+    // rows from the request snapshot are server-authoritative (including
+    // cross-client deletions); rows created or updated meanwhile are local
+    // deltas that an older response must not erase.
+    const concurrentAdditions = previousSessions.filter(
+      (session) => !requestBySessionId.has(String(session.id)) && !incomingSessionIds.has(String(session.id)),
+    );
+    const concurrentRemovals = new Set(
+      requestSessions
+        .filter((session) => !previousBySessionId.has(String(session.id)))
+        .map((session) => String(session.id)),
+    );
+    const concurrentChanges = new Map<string, ProjectSession>();
+    for (const previousSession of previousSessions) {
+      const id = String(previousSession.id);
+      const requestedSession = requestBySessionId.get(id);
+      if (requestedSession && serialize(previousSession) !== serialize(requestedSession)) {
+        concurrentChanges.set(id, previousSession);
+      }
+    }
+
+    const refreshedSessions = incomingSessions
+      .filter((session) => !concurrentRemovals.has(String(session.id)))
+      .map((session) => concurrentChanges.get(String(session.id)) ?? session);
+
+    const requestLoadedCount = requestSessions.length;
     const incomingLoadedCount = countLoadedProjectSessions(incomingProject);
-    if (previousLoadedCount <= incomingLoadedCount) {
+    const incomingTotalValue = incomingProject.sessionMeta?.total;
+    const incomingTotal = typeof incomingTotalValue === 'number' && Number.isFinite(incomingTotalValue)
+      ? incomingTotalValue
+      : null;
+    const shouldPreserveDeeperRequestPage =
+      requestLoadedCount > incomingLoadedCount
+      && (incomingTotal === null || incomingTotal >= requestLoadedCount);
+
+    const preservedDeeperSessions = shouldPreserveDeeperRequestPage
+      ? requestSessions
+        .filter((session) => {
+          const id = String(session.id);
+          return !incomingSessionIds.has(id) && !concurrentRemovals.has(id);
+        })
+        .map((session) => concurrentChanges.get(String(session.id)) ?? session)
+      : [];
+
+    if (
+      concurrentAdditions.length === 0
+      && concurrentRemovals.size === 0
+      && concurrentChanges.size === 0
+      && preservedDeeperSessions.length === 0
+    ) {
       return incomingProject;
     }
 
     const mergedProject: Project = {
       ...incomingProject,
-      sessions: mergeSessionProviderLists(incomingProject.sessions ?? [], previousProject.sessions ?? []),
+      sessions: mergeSessionProviderLists(
+        concurrentAdditions,
+        mergeSessionProviderLists(refreshedSessions, preservedDeeperSessions),
+      ),
     };
 
-    const totalSessions = Number(incomingProject.sessionMeta?.total ?? previousLoadedCount);
+    const additionsMissingFromResponse = concurrentAdditions.length;
+    const removalsStillInResponse = incomingSessions.filter(
+      (session) => concurrentRemovals.has(String(session.id)),
+    ).length;
+    const totalSessions = Math.max(
+      countLoadedProjectSessions(mergedProject),
+      Number(incomingProject.sessionMeta?.total ?? requestLoadedCount)
+        + additionsMissingFromResponse
+        - removalsStillInResponse,
+    );
     mergedProject.sessionMeta = {
       ...incomingProject.sessionMeta,
       total: totalSessions,

@@ -62,6 +62,53 @@ type RegisterOptimisticSessionArgs = {
   summary?: string | null;
 };
 
+const getProjectsRefreshSessionLimit = (projects: Project[]): number | undefined => {
+  const loadedCounts = projects.map(countLoadedProjectSessions);
+  const largestLoadedPage = loadedCounts.length > 0 ? Math.max(...loadedCounts) : 0;
+  return largestLoadedPage > 0 ? largestLoadedPage : undefined;
+};
+
+const fetchProjectsSnapshot = async (requestProjects: Project[]): Promise<Project[]> => {
+  const response = await api.projects({
+    sessionsLimit: getProjectsRefreshSessionLimit(requestProjects),
+  });
+  const projects = (await response.json()) as Project[];
+  const requestedByProjectId = new Map(
+    requestProjects.map((project) => [project.projectId, countLoadedProjectSessions(project)]),
+  );
+
+  return Promise.all(projects.map(async (project) => {
+    const requestedCount = requestedByProjectId.get(project.projectId) ?? 0;
+    const serverTotal = Number(project.sessionMeta?.total ?? 0);
+    const targetCount = Math.min(requestedCount, serverTotal);
+    let expandedProject = project;
+
+    // `/api/projects` caps its per-project first page. If a user has expanded
+    // beyond that cap, fill the rest of the already-visible window from the
+    // paginated endpoint so every cached row in that window is reconciled
+    // against server truth (including deletions).
+    while (countLoadedProjectSessions(expandedProject) < targetCount) {
+      const offset = countLoadedProjectSessions(expandedProject);
+      const pageResponse = await api.projectSessions(project.projectId, {
+        limit: targetCount - offset,
+        offset,
+      });
+      if (!pageResponse.ok) {
+        break;
+      }
+
+      const page = (await pageResponse.json()) as ProjectSessionPage;
+      const nextProject = mergeProjectSessionPage(expandedProject, page);
+      if (countLoadedProjectSessions(nextProject) <= offset) {
+        break;
+      }
+      expandedProject = nextProject;
+    }
+
+    return expandedProject;
+  }));
+};
+
 const readSelectedProvider = (): LLMProvider => {
   try {
     const storedProvider = localStorage.getItem('selected-provider');
@@ -185,15 +232,15 @@ export function useProjectsState({
   }, []);
 
   const fetchProjects = useCallback(async ({ showLoadingState = true }: FetchProjectsOptions = {}) => {
+    const requestProjects = projectsRef.current;
     try {
       if (showLoadingState) {
         setIsLoadingProjects(true);
       }
-      const response = await api.projects();
-      const projectData = (await response.json()) as Project[];
+      const projectData = await fetchProjectsSnapshot(requestProjects);
 
       setProjects((prevProjects) => {
-        const mergedProjects = mergeExpandedSessionPages(prevProjects, projectData);
+        const mergedProjects = mergeExpandedSessionPages(prevProjects, projectData, requestProjects);
 
         if (prevProjects.length === 0) {
           return mergedProjects;
@@ -666,51 +713,58 @@ export function useProjectsState({
   );
 
   const handleSidebarRefresh = useCallback(async () => {
+    const requestProjects = projectsRef.current;
+    const requestedProjectId = selectedProjectRef.current?.projectId ?? null;
+    const requestedSessionId = selectedSessionRef.current?.id ?? null;
     try {
-      const response = await api.projects();
-      const freshProjects = (await response.json()) as Project[];
-      const mergedProjects = mergeExpandedSessionPages(projects, freshProjects);
+      const freshProjects = await fetchProjectsSnapshot(requestProjects);
+      const mergedProjects = mergeExpandedSessionPages(projectsRef.current, freshProjects, requestProjects);
 
-      setProjects((prevProjects) =>
-        projectsHaveChanges(prevProjects, mergedProjects) ? mergedProjects : prevProjects,
-      );
+      setProjects((prevProjects) => {
+        const nextProjects = mergeExpandedSessionPages(prevProjects, freshProjects, requestProjects);
+        return projectsHaveChanges(prevProjects, nextProjects) ? nextProjects : prevProjects;
+      });
 
-      if (!selectedProject) {
+      const currentSelectedProject = selectedProjectRef.current;
+      if (!currentSelectedProject || currentSelectedProject.projectId !== requestedProjectId) {
         return;
       }
 
-      const refreshedProject = mergedProjects.find((project) => project.projectId === selectedProject.projectId);
+      const refreshedProject = mergedProjects.find(
+        (project) => project.projectId === currentSelectedProject.projectId,
+      );
       if (!refreshedProject) {
         return;
       }
 
-      if (serialize(refreshedProject) !== serialize(selectedProject)) {
+      if (serialize(refreshedProject) !== serialize(currentSelectedProject)) {
         setSelectedProject(refreshedProject);
       }
 
-      if (!selectedSession) {
+      const currentSelectedSession = selectedSessionRef.current;
+      if (!currentSelectedSession || currentSelectedSession.id !== requestedSessionId) {
         return;
       }
 
       const refreshedSession = getProjectSessions(refreshedProject).find(
-        (session) => session.id === selectedSession.id,
+        (session) => session.id === currentSelectedSession.id,
       );
 
       if (refreshedSession) {
         // Keep provider metadata stable when refreshed payload doesn't include __provider.
         const normalizedRefreshedSession =
-          refreshedSession.__provider || !selectedSession.__provider
+          refreshedSession.__provider || !currentSelectedSession.__provider
             ? refreshedSession
-            : { ...refreshedSession, __provider: selectedSession.__provider };
+            : { ...refreshedSession, __provider: currentSelectedSession.__provider };
 
-        if (serialize(normalizedRefreshedSession) !== serialize(selectedSession)) {
+        if (serialize(normalizedRefreshedSession) !== serialize(currentSelectedSession)) {
           setSelectedSession(normalizedRefreshedSession);
         }
       }
     } catch (error) {
       console.error('Error refreshing sidebar:', error);
     }
-  }, [projects, selectedProject, selectedSession]);
+  }, []);
 
   const loadMoreProjectSessions = useCallback(async (projectId: string) => {
     const project = projects.find((candidate) => candidate.projectId === projectId);

@@ -4,15 +4,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerEvent } from '../contexts/WebSocketContext';
 
 const projectsFetch = vi.fn();
+const projectSessionsFetch = vi.fn();
 
 vi.mock('@/utils/api', () => ({
-  api: { projects: (...args: unknown[]) => projectsFetch(...args) },
+  api: {
+    projects: (...args: unknown[]) => projectsFetch(...args),
+    projectSessions: (...args: unknown[]) => projectSessionsFetch(...args),
+  },
   authenticatedFetch: vi.fn(),
   isValidRefreshedToken: () => false,
 }));
 
 vi.mock('../utils/api', () => ({
-  api: { projects: (...args: unknown[]) => projectsFetch(...args) },
+  api: {
+    projects: (...args: unknown[]) => projectsFetch(...args),
+    projectSessions: (...args: unknown[]) => projectSessionsFetch(...args),
+  },
   authenticatedFetch: vi.fn(),
   isValidRefreshedToken: () => false,
 }));
@@ -74,6 +81,7 @@ function mountHook() {
 describe('useProjectsState — projects_snapshot_stale', () => {
   beforeEach(() => {
     projectsFetch.mockReset();
+    projectSessionsFetch.mockReset();
   });
 
   it('refetches the project list when the server reports a stale snapshot', async () => {
@@ -131,5 +139,94 @@ describe('useProjectsState — projects_snapshot_stale', () => {
     });
 
     expect(projectsFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an optimistic session and selection created during a manual refresh', async () => {
+    respondWith(['s1']);
+    const { result } = mountHook();
+    await waitFor(() => expect(result.current.isLoadingProjects).toBe(false));
+
+    act(() => {
+      result.current.handleProjectSelect(result.current.projects[0]);
+    });
+
+    let resolveRefresh: (value: unknown) => void = () => {};
+    projectsFetch.mockReturnValueOnce(new Promise((resolve) => {
+      resolveRefresh = resolve;
+    }));
+
+    let refreshPromise: Promise<void> = Promise.resolve();
+    await act(async () => {
+      refreshPromise = result.current.handleSidebarRefresh();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      result.current.registerOptimisticSession({
+        sessionId: 'optimistic',
+        provider: 'claude',
+        project: result.current.projects[0],
+        summary: 'New conversation',
+      });
+    });
+
+    await act(async () => {
+      resolveRefresh({ ok: true, json: async () => projectPayload(['s1']) });
+      await refreshPromise;
+    });
+
+    expect(result.current.projects[0]?.sessions?.map((session) => session.id)).toEqual([
+      'optimistic',
+      's1',
+    ]);
+    expect(result.current.selectedSession?.id).toBe('optimistic');
+  });
+
+  it('drops a session deleted by another client when manually refreshed', async () => {
+    respondWith(['s1', 'deleted', 's3']);
+    const { result } = mountHook();
+    await waitFor(() => expect(result.current.isLoadingProjects).toBe(false));
+
+    projectsFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => projectPayload(['s1', 's3']),
+    } as unknown as Response);
+
+    await act(async () => {
+      await result.current.handleSidebarRefresh();
+    });
+
+    expect(result.current.projects[0]?.sessions?.map((session) => session.id)).toEqual(['s1', 's3']);
+    expect(projectsFetch).toHaveBeenLastCalledWith({ sessionsLimit: 3 });
+  });
+
+  it('hydrates past the projects endpoint cap before reconciling a deletion', async () => {
+    const originalIds = Array.from({ length: 22 }, (_, index) => `s${index + 1}`);
+    respondWith(originalIds);
+    const { result } = mountHook();
+    await waitFor(() => expect(result.current.isLoadingProjects).toBe(false));
+
+    const remainingIds = originalIds.filter((id) => id !== 's21');
+    projectsFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => {
+        const [payload] = projectPayload(remainingIds.slice(0, 20));
+        return [{ ...payload, sessionMeta: { hasMore: true, total: remainingIds.length } }];
+      },
+    } as unknown as Response);
+    projectSessionsFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        sessions: projectPayload(['s22'])[0].sessions,
+        sessionMeta: { hasMore: false, total: remainingIds.length },
+      }),
+    } as unknown as Response);
+
+    await act(async () => {
+      await result.current.handleSidebarRefresh();
+    });
+
+    expect(result.current.projects[0]?.sessions?.map((session) => session.id)).toEqual(remainingIds);
+    expect(projectSessionsFetch).toHaveBeenCalledWith('p1', { limit: 1, offset: 20 });
   });
 });
