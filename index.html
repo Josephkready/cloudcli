@@ -49,6 +49,48 @@
     -->
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180x180.png" />
 
+    <!--
+      iOS launch images (issue #373). iOS has no manifest-driven splash: without
+      these an installed home-screen app shows a blank white screen for the whole
+      cold start. There is one per device geometry per orientation because that
+      is what iOS matches on — a near-miss simply does not apply, and the app
+      falls back to the blank screen.
+
+      GENERATED. Do not hand-edit: run `python3 scripts/generate-launch-images.py`
+      and paste its output here. `src/pwa/pwaAssets.test.ts` asserts every href
+      exists and is exactly the resolution its media query claims.
+    -->
+    <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="/icons/launch/launch-750x1334.png" />  <!-- iPhone SE (2nd/3rd gen), 8 -->
+    <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)" href="/icons/launch/launch-1334x750.png" />  <!-- iPhone SE (2nd/3rd gen), 8 -->
+    <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="/icons/launch/launch-828x1792.png" />  <!-- iPhone XR, 11 -->
+    <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)" href="/icons/launch/launch-1792x828.png" />  <!-- iPhone XR, 11 -->
+    <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/icons/launch/launch-1125x2436.png" />  <!-- iPhone X, XS, 11 Pro, 12/13 mini -->
+    <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)" href="/icons/launch/launch-2436x1125.png" />  <!-- iPhone X, XS, 11 Pro, 12/13 mini -->
+    <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/icons/launch/launch-1242x2688.png" />  <!-- iPhone XS Max, 11 Pro Max -->
+    <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)" href="/icons/launch/launch-2688x1242.png" />  <!-- iPhone XS Max, 11 Pro Max -->
+    <link rel="apple-touch-startup-image" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/icons/launch/launch-1170x2532.png" />  <!-- iPhone 12, 13, 14 -->
+    <link rel="apple-touch-startup-image" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)" href="/icons/launch/launch-2532x1170.png" />  <!-- iPhone 12, 13, 14 -->
+    <link rel="apple-touch-startup-image" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/icons/launch/launch-1284x2778.png" />  <!-- iPhone 12/13 Pro Max, 14 Plus -->
+    <link rel="apple-touch-startup-image" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)" href="/icons/launch/launch-2778x1284.png" />  <!-- iPhone 12/13 Pro Max, 14 Plus -->
+    <link rel="apple-touch-startup-image" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/icons/launch/launch-1179x2556.png" />  <!-- iPhone 14 Pro, 15, 15 Pro, 16 -->
+    <link rel="apple-touch-startup-image" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)" href="/icons/launch/launch-2556x1179.png" />  <!-- iPhone 14 Pro, 15, 15 Pro, 16 -->
+    <link rel="apple-touch-startup-image" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/icons/launch/launch-1290x2796.png" />  <!-- iPhone 14 Pro Max, 15 Plus/Pro Max, 16 Plus -->
+    <link rel="apple-touch-startup-image" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)" href="/icons/launch/launch-2796x1290.png" />  <!-- iPhone 14 Pro Max, 15 Plus/Pro Max, 16 Plus -->
+    <link rel="apple-touch-startup-image" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/icons/launch/launch-1206x2622.png" />  <!-- iPhone 16 Pro -->
+    <link rel="apple-touch-startup-image" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)" href="/icons/launch/launch-2622x1206.png" />  <!-- iPhone 16 Pro -->
+    <link rel="apple-touch-startup-image" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/icons/launch/launch-1320x2868.png" />  <!-- iPhone 16 Pro Max -->
+    <link rel="apple-touch-startup-image" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)" href="/icons/launch/launch-2868x1320.png" />  <!-- iPhone 16 Pro Max -->
+    <link rel="apple-touch-startup-image" media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="/icons/launch/launch-1536x2048.png" />  <!-- iPad 9.7" -->
+    <link rel="apple-touch-startup-image" media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)" href="/icons/launch/launch-2048x1536.png" />  <!-- iPad 9.7" -->
+    <link rel="apple-touch-startup-image" media="(device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="/icons/launch/launch-1620x2160.png" />  <!-- iPad 10.2" -->
+    <link rel="apple-touch-startup-image" media="(device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)" href="/icons/launch/launch-2160x1620.png" />  <!-- iPad 10.2" -->
+    <link rel="apple-touch-startup-image" media="(device-width: 820px) and (device-height: 1180px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="/icons/launch/launch-1640x2360.png" />  <!-- iPad Air 10.9" -->
+    <link rel="apple-touch-startup-image" media="(device-width: 820px) and (device-height: 1180px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)" href="/icons/launch/launch-2360x1640.png" />  <!-- iPad Air 10.9" -->
+    <link rel="apple-touch-startup-image" media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="/icons/launch/launch-1668x2388.png" />  <!-- iPad Pro 11" -->
+    <link rel="apple-touch-startup-image" media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)" href="/icons/launch/launch-2388x1668.png" />  <!-- iPad Pro 11" -->
+    <link rel="apple-touch-startup-image" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="/icons/launch/launch-2048x2732.png" />  <!-- iPad Pro 12.9" -->
+    <link rel="apple-touch-startup-image" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)" href="/icons/launch/launch-2732x2048.png" />  <!-- iPad Pro 12.9" -->
+
     <!-- Theme Color — matched to the app's own light/dark surface tokens
          (hsl(44 22% 96%) / hsl(0 0% 8%)) so the browser/OS chrome isn't a white
          flash before the app's JS runs. ThemeContext keeps these in sync with an
