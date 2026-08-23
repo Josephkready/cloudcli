@@ -1,4 +1,4 @@
-import fsSync from 'node:fs';
+import fsSync, { promises as fsPromises } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 
@@ -13,6 +13,7 @@ import {
   isAgentAuthoredUserTurn,
   isInternalContent as isClaudeInternalContent,
 } from '@/modules/providers/list/claude/claude-sessions.provider.js';
+import { mapWithConcurrency } from '@/shared/utils.js';
 
 type AnyRecord = Record<string, any>;
 type SearchableProvider = 'claude' | 'codex' | 'antigravity';
@@ -495,7 +496,7 @@ function extractCodexText(content: unknown): string {
     .join(' ');
 }
 
-export function normalizeSearchableSessions(rows: SessionRepositoryRow[]): SearchableSessionRow[] {
+export async function normalizeSearchableSessions(rows: SessionRepositoryRow[]): Promise<SearchableSessionRow[]> {
   const normalizedRows: SearchableSessionRow[] = [];
   const projectArchiveStateByPath = new Map<string, boolean>();
 
@@ -539,7 +540,15 @@ export function normalizeSearchableSessions(rows: SessionRepositoryRow[]): Searc
     });
   }
 
-  return normalizedRows;
+  const existingRows = await mapWithConcurrency(normalizedRows, 32, async (row) => {
+    try {
+      await fsPromises.access(row.jsonl_path);
+      return row;
+    } catch {
+      return null;
+    }
+  });
+  return existingRows.filter((row): row is SearchableSessionRow => row !== null);
 }
 
 function buildProjectBuckets(searchableSessions: SearchableSessionRow[]): ProjectBucket[] {
@@ -1195,7 +1204,7 @@ export async function searchConversations(
     return { results: [], totalMatches: 0, query: safeQuery };
   }
 
-  const searchableSessions = normalizeSearchableSessions(sessionsDb.getAllSessions());
+  const searchableSessions = await normalizeSearchableSessions(sessionsDb.getAllSessions());
   if (searchableSessions.length === 0) {
     return { results: [], totalMatches: 0, query: safeQuery };
   }

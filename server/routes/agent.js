@@ -15,7 +15,11 @@ import { IS_PLATFORM } from '../constants/config.js';
 import { normalizeProjectPath } from '../shared/utils.js';
 import { ResponseCollector } from './response-collector.js';
 import { runMockAgentProvider } from './mock-agent-provider.js';
-import { buildGitHubCloneEnvironment } from './git-clone-auth.js';
+import {
+  buildGitHubCloneEnvironment,
+  redactGitHubUrlCredentials,
+  validateGitHubCloneUrl,
+} from './git-clone-auth.js';
 
 const router = express.Router();
 
@@ -108,7 +112,7 @@ async function getGitRemoteUrl(repoPath) {
  */
 function normalizeGitHubUrl(url) {
   // Remove .git suffix
-  let normalized = url.replace(/\.git$/, '');
+  let normalized = redactGitHubUrlCredentials(url).replace(/\.git$/, '');
   // Convert SSH to HTTPS format for comparison
   normalized = normalized.replace(/^git@github\.com:/, 'https://github.com/');
   // Remove trailing slash
@@ -337,10 +341,7 @@ async function createGitHubPR(octokit, owner, repo, branchName, title, body, bas
 async function cloneGitHubRepo(githubUrl, githubToken = null, projectPath) {
   return new Promise(async (resolve, reject) => {
     try {
-      // Validate GitHub URL
-      if (!githubUrl || !githubUrl.includes('github.com')) {
-        throw new Error('Invalid GitHub URL');
-      }
+      const safeGitHubUrl = validateGitHubCloneUrl(githubUrl);
 
       const cloneDir = path.resolve(projectPath);
 
@@ -351,13 +352,13 @@ async function cloneGitHubRepo(githubUrl, githubToken = null, projectPath) {
         try {
           const existingUrl = await getGitRemoteUrl(cloneDir);
           const normalizedExisting = normalizeGitHubUrl(existingUrl);
-          const normalizedRequested = normalizeGitHubUrl(githubUrl);
+          const normalizedRequested = normalizeGitHubUrl(safeGitHubUrl);
 
           if (normalizedExisting === normalizedRequested) {
             console.log('✅ Repository already exists at path with correct URL');
             return resolve(cloneDir);
           } else {
-            throw new Error(`Directory ${cloneDir} already exists with a different repository (${existingUrl}). Expected: ${githubUrl}`);
+            throw new Error(`Directory ${cloneDir} already exists with a different repository (${redactGitHubUrlCredentials(existingUrl)}). Expected: ${safeGitHubUrl}`);
           }
         } catch (gitError) {
           throw new Error(`Directory ${cloneDir} already exists but is not a valid git repository or git command failed`);
@@ -371,11 +372,11 @@ async function cloneGitHubRepo(githubUrl, githubToken = null, projectPath) {
 
       const cloneEnvironment = buildGitHubCloneEnvironment(githubToken);
 
-      console.log('🔄 Cloning repository:', githubUrl);
+      console.log('🔄 Cloning repository:', safeGitHubUrl);
       console.log('📁 Destination:', cloneDir);
 
       // Execute git clone
-      const gitProcess = spawn('git', ['clone', '--depth', '1', githubUrl, cloneDir], {
+      const gitProcess = spawn('git', ['clone', '--depth', '1', safeGitHubUrl, cloneDir], {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: cloneEnvironment
       });

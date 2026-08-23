@@ -16,3 +16,42 @@ export function buildGitHubCloneEnvironment(githubToken = null, baseEnvironment 
     GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basicCredential}`,
   };
 }
+
+export function validateGitHubCloneUrl(value) {
+  const cloneUrl = typeof value === 'string' ? value.trim() : '';
+  if (/^git@github\.com:[^/\s]+\/[^/\s]+\/?$/.test(cloneUrl)) {
+    return cloneUrl;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(cloneUrl);
+  } catch {
+    throw new Error('Invalid GitHub URL');
+  }
+
+  const pathParts = parsed.pathname.split('/').filter(Boolean);
+  if (
+    parsed.protocol !== 'https:'
+    || parsed.hostname.toLowerCase() !== 'github.com'
+    || parsed.username
+    || parsed.password
+    || parsed.search
+    || parsed.hash
+    || pathParts.length !== 2
+  ) {
+    throw new Error('Invalid GitHub URL');
+  }
+  return cloneUrl;
+}
+
+export function redactGitHubUrlCredentials(value) {
+  try {
+    const parsed = new URL(value);
+    parsed.username = '';
+    parsed.password = '';
+    return parsed.toString();
+  } catch {
+    return value;
+  }
+}

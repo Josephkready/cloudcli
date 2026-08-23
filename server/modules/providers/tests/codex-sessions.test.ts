@@ -127,12 +127,33 @@ test('Codex synchronizer finds titles in bounded windows of a large transcript',
       }),
     ];
     await writeFile(filePath, `${lines.join('\n')}\n`, 'utf8');
+    await writeFile(
+      path.join(sessionsDir, 'rollout-codex-large-tail.jsonl'),
+      `${[
+        JSON.stringify({
+          type: 'session_meta',
+          payload: { id: 'codex-large-tail', cwd: workspacePath },
+        }),
+        JSON.stringify({
+          type: 'response_item',
+          payload: { type: 'function_call_output', output: 'y'.repeat(600_000) },
+        }),
+        JSON.stringify({
+          type: 'event_msg',
+          payload: { type: 'task_complete', last_agent_message: 'Tail title' },
+        }),
+      ].join('\n')}\n`,
+      'utf8',
+    );
 
     await withIsolatedDatabase(async () => {
+      sessionsDb.createAppSession('app-large-1', 'codex', workspacePath);
+      sessionsDb.assignProviderSessionId('app-large-1', 'codex-large-1');
       const synchronizer = new CodexSessionSynchronizer();
       await synchronizer.synchronize();
 
-      assert.equal(sessionsDb.getSessionById('codex-large-1')?.custom_name, 'Tail title');
+      assert.equal(sessionsDb.getSessionById('app-large-1')?.custom_name, 'Head title');
+      assert.equal(sessionsDb.getSessionById('codex-large-tail')?.custom_name, 'Tail title');
     });
   } finally {
     restoreHomeDir();

@@ -142,14 +142,13 @@ test('an ordinary codex message is not treated as internal', () => {
   assert.equal(isInternalCodexContent('please refactor the parser'), false);
 });
 
-test('search normalization does not synchronously stat every transcript path', () => {
+test('search normalization filters stale transcript paths asynchronously', async () => {
   const missingPath = '/definitely/missing/cloudcli-session.jsonl';
-  const rows = normalizeSearchableSessions([{
+  const rows = await normalizeSearchableSessions([{
     provider: 'claude',
     jsonl_path: missingPath,
     project_path: '',
   } as never]);
 
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0]?.jsonl_path, missingPath);
+  assert.equal(rows.length, 0);
 });

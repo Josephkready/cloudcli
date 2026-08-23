@@ -315,7 +315,11 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
       };
       this.titleCandidatesCache.set(filePath, fingerprint, candidates);
       return candidates;
-    } catch {
+    } catch (error) {
+      console.warn('[CodexSynchronizer] Could not extract title candidates', {
+        file: path.basename(filePath),
+        errorCode: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN',
+      });
       return {};
     }
   }
