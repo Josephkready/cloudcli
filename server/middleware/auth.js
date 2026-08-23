@@ -19,6 +19,11 @@ export function apiKeysMatch(providedKey, expectedKey) {
     && digestMatches;
 }
 
+export function readRequestBearerToken(req) {
+  const authHeader = req?.headers?.authorization;
+  return typeof authHeader === 'string' ? authHeader.split(' ')[1] || null : null;
+}
+
 // Optional API key middleware
 const validateApiKey = (req, res, next) => {
   // Skip API key validation if not configured
@@ -51,13 +56,7 @@ const authenticateToken = async (req, res, next) => {
   }
 
   // Normal OSS JWT validation
-  const authHeader = req.headers['authorization'];
-  let token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
-
-  // Also check query param for SSE endpoints (EventSource can't set headers)
-  if (!token && req.query.token) {
-    token = req.query.token;
-  }
+  const token = readRequestBearerToken(req);
 
   if (!token) {
     return res.status(401).json({ error: 'Access denied. No token provided.' });

@@ -150,9 +150,7 @@ export const api = {
     });
   },
   searchConversationsUrl: (query, limit = 50) => {
-    const token = localStorage.getItem('auth-token');
     const params = new URLSearchParams({ q: query, limit: String(limit) });
-    if (token) params.set('token', token);
     return `/api/providers/search/sessions?${params.toString()}`;
   },
   createProject: (projectData) =>

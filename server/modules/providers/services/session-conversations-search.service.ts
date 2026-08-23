@@ -211,7 +211,7 @@ function createWordMatcher(
   words: string[],
 ): Pick<SearchRuntime, 'matchesQuery' | 'buildSnippet'> {
   const normalizedQuery = rawQuery.trim().replace(/\s+/g, ' ');
-  const requireExactPhrase = words.length > 1 && normalizedQuery.length > 0;
+  const requireExactPhrase = normalizedQuery.split(/\s+/).length > 1;
   const wordPatterns = words.map((word) => new RegExp(`(?<!\\p{L})${escapeRegex(word)}(?!\\p{L})`, 'u'));
   const phrasePattern = words.map((word) => escapeRegex(word)).join('\\s+');
   const phraseRegex = new RegExp(phrasePattern, 'iu');
@@ -709,6 +709,109 @@ async function runRipgrepFilesWithMatches(
   });
 }
 
+export function normalizeSessionSearchTerms(query: string): string[] {
+  return Array.from(new Set(query.toLowerCase().split(/\s+/).filter(Boolean)));
+}
+
+type SearchTermNode = {
+  next: Map<string, number>;
+  failure: number;
+  outputs: string[];
+};
+
+export class SearchTermMatcher {
+  private readonly nodes: SearchTermNode[] = [{ next: new Map(), failure: 0, outputs: [] }];
+  private readonly remaining: Set<string>;
+  private state = 0;
+
+  constructor(terms: string[]) {
+    this.remaining = new Set(terms.map((term) => term.toLowerCase()).filter(Boolean));
+    for (const term of this.remaining) {
+      let nodeIndex = 0;
+      for (const character of term) {
+        const parent = this.nodes[nodeIndex] as SearchTermNode;
+        const existing = parent.next.get(character);
+        if (existing !== undefined) {
+          nodeIndex = existing;
+          continue;
+        }
+        const childIndex = this.nodes.length;
+        this.nodes.push({ next: new Map(), failure: 0, outputs: [] });
+        parent.next.set(character, childIndex);
+        nodeIndex = childIndex;
+      }
+      this.nodes[nodeIndex]?.outputs.push(term);
+    }
+    this.buildFailureLinks();
+  }
+
+  get matchedAll(): boolean {
+    return this.remaining.size === 0;
+  }
+
+  feed(text: string): boolean {
+    for (const character of text.toLowerCase()) {
+      while (this.state !== 0 && !this.nodes[this.state]?.next.has(character)) {
+        this.state = this.nodes[this.state]?.failure ?? 0;
+      }
+      this.state = this.nodes[this.state]?.next.get(character) ?? 0;
+      for (const term of this.nodes[this.state]?.outputs ?? []) this.remaining.delete(term);
+      if (this.matchedAll) return true;
+    }
+    return this.matchedAll;
+  }
+
+  private buildFailureLinks(): void {
+    const queue: number[] = [];
+    for (const child of this.nodes[0]?.next.values() ?? []) queue.push(child);
+
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      const nodeIndex = queue[cursor] as number;
+      const node = this.nodes[nodeIndex] as SearchTermNode;
+      for (const [character, childIndex] of node.next) {
+        queue.push(childIndex);
+        let fallback = node.failure;
+        while (fallback !== 0 && !this.nodes[fallback]?.next.has(character)) {
+          fallback = this.nodes[fallback]?.failure ?? 0;
+        }
+        const fallbackTransition = this.nodes[fallback]?.next.get(character);
+        const child = this.nodes[childIndex] as SearchTermNode;
+        child.failure = fallbackTransition !== undefined && fallbackTransition !== childIndex
+          ? fallbackTransition
+          : 0;
+        child.outputs.push(...((this.nodes[child.failure]?.outputs) ?? []));
+      }
+    }
+  }
+}
+
+export async function fileContainsAllSearchTerms(
+  filePath: string,
+  terms: string[],
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const matcher = new SearchTermMatcher(terms);
+  if (matcher.matchedAll) return true;
+  if (signal?.aborted) return false;
+
+  const stream = fsSync.createReadStream(filePath, { encoding: 'utf8' });
+  const abortListener = () => stream.destroy();
+  signal?.addEventListener('abort', abortListener, { once: true });
+
+  try {
+    for await (const chunk of stream) {
+      if (signal?.aborted) return false;
+      if (matcher.feed(String(chunk))) return true;
+    }
+    return false;
+  } catch (error) {
+    if (signal?.aborted || (error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  } finally {
+    signal?.removeEventListener('abort', abortListener);
+  }
+}
+
 async function findMatchedFileKeys(
   searchablePathEntries: SearchablePathEntry[],
   rawQuery: string,
@@ -723,47 +826,19 @@ async function findMatchedFileKeys(
   const requireExactPhrase = words.length > 1 && normalizedQuery.length > 0;
 
   if (requireExactPhrase) {
-    let matchedForPhrase = searchablePathEntries.slice();
-
-    // Keep ripgrep as an over-approximation for exact phrase mode by requiring
-    // each word to appear somewhere in the file, then defer strict phrase
-    // validation to the in-memory matcher.
-    for (const word of words) {
-      if (signal?.aborted) {
-        return new Set();
-      }
-
-      const matchedForWord = new Set<string>();
-      const fileChunks = chunkArray(
-        matchedForPhrase.map((entry) => entry.absolutePath),
-        RIPGREP_FILE_CHUNK_SIZE,
-      );
-
-      let nextChunkIndex = 0;
-      const workerCount = Math.min(RIPGREP_CHUNK_CONCURRENCY, fileChunks.length);
-      const workers = Array.from({ length: workerCount }, async () => {
-        while (nextChunkIndex < fileChunks.length && !signal?.aborted) {
-          const currentIndex = nextChunkIndex;
-          nextChunkIndex += 1;
-          const chunkMatches = await runRipgrepFilesWithMatches(word, fileChunks[currentIndex], signal);
-          for (const matchedPath of chunkMatches) {
-            matchedForWord.add(matchedPath);
-          }
-        }
-      });
-
-      await Promise.all(workers);
-      if (signal?.aborted) {
-        return new Set();
-      }
-
-      matchedForPhrase = matchedForPhrase.filter((entry) => matchedForWord.has(entry.normalizedPath));
-      if (matchedForPhrase.length === 0) {
-        break;
-      }
-    }
-
-    return new Set(matchedForPhrase.map((entry) => entry.normalizedPath));
+    // Scan each file once with bounded concurrency. The old implementation
+    // spawned a fresh ripgrep process for every term, so duplicate or very long
+    // queries multiplied child-process churn without changing the result.
+    const matches = await mapWithConcurrency(
+      searchablePathEntries,
+      RIPGREP_CHUNK_CONCURRENCY,
+      async (entry) => (
+        await fileContainsAllSearchTerms(entry.absolutePath, words, signal)
+          ? entry.normalizedPath
+          : null
+      ),
+    );
+    return new Set(matches.filter((match): match is string => match !== null));
   }
 
   let remainingEntries = searchablePathEntries.slice();
@@ -1202,7 +1277,8 @@ export async function searchConversations(
 ): Promise<{ results: ProjectConversationResult[]; totalMatches: number; query: string }> {
   const safeQuery = typeof query === 'string' ? query.trim() : '';
   const safeLimit = Math.max(1, Math.min(Number.isFinite(limit) ? limit : 50, 200));
-  const words = safeQuery.toLowerCase().split(/\s+/).filter((word) => word.length > 0);
+  const words = safeQuery.toLowerCase().split(/\s+/).filter(Boolean);
+  const scanTerms = normalizeSessionSearchTerms(safeQuery);
 
   if (words.length === 0) {
     return { results: [], totalMatches: 0, query: safeQuery };
@@ -1242,7 +1318,7 @@ export async function searchConversations(
   const matchedFileKeys = await findMatchedFileKeys(
     searchablePathEntries,
     safeQuery,
-    words,
+    scanTerms,
     signal ?? undefined,
   );
   if (isAborted() || matchedFileKeys.size === 0) {

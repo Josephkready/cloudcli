@@ -3,7 +3,7 @@ import test, { mock } from 'node:test';
 
 import { api } from '../../../utils/api';
 
-import { browseFilesystemFolders } from './workspaceApi';
+import { browseFilesystemFolders, buildCloneProgressPayload } from './workspaceApi';
 
 /*
  * #238: the folder picker needs to know whether it is sitting at
@@ -104,6 +104,20 @@ test('browseFilesystemFolders: still throws the server error on a failed browse'
     () => browseFilesystemFolders('/var/tmp'),
     /allowed workspace root/,
   );
+});
+
+test('clone progress sends credentials in the request body rather than the URL', () => {
+  assert.deepEqual(buildCloneProgressPayload({
+    workspacePath: ' /workspace/demo ',
+    githubUrl: ' https://github.com/org/repo.git ',
+    tokenMode: 'new',
+    selectedGithubToken: '',
+    newGithubToken: ' secret-token ',
+  }), {
+    path: '/workspace/demo',
+    githubUrl: 'https://github.com/org/repo.git',
+    newGithubToken: 'secret-token',
+  });
 });
 
 mock.reset();

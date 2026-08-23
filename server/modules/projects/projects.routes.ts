@@ -180,7 +180,7 @@ router.post(
   }),
 );
 
-router.get('/clone-progress', async (req, res) => {
+router.post('/clone-progress', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -201,11 +201,11 @@ router.get('/clone-progress', async (req, res) => {
   req.on('close', closeListener);
 
   try {
-    const queryParams = req.query as Record<string, unknown>;
-    const workspacePath = readQueryStringValue(queryParams.path);
-    const githubUrl = readQueryStringValue(queryParams.githubUrl);
-    const githubTokenId = readOptionalNumericQueryValue(queryParams.githubTokenId);
-    const newGithubToken = readQueryStringValue(queryParams.newGithubToken) || null;
+    const requestBody = req.body as Record<string, unknown>;
+    const workspacePath = readQueryStringValue(requestBody.path);
+    const githubUrl = readQueryStringValue(requestBody.githubUrl);
+    const githubTokenId = readOptionalNumericQueryValue(requestBody.githubTokenId);
+    const newGithubToken = readQueryStringValue(requestBody.newGithubToken) || null;
 
     const authenticatedUser = (req as typeof req & { user?: AuthenticatedUser }).user;
     const userId = authenticatedUser?.id;
