@@ -11,7 +11,11 @@ import {
   writePendingSends,
 } from '../utils/pendingSends';
 
-import { useChatRealtimeHandlers } from './useChatRealtimeHandlers';
+import {
+  clearStreamingStates,
+  useChatRealtimeHandlers,
+  type StreamingState,
+} from './useChatRealtimeHandlers';
 
 /**
  * The client half of the `chat_send_accepted` delivery ack (#389).
@@ -149,6 +153,48 @@ describe('stream buffering', () => {
     expect(sessionStore.finalizeStreaming).toHaveBeenCalledWith(SESSION);
     expect(sessionStore.updateStreaming).toHaveBeenCalledWith(OTHER_SESSION, 'B', 'claude');
     expect(sessionStore.finalizeStreaming).not.toHaveBeenCalledWith(OTHER_SESSION);
+  });
+
+  it('uses each stream event provider for background-session metadata', () => {
+    vi.useFakeTimers();
+    const { deliver, sessionStore } = setup();
+
+    deliver({
+      kind: 'stream_delta',
+      sessionId: OTHER_SESSION,
+      provider: 'codex',
+      content: 'from codex',
+    });
+    vi.advanceTimersByTime(100);
+
+    expect(sessionStore.updateStreaming).toHaveBeenCalledWith(
+      OTHER_SESSION,
+      'from codex',
+      'codex',
+    );
+  });
+
+  it('clears every pending stream timer during owner cleanup', () => {
+    vi.useFakeTimers();
+    const callback = vi.fn();
+    const streamingStates = new Map<string, StreamingState>([
+      [SESSION, {
+        accumulatedText: 'pending',
+        timer: window.setTimeout(callback, 100),
+        provider: 'claude',
+      }],
+      [OTHER_SESSION, {
+        accumulatedText: 'also pending',
+        timer: window.setTimeout(callback, 100),
+        provider: 'codex',
+      }],
+    ]);
+
+    clearStreamingStates(streamingStates);
+    vi.advanceTimersByTime(100);
+
+    expect(callback).not.toHaveBeenCalled();
+    expect(streamingStates.size).toBe(0);
   });
 });
 

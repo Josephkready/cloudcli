@@ -8,7 +8,11 @@ import { QuickSettingsPanel } from '../../quick-settings-panel';
 import type { ChatInterfaceProps, Provider  } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
-import { useChatRealtimeHandlers, type StreamingState } from '../hooks/useChatRealtimeHandlers';
+import {
+  clearStreamingStates,
+  useChatRealtimeHandlers,
+  type StreamingState,
+} from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
 import { useInterruptedResume } from '../hooks/useInterruptedResume';
 import { useSessionStore } from '../../../stores/useSessionStore';
@@ -302,10 +306,7 @@ function ChatInterface({
   useEffect(() => {
     const streamingStates = streamingStatesRef.current;
     return () => {
-      streamingStates.forEach(({ timer }) => {
-        if (timer) clearTimeout(timer);
-      });
-      streamingStates.clear();
+      clearStreamingStates(streamingStates);
     };
   }, []);
 

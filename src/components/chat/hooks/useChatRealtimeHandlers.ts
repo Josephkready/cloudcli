@@ -48,6 +48,19 @@ export type StreamingState = {
   provider: LLMProvider;
 };
 
+export function clearStreamingStates(streamingStates: Map<string, StreamingState>): void {
+  streamingStates.forEach(({ timer }) => {
+    if (timer) clearTimeout(timer);
+  });
+  streamingStates.clear();
+}
+
+function resolveEventProvider(value: unknown, fallback: LLMProvider): LLMProvider {
+  return value === 'claude' || value === 'codex' || value === 'antigravity'
+    ? value
+    : fallback;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Hook                                                              */
 /* ------------------------------------------------------------------ */
@@ -205,12 +218,14 @@ export function useChatRealtimeHandlers({
         const text = (msg.content as string) || '';
         if (!sid || !text) return;
 
+        const eventProvider = resolveEventProvider(msg.provider, provider);
         const streamingState = streamingStatesRef.current.get(sid) ?? {
           accumulatedText: '',
           timer: null,
-          provider,
+          provider: eventProvider,
         };
         streamingState.accumulatedText += text;
+        streamingState.provider = eventProvider;
         streamingStatesRef.current.set(sid, streamingState);
 
         if (!streamingState.timer) {

@@ -225,3 +225,45 @@ test('the owning socket detaches its PTY and arms cleanup', () => {
   assert.ok(session.timeoutId);
   clearTimeout(session.timeoutId as NodeJS.Timeout);
 });
+
+test('an idle detached PTY is killed and removed after the timeout', async () => {
+  let killCount = 0;
+  const socket = {} as never;
+  const session = {
+    pty: { kill: () => { killCount += 1; } },
+    ws: socket,
+    buffer: [],
+    timeoutId: null,
+    projectPath: '/tmp/project',
+    sessionId: APP_ID,
+  } as unknown as PtySessionEntry;
+  const sessions = new Map([['session-key', session]]);
+
+  detachPtySessionSocket('session-key', session, socket, sessions, 0);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  assert.equal(killCount, 1);
+  assert.equal(sessions.has('session-key'), false);
+});
+
+test('a reattached PTY is not killed by its stale idle timer', async () => {
+  let killCount = 0;
+  const oldSocket = {} as never;
+  const newSocket = {} as never;
+  const session = {
+    pty: { kill: () => { killCount += 1; } },
+    ws: oldSocket,
+    buffer: [],
+    timeoutId: null,
+    projectPath: '/tmp/project',
+    sessionId: APP_ID,
+  } as unknown as PtySessionEntry;
+  const sessions = new Map([['session-key', session]]);
+
+  detachPtySessionSocket('session-key', session, oldSocket, sessions, 0);
+  session.ws = newSocket;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  assert.equal(killCount, 0);
+  assert.equal(sessions.get('session-key'), session);
+});
