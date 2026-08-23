@@ -124,6 +124,20 @@ test('clone progress sends credentials in the request body rather than the URL',
   });
 });
 
+test('clone progress sends a selected stored-token id without a raw token', () => {
+  assert.deepEqual(buildCloneProgressPayload({
+    workspacePath: '/workspace/demo',
+    githubUrl: 'https://github.com/org/repo.git',
+    tokenMode: 'stored',
+    selectedGithubToken: '42',
+    newGithubToken: 'must-not-be-sent',
+  }), {
+    path: '/workspace/demo',
+    githubUrl: 'https://github.com/org/repo.git',
+    githubTokenId: '42',
+  });
+});
+
 test('clone progress uses an authenticated POST body and consumes the completion event', async (t) => {
   const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   Object.defineProperty(globalThis, 'localStorage', {
