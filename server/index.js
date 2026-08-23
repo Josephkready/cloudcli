@@ -18,6 +18,7 @@ import {
     validateWorkspacePath,
 } from '@/shared/utils.js';
 import { shouldExcludeFileTreeEntry } from '@/shared/file-tree-excludes.js';
+import { cleanupUploadedTempFiles, processProjectUpload } from '@/shared/project-file-upload.js';
 import {
     annotateRepositoryFlags,
     buildBrowseSuggestions,
@@ -938,6 +939,7 @@ const uploadFilesHandler = async (req, res) => {
     uploadMiddleware.array('files', MAX_FILE_UPLOAD_COUNT)(req, res, async (err) => {
         if (err) {
             console.error('Multer error:', err);
+            await cleanupUploadedTempFiles(req.files, 'multer rejection');
             if (err.code === 'LIMIT_FILE_SIZE') {
                 return res.status(400).json({ error: `File too large. Maximum size is ${MAX_FILE_UPLOAD_SIZE_MB}MB.` });
             }
@@ -955,7 +957,8 @@ const uploadFilesHandler = async (req, res) => {
             let filePaths = [];
             if (relativePaths) {
                 try {
-                    filePaths = JSON.parse(relativePaths);
+                    const parsedFilePaths = JSON.parse(relativePaths);
+                    filePaths = Array.isArray(parsedFilePaths) ? parsedFilePaths : [];
                 } catch {}
             }
 
@@ -971,6 +974,7 @@ const uploadFilesHandler = async (req, res) => {
             // Resolve the project directory through the DB using the new projectId.
             const projectRoot = await projectsDb.getProjectPathById(projectId);
             if (!projectRoot) {
+                await cleanupUploadedTempFiles(req.files, 'unknown upload project');
                 return res.status(404).json({ error: 'Project not found' });
             }
 
@@ -985,72 +989,29 @@ const uploadFilesHandler = async (req, res) => {
             } else {
                 const validation = await validateProjectPath(projectRoot, targetDir);
                 if (!validation.valid) {
+                    await cleanupUploadedTempFiles(req.files, 'rejected upload target');
                     return res.status(403).json({ error: validation.error });
                 }
                 resolvedTargetDir = validation.resolved;
             }
 
-            // Ensure target directory exists
-            try {
-                await fsPromises.access(resolvedTargetDir);
-            } catch {
-                await fsPromises.mkdir(resolvedTargetDir, { recursive: true });
-            }
-
-            // Validate every destination before moving any files so a rejected
-            // path cannot produce an apparently successful partial upload.
-            const uploadPlans = [];
-            const rejectedFiles = [];
-            for (let i = 0; i < req.files.length; i++) {
-                const file = req.files[i];
-                // Use relative path if provided (for folder uploads), otherwise use originalname
-                const fileName = (filePaths && filePaths[i]) ? filePaths[i] : file.originalname;
-                const destPath = path.join(resolvedTargetDir, fileName);
-                const destValidation = await validateProjectPath(projectRoot, destPath);
-                if (!destValidation.valid) {
-                    rejectedFiles.push(fileName);
-                    continue;
-                }
-                uploadPlans.push({ file, fileName, destPath: destValidation.resolved });
-            }
-
-            if (rejectedFiles.length > 0) {
+            const uploadResult = await processProjectUpload({
+                projectRoot,
+                resolvedTargetDir,
+                files: req.files,
+                relativePaths: filePaths
+            });
+            if (!uploadResult.ok) {
                 console.warn('Rejected file upload paths outside project root', {
                     projectId,
-                    rejectedFileCount: rejectedFiles.length
+                    rejectedFileCount: uploadResult.rejectedFiles.length
                 });
-                for (const file of req.files) {
-                    await fsPromises.unlink(file.path).catch(() => {});
-                }
                 return res.status(403).json({
                     error: 'One or more upload paths must be under project root',
-                    rejectedFiles
+                    rejectedFiles: uploadResult.rejectedFiles
                 });
             }
-
-            // Move uploaded files from temp to target directory
-            const uploadedFiles = [];
-            for (const { file, fileName, destPath } of uploadPlans) {
-
-                // Ensure parent directory exists (for nested files from folder upload)
-                const parentDir = path.dirname(destPath);
-                try {
-                    await fsPromises.access(parentDir);
-                } catch {
-                    await fsPromises.mkdir(parentDir, { recursive: true });
-                }
-
-                // Move file (copy + unlink to handle cross-device scenarios)
-                await fsPromises.copyFile(file.path, destPath);
-                await fsPromises.unlink(file.path);
-
-                uploadedFiles.push({
-                    name: fileName,
-                    path: destPath,
-                    size: file.size,
-                    mimeType: file.mimetype
-                });
-            }
+            const uploadedFiles = uploadResult.files;
 
             res.json({
                 success: true,
@@ -1063,11 +1024,7 @@ const uploadFilesHandler = async (req, res) => {
         } catch (error) {
             console.error('Error uploading files:', error);
             // Clean up any remaining temp files
-            if (req.files) {
-                for (const file of req.files) {
-                    await fsPromises.unlink(file.path).catch(() => {});
-                }
-            }
+            await cleanupUploadedTempFiles(req.files, 'upload handler failure');
             if (error.code === 'EACCES') {
                 res.status(403).json({ error: 'Permission denied' });
             } else {
