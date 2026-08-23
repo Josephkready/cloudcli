@@ -6,10 +6,12 @@ import test from 'node:test';
 
 import {
   buildShellCommand,
+  detachPtySessionSocket,
   handleShellConnection,
   quoteShellExecutable,
   resolveResumeSessionId,
 } from './shell-websocket.service.js';
+import type { PtySessionEntry } from './shell-websocket.service.js';
 
 // #69: the Shell tab must resume by the PROVIDER session id, not the app id.
 // Claude only knows the provider id, so resuming by the app id fails ("no
@@ -185,4 +187,83 @@ test('handleShellConnection still rejects ids carrying shell metacharacters', as
   } finally {
     fs.rmSync(projectPath, { recursive: true, force: true });
   }
+});
+
+test('a stale socket cannot detach a PTY owned by a newer connection', () => {
+  const oldSocket = {} as never;
+  const currentSocket = {} as never;
+  const session = {
+    pty: { kill: () => {} },
+    ws: currentSocket,
+    buffer: [],
+    timeoutId: null,
+    projectPath: '/tmp/project',
+    sessionId: APP_ID,
+  } as unknown as PtySessionEntry;
+  const sessions = new Map([['session-key', session]]);
+
+  assert.equal(detachPtySessionSocket('session-key', session, oldSocket, sessions), false);
+  assert.equal(session.ws, currentSocket);
+  assert.equal(session.timeoutId, null);
+  assert.equal(sessions.get('session-key'), session);
+});
+
+test('the owning socket detaches its PTY and arms cleanup', () => {
+  const socket = {} as never;
+  const session = {
+    pty: { kill: () => {} },
+    ws: socket,
+    buffer: [],
+    timeoutId: null,
+    projectPath: '/tmp/project',
+    sessionId: APP_ID,
+  } as unknown as PtySessionEntry;
+  const sessions = new Map([['session-key', session]]);
+
+  assert.equal(detachPtySessionSocket('session-key', session, socket, sessions), true);
+  assert.equal(session.ws, null);
+  assert.ok(session.timeoutId);
+  clearTimeout(session.timeoutId as NodeJS.Timeout);
+});
+
+test('an idle detached PTY is killed and removed after the timeout', async () => {
+  let killCount = 0;
+  const socket = {} as never;
+  const session = {
+    pty: { kill: () => { killCount += 1; } },
+    ws: socket,
+    buffer: [],
+    timeoutId: null,
+    projectPath: '/tmp/project',
+    sessionId: APP_ID,
+  } as unknown as PtySessionEntry;
+  const sessions = new Map([['session-key', session]]);
+
+  detachPtySessionSocket('session-key', session, socket, sessions, 0);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  assert.equal(killCount, 1);
+  assert.equal(sessions.has('session-key'), false);
+});
+
+test('a reattached PTY is not killed by its stale idle timer', async () => {
+  let killCount = 0;
+  const oldSocket = {} as never;
+  const newSocket = {} as never;
+  const session = {
+    pty: { kill: () => { killCount += 1; } },
+    ws: oldSocket,
+    buffer: [],
+    timeoutId: null,
+    projectPath: '/tmp/project',
+    sessionId: APP_ID,
+  } as unknown as PtySessionEntry;
+  const sessions = new Map([['session-key', session]]);
+
+  detachPtySessionSocket('session-key', session, oldSocket, sessions, 0);
+  session.ws = newSocket;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  assert.equal(killCount, 0);
+  assert.equal(sessions.get('session-key'), session);
 });

@@ -8,7 +8,11 @@ import { QuickSettingsPanel } from '../../quick-settings-panel';
 import type { ChatInterfaceProps, Provider  } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
-import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
+import {
+  clearStreamingStates,
+  useChatRealtimeHandlers,
+  type StreamingState,
+} from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
 import { useInterruptedResume } from '../hooks/useInterruptedResume';
 import { useSessionStore } from '../../../stores/useSessionStore';
@@ -46,8 +50,7 @@ function ChatInterface({
   const { t } = useTranslation('chat');
 
   const sessionStore = useSessionStore();
-  const streamTimerRef = useRef<number | null>(null);
-  const accumulatedStreamRef = useRef('');
+  const streamingStatesRef = useRef(new Map<string, StreamingState>());
   // When each session's `chat.subscribe` was last sent; idle acks older than
   // a later local request are discarded as stale.
   const statusCheckSentAtRef = useRef(new Map<string, number>());
@@ -55,14 +58,6 @@ function ChatInterface({
   // on every sequenced frame, read whenever a `chat.subscribe` is sent so the
   // server replays only the events this client actually missed.
   const lastSeqRef = useRef(new Map<string, number>());
-
-  const resetStreamingState = useCallback(() => {
-    if (streamTimerRef.current) {
-      clearTimeout(streamTimerRef.current);
-      streamTimerRef.current = null;
-    }
-    accumulatedStreamRef.current = '';
-  }, []);
 
   const {
     provider,
@@ -132,7 +127,6 @@ function ChatInterface({
     newSessionTrigger,
     processingSessions,
     onSessionIdle,
-    resetStreamingState,
     statusCheckSentAtRef,
     lastSeqRef,
     sessionStore,
@@ -280,8 +274,7 @@ function ChatInterface({
     setTokenBudget,
     pendingPermissionRequests,
     setPendingPermissionRequests,
-    streamTimerRef,
-    accumulatedStreamRef,
+    streamingStatesRef,
     lastSeqRef,
     statusCheckSentAtRef,
     onSessionProcessing,
@@ -311,10 +304,11 @@ function ChatInterface({
   }, [canAbortSession, handleAbortSession]);
 
   useEffect(() => {
+    const streamingStates = streamingStatesRef.current;
     return () => {
-      resetStreamingState();
+      clearStreamingStates(streamingStates);
     };
-  }, [resetStreamingState]);
+  }, []);
 
   const permissionContextValue = useMemo(() => ({
     pendingPermissionRequests,

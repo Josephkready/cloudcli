@@ -26,7 +26,7 @@ type ShellIncomingMessage = {
   forceRestart?: boolean;
 };
 
-type PtySessionEntry = {
+export type PtySessionEntry = {
   pty: IPty;
   ws: WebSocket | null;
   buffer: string[];
@@ -38,6 +38,32 @@ type PtySessionEntry = {
 const ptySessionsMap = new Map<string, PtySessionEntry>();
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 const SHELL_URL_PARSE_BUFFER_LIMIT = 32768;
+
+export function detachPtySessionSocket(
+  sessionKey: string,
+  session: PtySessionEntry,
+  socket: WebSocket,
+  sessions: Map<string, PtySessionEntry> = ptySessionsMap,
+  timeoutMs = PTY_SESSION_TIMEOUT,
+): boolean {
+  if (session.ws !== socket) {
+    return false;
+  }
+
+  session.ws = null;
+  if (session.timeoutId) {
+    clearTimeout(session.timeoutId);
+  }
+  session.timeoutId = setTimeout(() => {
+    if (sessions.get(sessionKey) !== session || session.ws !== null) {
+      return;
+    }
+
+    session.pty.kill();
+    sessions.delete(sessionKey);
+  }, timeoutMs);
+  return true;
+}
 
 type ShellWebSocketDependencies = {
   resolveProviderSessionId: (
@@ -272,6 +298,13 @@ export function handleShellConnection(
       }
 
       if (data.type === 'init') {
+        if (ptySessionKey) {
+          const previousSession = ptySessionsMap.get(ptySessionKey);
+          if (previousSession) {
+            detachPtySessionSocket(ptySessionKey, previousSession, ws);
+          }
+        }
+
         const projectPath = readString(data.projectPath, process.cwd());
         const sessionId = readString(data.sessionId) || null;
         const hasSession = readBoolean(data.hasSession);
@@ -314,6 +347,7 @@ export function handleShellConnection(
           shellProcess = existingSession.pty;
           if (existingSession.timeoutId) {
             clearTimeout(existingSession.timeoutId);
+            existingSession.timeoutId = null;
           }
 
           ws.send(
@@ -366,7 +400,8 @@ export function handleShellConnection(
         const providerCliEnv = buildProviderCliEnv();
         const prioritizedPath = prioritizeUserNpmGlobalBin(providerCliEnv);
 
-        shellProcess = pty.spawn(shell, shellArgs, {
+        const spawnedSessionKey = ptySessionKey;
+        const spawnedPty = pty.spawn(shell, shellArgs, {
           name: 'xterm-256color',
           cols: termCols,
           rows: termRows,
@@ -379,9 +414,10 @@ export function handleShellConnection(
             FORCE_COLOR: '3',
           },
         });
+        shellProcess = spawnedPty;
 
-        ptySessionsMap.set(ptySessionKey, {
-          pty: shellProcess,
+        ptySessionsMap.set(spawnedSessionKey, {
+          pty: spawnedPty,
           ws,
           buffer: [],
           timeoutId: null,
@@ -389,12 +425,8 @@ export function handleShellConnection(
           sessionId,
         });
 
-        shellProcess.onData((chunk) => {
-          if (!ptySessionKey) {
-            return;
-          }
-
-          const session = ptySessionsMap.get(ptySessionKey);
+        spawnedPty.onData((chunk) => {
+          const session = ptySessionsMap.get(spawnedSessionKey);
           if (!session) {
             return;
           }
@@ -465,13 +497,9 @@ export function handleShellConnection(
           }
         });
 
-        shellProcess.onExit((exitCode) => {
-          if (!ptySessionKey) {
-            return;
-          }
-
-          const session = ptySessionsMap.get(ptySessionKey);
-          if (session && session.pty !== shellProcess) {
+        spawnedPty.onExit((exitCode) => {
+          const session = ptySessionsMap.get(spawnedSessionKey);
+          if (session && session.pty !== spawnedPty) {
             return;
           }
 
@@ -490,8 +518,10 @@ export function handleShellConnection(
             clearTimeout(session.timeoutId);
           }
 
-          ptySessionsMap.delete(ptySessionKey);
-          shellProcess = null;
+          ptySessionsMap.delete(spawnedSessionKey);
+          if (shellProcess === spawnedPty) {
+            shellProcess = null;
+          }
         });
 
         let welcomeMsg = `\x1b[36mStarting terminal in: ${projectPath}\x1b[0m\r\n`;
@@ -551,15 +581,7 @@ export function handleShellConnection(
       return;
     }
 
-    session.ws = null;
-    session.timeoutId = setTimeout(() => {
-      if (ptySessionsMap.get(ptySessionKey as string) !== session) {
-        return;
-      }
-
-      session.pty.kill();
-      ptySessionsMap.delete(ptySessionKey as string);
-    }, PTY_SESSION_TIMEOUT);
+    detachPtySessionSocket(ptySessionKey, session, ws);
   });
 
   ws.on('error', (error) => {
