@@ -64,7 +64,14 @@ export const api = {
   // config endpoint removed - no longer needed (frontend uses window.location)
   // After the projectName → projectId migration the path/query identifier is
   // the DB-assigned `projectId`; parameter names reflect that for clarity.
-  projects: () => authenticatedFetch('/api/projects'),
+  projects: ({ sessionsLimit } = {}) => {
+    const params = new URLSearchParams();
+    if (Number.isFinite(sessionsLimit) && sessionsLimit > 0) {
+      params.set('sessionsLimit', String(Math.floor(sessionsLimit)));
+    }
+    const query = params.toString();
+    return authenticatedFetch(`/api/projects${query ? `?${query}` : ''}`);
+  },
   archivedProjects: () => authenticatedFetch('/api/projects/archived'),
   projectSessions: (projectId, { limit = 20, offset = 0 } = {}) => {
     const params = new URLSearchParams();

@@ -157,6 +157,59 @@ describe('mergeExpandedSessionPages', () => {
     assert.equal(merged.sessionMeta?.hasMore, false);
   });
 
+  it('accepts a smaller authoritative snapshot after a cross-client deletion', () => {
+    const previous = [project({
+      sessions: [session('s1'), session('deleted'), session('s3')],
+      sessionMeta: { hasMore: false, total: 3 },
+    })];
+    // Refreshes request the whole currently loaded window, so the remaining
+    // server rows are authoritative even though the total shrank.
+    const incoming = [project({
+      sessions: [session('s1'), session('s3')],
+      sessionMeta: { hasMore: false, total: 2 },
+    })];
+
+    assert.equal(mergeExpandedSessionPages(previous, incoming)[0], incoming[0]);
+  });
+
+  it('preserves an optimistic session added after the refresh began', () => {
+    const requested = [project({
+      sessions: [session('s1')],
+      sessionMeta: { hasMore: false, total: 1 },
+    })];
+    const current = [project({
+      sessions: [session('optimistic'), session('s1')],
+      sessionMeta: { hasMore: false, total: 2 },
+    })];
+    const incoming = [project({
+      sessions: [session('s1')],
+      sessionMeta: { hasMore: false, total: 1 },
+    })];
+
+    const [merged] = mergeExpandedSessionPages(current, incoming, requested);
+    assert.deepEqual(sessionIds(merged), ['optimistic', 's1']);
+    assert.equal(merged.sessionMeta?.total, 2);
+  });
+
+  it('does not undo a local removal that lands after the refresh began', () => {
+    const requested = [project({
+      sessions: [session('s1'), session('s2')],
+      sessionMeta: { hasMore: false, total: 2 },
+    })];
+    const current = [project({
+      sessions: [session('s1')],
+      sessionMeta: { hasMore: false, total: 1 },
+    })];
+    const incoming = [project({
+      sessions: [session('s1'), session('s2')],
+      sessionMeta: { hasMore: false, total: 2 },
+    })];
+
+    const [merged] = mergeExpandedSessionPages(current, incoming, requested);
+    assert.deepEqual(sessionIds(merged), ['s1']);
+    assert.equal(merged.sessionMeta?.total, 1);
+  });
+
   it('still reports more pages when the merged list is short of the total', () => {
     const previous = [project({ sessions: [session('s1'), session('s2')] })];
     const incoming = [project({ sessions: [session('s1')], sessionMeta: { hasMore: true, total: 10 } })];
