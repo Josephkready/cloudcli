@@ -166,4 +166,5 @@ test('ripgrep missing-file races are non-fatal but other I/O errors remain visib
     isIgnorableRipgrepMissingFileError(2, 'rg: /private/file: Permission denied (os error 13)'),
     false,
   );
+  assert.equal(isIgnorableRipgrepMissingFileError(2, ''), false);
 });

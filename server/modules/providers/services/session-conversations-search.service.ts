@@ -631,7 +631,6 @@ async function runRipgrepFilesWithMatches(
   return new Promise((resolve, reject) => {
     const args = [
       '--files-with-matches',
-      '--no-messages',
       '--ignore-case',
       '--fixed-strings',
       '--',
