@@ -53,6 +53,9 @@ export function attachHeartbeat(
     setInterval: (handler: () => void, ms: number) => unknown;
     clearInterval: (handle: never) => void;
   } = globalThis as never,
+  /** Names the socket in the termination log. Chat, shell, and plugin sockets
+   *  all pass through here, and only chat logs its own disconnects. */
+  label = 'websocket',
 ): () => void {
   let awaitingPong = false;
   ws.on('pong', () => {
@@ -67,6 +70,12 @@ export function attachHeartbeat(
       // cannot come, which is the very stall this exists to end. Terminating
       // fires the 'close' handlers that stop this timer and unsubscribe the
       // socket from every run.
+      //
+      // Logged because a silent terminate would recreate #389's real problem —
+      // a connection dying with no observable signal. Shell and plugin sockets
+      // log nothing on close at all, so without this line a heartbeat kill on
+      // those paths is completely invisible to an operator.
+      console.warn(`[Heartbeat] Terminating unresponsive ${label}: no pong within ${intervalMs}ms`);
       ws.terminate();
       return;
     }
@@ -103,11 +112,12 @@ export function createWebSocketServer(
   });
 
   wss.on('connection', (ws, request) => {
-    attachHeartbeat(ws as unknown as HeartbeatSocket);
-
     const incomingRequest = request as AuthenticatedWebSocketRequest;
     const url = incomingRequest.url ?? '/';
     const pathname = new URL(url, 'http://localhost').pathname;
+
+    // Path only — never the raw URL, which carries `?token=...`.
+    attachHeartbeat(ws as unknown as HeartbeatSocket, HEARTBEAT_INTERVAL_MS, globalThis as never, pathname);
 
     if (pathname === '/shell') {
       handleShellConnection(ws, dependencies.shell);

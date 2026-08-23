@@ -193,6 +193,15 @@ export type MessageKind =
  */
 export type GatewayEventKind =
   | 'chat_subscribed'
+  // Delivery ack for `chat.send`, echoing the sender's own `clientMessageId`
+  // (#389). Emitted as soon as the server owns the message — whether it started
+  // a run or queued it — so the client can retire its durable pending-send
+  // entry on a fact instead of inferring delivery from a transcript echo that a
+  // queued message will not produce until the run ahead of it finishes.
+  | 'chat_send_accepted'
+  // Answer to a `chat.ping` liveness probe (#389). Pure plumbing: the client
+  // consumes it to prove the socket is alive and never dispatches it onward.
+  | 'pong'
   | 'session_upserted'
   | 'loading_progress'
   // Emitted when a background provider scan finished and indexed something the

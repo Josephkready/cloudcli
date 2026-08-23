@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
-import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
+import { forgetSeenClientMessages, handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
 import { connectedClients } from '@/modules/websocket/services/websocket-state.service.js';
 
 /**
@@ -115,6 +115,7 @@ async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promis
   } finally {
     connectedClients.clear();
     chatRunRegistry.clearAll();
+    forgetSeenClientMessages();
     closeConnection();
     if (previousDatabasePath === undefined) {
       delete process.env.DATABASE_PATH;
@@ -248,6 +249,138 @@ test('chat.ping is answered with pong and touches no session state', async () =>
 
     assert.equal(socket.framesOfKind('pong').length, 1);
     assert.equal(socket.framesOfKind('protocol_error').length, 0);
+  });
+});
+
+test('a resent message with a known id is re-acked, NOT run a second time', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('dedupe', 'claude', '/workspace/demo');
+    const { spawn, calls } = makeControllableSpawn();
+    const socket = new FakeSocket();
+    connect(socket, makeDependencies(spawn));
+
+    sendChat(socket, 'dedupe', 'only once', 'pending_1');
+    await settle();
+    assert.equal(calls.length, 1);
+
+    // The ack never reached the client (a half-open socket whose uplink works
+    // and whose downlink is dead), so the client retries the same entry. The
+    // server already has it — running it again is the #389 duplicate.
+    sendChat(socket, 'dedupe', 'only once', 'pending_1');
+    await settle();
+
+    assert.equal(calls.length, 1, 'the message must not run twice');
+    assert.equal(
+      socket.acks().filter((frame) => frame.clientMessageId === 'pending_1').length,
+      2,
+      'the retry is answered, so the client can finally retire its entry',
+    );
+
+    finishRun(calls[0] as SpawnCall);
+    await settle();
+  });
+});
+
+test('a resend is suppressed even while the original is still queued', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('dedupe-queued', 'claude', '/workspace/demo');
+    const { spawn, calls } = makeControllableSpawn();
+    const socket = new FakeSocket();
+    connect(socket, makeDependencies(spawn));
+
+    sendChat(socket, 'dedupe-queued', 'first', 'pending_1');
+    await settle();
+    sendChat(socket, 'dedupe-queued', 'second', 'pending_2');
+    await settle();
+    assert.equal(chatRunRegistry.getPendingCount('dedupe-queued'), 1);
+
+    // The window the ack alone could not close: the queued message has no
+    // transcript row yet, so a client past its 30s grace resends it.
+    sendChat(socket, 'dedupe-queued', 'second', 'pending_2');
+    await settle();
+
+    assert.equal(
+      chatRunRegistry.getPendingCount('dedupe-queued'),
+      1,
+      'the resend must not add a second copy to the FIFO',
+    );
+
+    finishRun(calls[0] as SpawnCall);
+    await settle();
+    finishRun(calls[1] as SpawnCall);
+    await settle();
+    assert.deepEqual(calls.map((call) => call.command), ['first', 'second']);
+  });
+});
+
+test('distinct ids with identical text both run — dedup is by id, not content', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('dedupe-text', 'claude', '/workspace/demo');
+    const { spawn, calls } = makeControllableSpawn();
+    const socket = new FakeSocket();
+    connect(socket, makeDependencies(spawn));
+
+    // Deliberately asking the same thing twice is a legitimate thing to do.
+    sendChat(socket, 'dedupe-text', 'again please', 'pending_1');
+    await settle();
+    sendChat(socket, 'dedupe-text', 'again please', 'pending_2');
+    await settle();
+
+    finishRun(calls[0] as SpawnCall);
+    await settle();
+
+    assert.equal(calls.length, 2, 'a genuinely new message must not be swallowed');
+  });
+});
+
+test('the same id in a DIFFERENT session is not treated as a duplicate', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('sess-a', 'claude', '/workspace/demo');
+    sessionsDb.createAppSession('sess-b', 'claude', '/workspace/demo');
+    const { spawn, calls } = makeControllableSpawn();
+    const socket = new FakeSocket();
+    connect(socket, makeDependencies(spawn));
+
+    // Ids are only unique within one client's storage, so they can collide
+    // across sessions.
+    sendChat(socket, 'sess-a', 'hello a', 'pending_1');
+    await settle();
+    sendChat(socket, 'sess-b', 'hello b', 'pending_1');
+    await settle();
+
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls.map((call) => call.command), ['hello a', 'hello b']);
+
+    for (const call of [...calls]) {
+      finishRun(call);
+      await settle();
+    }
+  });
+});
+
+test('a send rejected for an unknown session stays retryable (its id is not burned)', async () => {
+  await withIsolatedDatabase(async () => {
+    const { spawn, calls } = makeControllableSpawn();
+    const socket = new FakeSocket();
+    connect(socket, makeDependencies(spawn));
+
+    // Rejected: the session does not exist yet.
+    sendChat(socket, 'later-session', 'hello', 'pending_1');
+    await settle();
+    assert.equal(socket.framesOfKind('protocol_error').length, 1);
+
+    // The client creates the session and retries the SAME entry. If the
+    // rejection had recorded the id, this would be swallowed as a duplicate and
+    // falsely acked — losing the only copy of the message.
+    sessionsDb.createAppSession('later-session', 'claude', '/workspace/demo');
+    sendChat(socket, 'later-session', 'hello', 'pending_1');
+    await settle();
+
+    assert.equal(calls.length, 1, 'the retry must actually run');
+    assert.equal(socket.acks().length, 1);
+
+    finishRun(calls[0] as SpawnCall);
+    await settle();
   });
 });
 

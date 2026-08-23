@@ -399,6 +399,18 @@ async function handleChatSend(
     return;
   }
 
+  const clientMessageId = typeof data.clientMessageId === 'string' ? data.clientMessageId : '';
+
+  // A resend of something already accepted. Re-ack it and stop: the client is
+  // retrying because it never saw the first ack, not because the server missed
+  // the message (#389). Running it again is precisely the duplicate this
+  // whole change exists to prevent, so the check goes BEFORE `submitMessage`.
+  if (hasSeenClientMessage(sessionId, clientMessageId)) {
+    console.warn('[Chat] Suppressing duplicate chat.send', { sessionId, clientMessageId });
+    sendChatSendAccepted(ws, sessionId, clientMessageId);
+    return;
+  }
+
   const message: QueuedChatMessage = {
     content: typeof data.content === 'string' ? data.content : '',
     options: (data.options ?? {}) as AnyRecord,
@@ -463,7 +475,10 @@ async function handleChatSend(
   // resent a message the server already had, and the user was asked the same
   // thing twice. Acking here turns "probably delivered" into a fact, and it must
   // be sent BEFORE the `await` below so a long run cannot delay its own ack.
-  sendChatSendAccepted(ws, sessionId, data);
+  // Recorded only now that the server has actually taken the message, so the
+  // rejection paths above stay retryable.
+  rememberClientMessage(sessionId, clientMessageId);
+  sendChatSendAccepted(ws, sessionId, clientMessageId);
 
   if (result.action === 'queued') {
     // A run is already in progress: the message now sits in the server-side
@@ -487,8 +502,7 @@ async function handleChatSend(
  * an id: older clients do not know about this frame, and an ack they cannot
  * correlate is not worth a protocol error.
  */
-function sendChatSendAccepted(ws: WebSocket, sessionId: string, data: AnyRecord): void {
-  const clientMessageId = typeof data.clientMessageId === 'string' ? data.clientMessageId : '';
+function sendChatSendAccepted(ws: WebSocket, sessionId: string, clientMessageId: string): void {
   if (!clientMessageId) {
     return;
   }
@@ -498,6 +512,93 @@ function sendChatSendAccepted(ws: WebSocket, sessionId: string, data: AnyRecord)
     clientMessageId,
     timestamp: new Date().toISOString(),
   });
+}
+
+/**
+ * How long a `clientMessageId` is remembered for duplicate suppression.
+ *
+ * Comfortably longer than the client's own resend grace
+ * (`DISPATCHED_RESEND_GRACE_MS`, 30s) plus a reconnect, because the whole point
+ * is to still recognise the id when a retry finally arrives.
+ */
+const SEEN_MESSAGE_TTL_MS = 10 * 60 * 1000;
+/** Bound per session so a long-lived chat cannot grow this without limit. */
+const SEEN_MESSAGE_MAX_PER_SESSION = 200;
+
+/**
+ * Recently accepted `clientMessageId`s, per session.
+ *
+ * WHY THIS EXISTS. The ack alone makes a duplicate *unlikely*, not impossible:
+ * it is just another outbound frame, and it can be lost exactly the way #389
+ * loses sends. A socket whose uplink still works but whose downlink is dead
+ * delivers the `chat.send`, starts or queues the run, and never gets the ack
+ * back. The client then reconnects, finds no transcript echo (the message may
+ * still be sitting in the FIFO behind a long turn), and resends — and without
+ * this the server would happily run it a second time.
+ *
+ * Deduping on the id the client already sends closes that hole, and makes
+ * `chat.send` idempotent per id rather than merely acknowledged.
+ */
+const seenClientMessageIds = new Map<string, Map<string, number>>();
+
+/** Drops expired ids and enforces the per-session cap, oldest first. */
+function pruneSeenMessages(seen: Map<string, number>, now: number): void {
+  for (const [id, at] of seen) {
+    if (now - at > SEEN_MESSAGE_TTL_MS) {
+      seen.delete(id);
+    }
+  }
+  // Map preserves insertion order, and entries are inserted in arrival order,
+  // so the first keys are the oldest.
+  while (seen.size > SEEN_MESSAGE_MAX_PER_SESSION) {
+    const oldest = seen.keys().next();
+    if (oldest.done) break;
+    seen.delete(oldest.value);
+  }
+}
+
+/**
+ * Whether this id has already been accepted for the session.
+ *
+ * An empty id (a client predating the ack) is never a duplicate — those clients
+ * get exactly the old behaviour.
+ */
+function hasSeenClientMessage(sessionId: string, clientMessageId: string): boolean {
+  if (!clientMessageId) return false;
+  const seen = seenClientMessageIds.get(sessionId);
+  if (!seen) return false;
+  pruneSeenMessages(seen, Date.now());
+  return seen.has(clientMessageId);
+}
+
+/**
+ * Records an id as accepted.
+ *
+ * Deliberately called only once the server has actually taken ownership — after
+ * `submitMessage` returns `queued` or `start`, never before. Recording earlier
+ * would mean a send REJECTED for draining or a full queue still poisoned its
+ * own id, so the client's perfectly legitimate retry would come back as a
+ * duplicate, get a false ack, and drop the only copy of the message.
+ */
+function rememberClientMessage(sessionId: string, clientMessageId: string): void {
+  if (!clientMessageId) return;
+  const now = Date.now();
+  let seen = seenClientMessageIds.get(sessionId);
+  if (!seen) {
+    seen = new Map<string, number>();
+    seenClientMessageIds.set(sessionId, seen);
+  }
+  seen.set(clientMessageId, now);
+  pruneSeenMessages(seen, now);
+}
+
+/** Forgets a session's accepted ids. Exported for tests and session teardown. */
+export function forgetSeenClientMessages(sessionId?: string): void {
+  if (sessionId === undefined) {
+    seenClientMessageIds.clear();
+    return;
+  }
+  seenClientMessageIds.delete(sessionId);
 }
 
 /**

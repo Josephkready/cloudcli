@@ -5,9 +5,13 @@ import { IS_PLATFORM } from '../constants/config';
 /**
  * One frame received from the chat websocket. The server guarantees every
  * frame carries a `kind` (provider message kinds plus gateway kinds such as
- * `chat_subscribed`, `session_upserted`, `loading_progress`,
- * `protocol_error`). The synthetic `websocket_reconnected` kind is injected
- * client-side when the socket re-opens after a drop.
+ * `chat_subscribed`, `chat_send_accepted`, `pong`, `session_upserted`,
+ * `loading_progress`, `protocol_error`). The synthetic `websocket_reconnected`
+ * kind is injected client-side when the socket re-opens after a drop.
+ *
+ * `pong` and the `UNKNOWN_MESSAGE_TYPE` flavour of `protocol_error` answering a
+ * `chat.ping` are consumed here and never dispatched — they are liveness
+ * plumbing, not application events (#389).
  */
 export type ServerEvent = {
   kind?: string;
@@ -75,6 +79,41 @@ const IDLE_BEFORE_PROBE_MS = 20_000;
  */
 const PONG_TIMEOUT_MS = 10_000;
 const RECONNECT_DELAY_MS = 3_000;
+/**
+ * How long a handshake may hang before it is abandoned.
+ *
+ * The liveness timer only starts at `onopen`, so a socket stuck in CONNECTING —
+ * no open, no close, no error — would otherwise be the one state with no
+ * coverage at all, waiting on whatever connect timeout the browser happens to
+ * apply. Same failure to the user as #389: wedged with no reconnect.
+ */
+const CONNECT_TIMEOUT_MS = 15_000;
+
+/**
+ * Whether a frame is a server rejecting our liveness probe, rather than a real
+ * failure the chat should see (#389).
+ *
+ * A `protocol_error` reaching the chat is not cosmetic: `useChatRealtimeHandlers`
+ * renders it as an error message in the conversation AND marks the session idle,
+ * so a probe rejected every 20s would spray fake errors into whatever session is
+ * open and stop the spinner on a live run.
+ *
+ * Two shapes have to be recognised, which is why this is not a single equality
+ * check:
+ *  - A CURRENT server names the type it rejected, so `type === 'chat.ping'` is
+ *    conclusive on its own.
+ *  - An OLDER server predates that field entirely and sends no `type` — the
+ *    very case this exists for. All that identifies it is that we had a probe
+ *    outstanding and the server said it did not recognise the message. Matching
+ *    on `type` alone silently failed to cover the only server that needs it.
+ */
+const isProbeRejection = (data: ServerEvent | null, answersProbe: boolean): boolean => {
+  if (data?.kind !== 'protocol_error' || data?.code !== 'UNKNOWN_MESSAGE_TYPE') {
+    return false;
+  }
+  if (data?.type === 'chat.ping') return true;
+  return data?.type === undefined && answersProbe;
+};
 
 const buildWebSocketUrl = (token: string | null) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -102,6 +141,8 @@ const useWebSocketProviderState = (): WebSocketContextType => {
   /** When the outstanding liveness probe was sent, or 0 when none is in flight. */
   const probeSentAtRef = useRef(0);
   const livenessTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Abandons a handshake that never completes. Cleared the moment one does. */
+  const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
    * Listener registry for the subscribe API. A ref (not state) because the
    * set must be readable synchronously inside `onmessage` and never trigger
@@ -128,6 +169,13 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       livenessTimerRef.current = null;
     }
     probeSentAtRef.current = 0;
+  }, []);
+
+  const stopConnectTimeout = useCallback(() => {
+    if (connectTimeoutRef.current) {
+      clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
   }, []);
 
   /**
@@ -158,6 +206,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       wsRef.current = null;
     }
     stopLivenessTimer();
+    stopConnectTimeout();
     setIsConnected(false);
 
     if (unmountedRef.current) return;
@@ -169,7 +218,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       if (unmountedRef.current) return; // Prevent reconnection if unmounted
       connectRef.current();
     }, RECONNECT_DELAY_MS);
-  }, [stopLivenessTimer]);
+  }, [stopLivenessTimer, stopConnectTimeout]);
 
   /**
    * Sends a liveness probe if one is not already outstanding.
@@ -221,12 +270,21 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       // CONNECTING and a superseded socket can be recognised as stale (#389).
       activeSocketRef.current = websocket;
 
+      stopConnectTimeout();
+      connectTimeoutRef.current = setTimeout(() => {
+        if (activeSocketRef.current !== websocket) return;
+        if (websocket.readyState === WebSocket.CONNECTING) {
+          teardown(websocket, 'handshake timed out');
+        }
+      }, CONNECT_TIMEOUT_MS);
+
       websocket.onopen = () => {
         if (activeSocketRef.current !== websocket) {
           // Superseded while connecting — a newer socket owns the provider now.
           websocket.close();
           return;
         }
+        stopConnectTimeout();
         setIsConnected(true);
         wsRef.current = websocket;
         lastFrameAtRef.current = Date.now();
@@ -246,6 +304,10 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       };
 
       websocket.onmessage = (event) => {
+        // Whether this frame could be the answer to a probe. Captured BEFORE the
+        // reset below, because the reset is what makes the probe no longer
+        // outstanding.
+        const answersProbe = probeSentAtRef.current !== 0;
         // Proof of life regardless of what the frame turns out to be — recorded
         // before parsing so even a malformed frame counts.
         lastFrameAtRef.current = Date.now();
@@ -255,16 +317,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
           // The probe's own answer carries no application meaning; everything
           // needed from it (the timestamps above) is already recorded.
           if (data?.kind === 'pong') return;
-          // A server too old to know `chat.ping` rejects it instead. That is a
-          // perfectly good proof of life, but it must not reach the chat, which
-          // renders protocol errors as messages and stops the spinner. Swallowed
-          // so the probe stays invisible across a version skew — the shape a
-          // service-worker-cached client can produce (#389).
-          if (data?.kind === 'protocol_error'
-            && data?.code === 'UNKNOWN_MESSAGE_TYPE'
-            && data?.type === 'chat.ping') {
-            return;
-          }
+          if (isProbeRejection(data, answersProbe)) return;
           dispatch(data);
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
@@ -279,13 +332,16 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       };
 
       websocket.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        // Only the event TYPE. The raw Event's `target` is the socket, whose
+        // `url` carries `?token=...` — logging the object puts the auth token in
+        // the console and in anything that ships console output.
+        console.error('WebSocket error:', error instanceof Event ? error.type : error);
       };
 
     } catch (error) {
       console.error('Error creating WebSocket connection:', error);
     }
-  }, [token, dispatch, checkLiveness, stopLivenessTimer, teardown]); // everytime token changes, we reconnect
+  }, [token, dispatch, checkLiveness, stopLivenessTimer, stopConnectTimeout, teardown]); // everytime token changes, we reconnect
 
   // `teardown` and the reconnect timer reach the CURRENT connect through this,
   // rather than capturing whichever one existed when the socket was created.
@@ -307,6 +363,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
         clearTimeout(reconnectTimeoutRef.current);
       }
       stopLivenessTimer();
+      stopConnectTimeout();
       // `activeSocketRef`, not `wsRef`: a socket still CONNECTING is absent from
       // `wsRef` and used to survive this cleanup, open later, and hijack the
       // provider's socket slot behind the replacement's back (#389).
