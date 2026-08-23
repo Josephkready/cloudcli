@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { api } from '../../../utils/api';
+import { streamAuthenticatedSse } from '../../../utils/sse';
 import type { LLMProvider } from '../../../types/app';
 
 export type SessionMessageMatch = {
@@ -31,35 +32,46 @@ export function useSessionMessageSearch(
 ) {
   const [items, setItems] = useState<SessionMessageMatch[]>([]);
   const seqRef = useRef(0);
-  const esRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const trimmed = query.trim();
     if (!enabled || !projectId || trimmed.length < MIN_QUERY) {
       setItems([]);
-      esRef.current?.close();
-      esRef.current = null;
+      abortRef.current?.abort();
+      abortRef.current = null;
       return;
     }
 
-    esRef.current?.close();
-    esRef.current = null;
+    abortRef.current?.abort();
+    abortRef.current = null;
     seqRef.current++;
 
     const handle = setTimeout(() => {
       const seq = ++seqRef.current;
       const url = api.searchConversationsUrl(trimmed);
-      const es = new EventSource(url);
-      esRef.current = es;
+      const controller = new AbortController();
+      abortRef.current = controller;
       const accumulated: SessionMessageMatch[] = [];
 
-      es.addEventListener('result', (evt) => {
+      const finish = () => {
+        if (seq !== seqRef.current) return;
+        controller.abort();
+        if (abortRef.current === controller) abortRef.current = null;
+      };
+
+      void streamAuthenticatedSse(url, (event) => {
         if (seq !== seqRef.current) {
-          es.close();
+          controller.abort();
           return;
         }
+        if (event.event === 'done' || event.event === 'error') {
+          finish();
+          return;
+        }
+        if (event.event !== 'result') return;
         try {
-          const data = JSON.parse((evt as MessageEvent).data) as { projectResult: ProjectResult };
+          const data = JSON.parse(event.data) as { projectResult: ProjectResult };
           const pr = data.projectResult;
           if (pr.projectId !== projectId) return;
           for (const s of pr.sessions) {
@@ -74,15 +86,9 @@ export function useSessionMessageSearch(
         } catch {
           // ignore malformed
         }
+      }, { signal: controller.signal }).then(finish).catch(() => {
+        if (!controller.signal.aborted) finish();
       });
-
-      const finish = () => {
-        if (seq !== seqRef.current) return;
-        es.close();
-        esRef.current = null;
-      };
-      es.addEventListener('done', finish);
-      es.addEventListener('error', finish);
     }, DEBOUNCE_MS);
 
     return () => {
@@ -92,8 +98,8 @@ export function useSessionMessageSearch(
 
   useEffect(() => {
     return () => {
-      esRef.current?.close();
-      esRef.current = null;
+      abortRef.current?.abort();
+      abortRef.current = null;
     };
   }, []);
 

@@ -35,6 +35,16 @@ The server serves the built client and the API on port `3001` by default. See `.
 
 Plugins (custom web-UI tabs, drop-installed by writing files): see [`docs/plugins.md`](docs/plugins.md).
 
+### Streaming API authentication
+
+Browser SSE calls use `Authorization: Bearer <token>`; bearer tokens are not
+accepted in URL query parameters. Conversation search remains
+`GET /api/providers/search/sessions?q=...`, while repository clone progress uses
+`POST /api/projects/clone-progress` with a JSON body containing `path`,
+`githubUrl`, and, when credentials are needed, optional `githubTokenId` or
+`newGithubToken`. Clients using the former GET/query-string clone contract must
+migrate to the POST body contract.
+
 ## Local feature-usage counters
 
 Alongside the auth/session data in `~/.cloudcli/auth.db` (`DATABASE_PATH`), the

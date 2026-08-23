@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
   extractClaudeSearchableMessage,
+  fileContainsAllSearchTerms,
   isIgnorableRipgrepMissingFileError,
   isInternalCodexContent,
+  normalizeSessionSearchTerms,
   normalizeSearchableSessions,
+  SearchTermMatcher,
 } from '@/modules/providers/services/session-conversations-search.service.js';
 
 /*
@@ -167,4 +173,34 @@ test('ripgrep missing-file races are non-fatal but other I/O errors remain visib
     false,
   );
   assert.equal(isIgnorableRipgrepMissingFileError(2, ''), false);
+});
+
+test('search terms are deduplicated before transcript scanning', () => {
+  const query = Array.from({ length: 3000 }, () => 'repeat').join(' ');
+  assert.deepEqual(normalizeSessionSearchTerms(`${query} UNIQUE unique`), ['repeat', 'unique']);
+});
+
+test('multi-pattern matching handles overlaps and chunks in a single scan', () => {
+  const matcher = new SearchTermMatcher(['he', 'she', 'hers']);
+  assert.equal(matcher.feed('s'), false);
+  assert.equal(matcher.feed('he went to '), false);
+  assert.equal(matcher.feed('hers'), true);
+});
+
+test('multi-term candidate scans read each file once and handle chunk boundaries', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'conversation-search-'));
+  const matching = path.join(directory, 'matching.jsonl');
+  const partial = path.join(directory, 'partial.jsonl');
+  try {
+    await writeFile(matching, `${'x'.repeat(65_534)}cross-boundary\nsecond term`, 'utf8');
+    await writeFile(partial, 'cross-boundary only', 'utf8');
+
+    assert.equal(
+      await fileContainsAllSearchTerms(matching, ['cross-boundary', 'second', 'term']),
+      true,
+    );
+    assert.equal(await fileContainsAllSearchTerms(partial, ['cross-boundary', 'second']), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

@@ -12,6 +12,16 @@ type WebSocketAuthDependencies = {
   } | null;
 };
 
+export function isAllowedWebSocketOrigin(origin: unknown, host: unknown): boolean {
+  if (origin === undefined) return true;
+  if (typeof origin !== 'string' || typeof host !== 'string' || host.trim() === '') return false;
+  try {
+    return new URL(origin).host.toLowerCase() === host.trim().toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Authenticates websocket upgrade requests before the `connection` handler runs.
  */
@@ -20,6 +30,10 @@ export function verifyWebSocketClient(
   dependencies: WebSocketAuthDependencies
 ): boolean {
   const request = info.req as AuthenticatedWebSocketRequest;
+  if (!isAllowedWebSocketOrigin(request.headers.origin, request.headers.host)) {
+    console.log('[WARN] WebSocket origin does not match request host');
+    return false;
+  }
   const upgradeUrl = new URL(request.url ?? '/', 'http://localhost');
   const loggedUrl = new URL(upgradeUrl);
   if (loggedUrl.searchParams.has('token')) {

@@ -215,6 +215,16 @@ test('Antigravity history reader normalizes messages and skips malformed lines',
       assert.equal(search.totalMatches, 1);
       assert.equal(search.results[0]?.sessions[0]?.provider, 'antigravity');
       assert.equal(search.results[0]?.sessions[0]?.sessionId, 'agy-session-2');
+
+      const caseAndWhitespaceVariant = await searchConversations('HISTORY   IS visible');
+      assert.equal(caseAndWhitespaceVariant.totalMatches, 1);
+
+      const separatedTerms = await searchConversations('visible History');
+      assert.equal(
+        separatedTerms.totalMatches,
+        0,
+        'multi-word queries still require the ordered adjacent phrase after candidate scanning',
+      );
     });
   } finally {
     await rm(tempRoot, { recursive: true, force: true });

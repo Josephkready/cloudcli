@@ -1,4 +1,5 @@
 import { api } from '../../../utils/api';
+import { streamAuthenticatedSse } from '../../../utils/sse';
 import type {
   BrowseFilesystemResponse,
   CloneProgressEvent,
@@ -128,33 +129,26 @@ export const createProjectRequest = async (payload: CreateProjectPayload) => {
   return data.project;
 };
 
-const buildCloneProgressQuery = ({
+export const buildCloneProgressPayload = ({
   workspacePath,
   githubUrl,
   tokenMode,
   selectedGithubToken,
   newGithubToken,
 }: CloneWorkspaceParams) => {
-  const query = new URLSearchParams({
+  const payload: Record<string, string> = {
     path: workspacePath.trim(),
     githubUrl: githubUrl.trim(),
-  });
+  };
 
   if (tokenMode === 'stored' && selectedGithubToken) {
-    query.set('githubTokenId', selectedGithubToken);
+    payload.githubTokenId = selectedGithubToken;
   }
 
   if (tokenMode === 'new' && newGithubToken.trim()) {
-    query.set('newGithubToken', newGithubToken.trim());
+    payload.newGithubToken = newGithubToken.trim();
   }
-
-  // EventSource cannot send custom headers, so the auth token is passed as query.
-  const authToken = localStorage.getItem('auth-token');
-  if (authToken) {
-    query.set('token', authToken);
-  }
-
-  return query.toString();
+  return payload;
 };
 
 export const cloneWorkspaceWithProgress = (
@@ -162,8 +156,7 @@ export const cloneWorkspaceWithProgress = (
   handlers: CloneProgressHandlers,
 ) =>
   new Promise<Record<string, unknown> | undefined>((resolve, reject) => {
-    const query = buildCloneProgressQuery(params);
-    const eventSource = new EventSource(`/api/projects/clone-progress?${query}`);
+    const controller = new AbortController();
     let settled = false;
 
     const settle = (callback: () => void) => {
@@ -171,11 +164,12 @@ export const cloneWorkspaceWithProgress = (
         return;
       }
       settled = true;
-      eventSource.close();
+      controller.abort();
       callback();
     };
 
-    eventSource.onmessage = (event) => {
+    void streamAuthenticatedSse('/api/projects/clone-progress', (event) => {
+      if (event.event !== 'message') return;
       try {
         const payload = JSON.parse(event.data) as CloneProgressEvent;
 
@@ -195,9 +189,14 @@ export const cloneWorkspaceWithProgress = (
       } catch (error) {
         console.error('Error parsing clone progress event:', error);
       }
-    };
-
-    eventSource.onerror = () => {
-      settle(() => reject(new Error('Connection lost during clone')));
-    };
+    }, {
+      method: 'POST',
+      body: JSON.stringify(buildCloneProgressPayload(params)),
+      signal: controller.signal,
+    }).then(() => {
+      if (!settled) settle(() => reject(new Error('Connection lost during clone')));
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      settle(() => reject(error instanceof Error ? error : new Error('Connection lost during clone')));
+    });
   });
