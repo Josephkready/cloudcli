@@ -1399,8 +1399,6 @@ async function startServer() {
             chatRunRegistry.startStaleRunReaper();
         });
 
-        await closeSessionsWatcher();
-
         // Graceful-drain window: on SIGTERM/SIGINT, stop accepting new chat runs
         // and give in-flight runs a bounded chance to finish before the process
         // exits, shrinking the window where a deploy/reconcile guillotines a turn
@@ -1455,6 +1453,11 @@ async function startServer() {
                 stopAiSessionTitler();
             } catch (err) {
                 console.error('[AI titles] Error stopping titler during shutdown:', err?.message || err);
+            }
+            try {
+                await closeSessionsWatcher();
+            } catch (err) {
+                console.error('[Sessions watcher] Error stopping watcher during shutdown:', err?.message || err);
             }
             try {
                 await stopAllPlugins();

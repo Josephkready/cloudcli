@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isSpawnRaceError, resolveToolApproval, waitForToolApproval } from './claude-sdk.js';
+import {
+  isSpawnRaceError,
+  registerClaudeQueryAbort,
+  resolveToolApproval,
+  waitForToolApproval,
+} from './claude-sdk.js';
 
 // The spawn-retry (#43) hinges on classifying the transient "the `claude` bin
 // briefly vanished" errors apart from genuine failures. Only the former may be
@@ -35,6 +40,25 @@ test('does not classify unrelated errors as a spawn race', () => {
 test('is false for null/undefined', () => {
   assert.equal(isSpawnRaceError(null), false);
   assert.equal(isSpawnRaceError(undefined), false);
+});
+
+test('Claude query abort wiring interrupts the query and clears after settlement', async () => {
+  let installedAbort = null;
+  let clears = 0;
+  let interrupts = 0;
+  const writer = {
+    setAbortHandler(handler) { installedAbort = handler; },
+    clearAbortHandler() { clears += 1; },
+  };
+  const queryInstance = {
+    async interrupt() { interrupts += 1; },
+  };
+
+  const clear = registerClaudeQueryAbort(writer, queryInstance);
+  assert.equal(await installedAbort(), true);
+  assert.equal(interrupts, 1);
+  clear();
+  assert.equal(clears, 1);
 });
 
 // #62: a tool-approval prompt must not auto-deny mid-task. The default wait is

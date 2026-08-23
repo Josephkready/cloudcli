@@ -6,7 +6,8 @@ import { WebSocket } from 'ws';
 export function handlePluginWsProxy(
   clientWs: WebSocket,
   pathname: string,
-  getPluginPort: (pluginName: string) => number | null
+  getPluginPort: (pluginName: string) => number | null,
+  createUpstream: (url: string) => WebSocket = (url) => new WebSocket(url),
 ): void {
   const pluginName = pathname.replace('/plugin-ws/', '');
   if (!pluginName || /[^a-zA-Z0-9_-]/.test(pluginName)) {
@@ -20,9 +21,23 @@ export function handlePluginWsProxy(
     return;
   }
 
-  const upstream = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const upstream = createUpstream(`ws://127.0.0.1:${port}/ws`);
+
+  const closeUpstream = (): void => {
+    if (upstream.readyState === WebSocket.CONNECTING) {
+      upstream.terminate();
+    } else if (upstream.readyState === WebSocket.OPEN) {
+      upstream.close();
+    }
+  };
 
   upstream.on('open', () => {
+    // The client can disappear while the upstream HTTP upgrade is in flight.
+    // Recheck at open as a second line of defense against an orphaned proxy.
+    if (clientWs.readyState !== WebSocket.OPEN) {
+      upstream.close();
+      return;
+    }
     console.log(`[Plugins] WS proxy connected to "${pluginName}" on port ${port}`);
   });
 
@@ -45,9 +60,7 @@ export function handlePluginWsProxy(
   });
 
   clientWs.on('close', () => {
-    if (upstream.readyState === WebSocket.OPEN) {
-      upstream.close();
-    }
+    closeUpstream();
   });
 
   upstream.on('error', (error) => {
@@ -58,8 +71,6 @@ export function handlePluginWsProxy(
   });
 
   clientWs.on('error', () => {
-    if (upstream.readyState === WebSocket.OPEN) {
-      upstream.close();
-    }
+    closeUpstream();
   });
 }

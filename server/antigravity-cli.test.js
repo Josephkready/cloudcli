@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import {
   abortAntigravitySession,
   resolveAntigravityPermissionArgs,
   spawnAntigravity,
+  terminateAntigravityChild,
 } from './antigravity-cli.js';
 
 const findEnvKey = (name) =>
@@ -120,6 +122,36 @@ test('permission modes map onto agy flags', () => {
   assert.deepEqual(resolveAntigravityPermissionArgs('acceptEdits'), ['--mode', 'accept-edits']);
   assert.deepEqual(resolveAntigravityPermissionArgs('bypassPermissions'), ['--dangerously-skip-permissions']);
   assert.deepEqual(resolveAntigravityPermissionArgs('default'), []);
+});
+
+test('Antigravity abort escalates to SIGKILL when a child ignores SIGTERM', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const child = new EventEmitter();
+  const signals = [];
+  child.kill = (signal) => {
+    signals.push(signal);
+    return true;
+  };
+
+  assert.equal(terminateAntigravityChild(child, 25), true);
+  assert.deepEqual(signals, ['SIGTERM']);
+  t.mock.timers.tick(25);
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+});
+
+test('Antigravity abort cancels escalation when the child closes during grace', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const child = new EventEmitter();
+  const signals = [];
+  child.kill = (signal) => {
+    signals.push(signal);
+    return true;
+  };
+
+  assert.equal(terminateAntigravityChild(child, 25), true);
+  child.emit('close', null, 'SIGTERM');
+  t.mock.timers.tick(25);
+  assert.deepEqual(signals, ['SIGTERM']);
 });
 
 test('spawnAntigravity streams NDJSON deltas and captures the native conversation id', { concurrency: false }, async () => {

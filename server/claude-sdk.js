@@ -423,6 +423,15 @@ function getAllSessions() {
   return Array.from(activeSessions.keys());
 }
 
+/** Bind a Claude query's interrupt method to the gateway writer for early aborts. */
+export function registerClaudeQueryAbort(writer, queryInstance) {
+  writer.setAbortHandler?.(async () => {
+    await queryInstance.interrupt();
+    return true;
+  });
+  return () => writer.clearAbortHandler?.();
+}
+
 /**
  * Transforms SDK messages to WebSocket format expected by frontend
  * @param {Object} sdkMessage - SDK message object
@@ -673,6 +682,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
   const { sessionId, sessionSummary } = options;
   let capturedSessionId = sessionId;
   let sessionCreatedSent = false;
+  let clearRuntimeAbort = () => {};
 
   const emitNotification = (event) => {
     notifyUserIfEnabled({
@@ -858,6 +868,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       }
 
       // Track the query instance for abort capability
+      clearRuntimeAbort = registerClaudeQueryAbort(ws, queryInstance);
       if (capturedSessionId) {
         addSession(capturedSessionId, queryInstance, ws);
       }
@@ -943,7 +954,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
     // Send the terminal completion event — skipped for aborted runs, whose
     // terminal `complete` (aborted: true) was already sent by abort-session.
-    const wasAborted = capturedSessionId ? abortedSessionIds.delete(capturedSessionId) : false;
+    const wasAborted = (capturedSessionId ? abortedSessionIds.delete(capturedSessionId) : false)
+      || ws?.isRunActive?.() === false;
     if (!wasAborted) {
       ws.send(createCompleteMessage({ provider: 'claude', sessionId: capturedSessionId || sessionId || null, exitCode: 0 }));
     }
@@ -957,19 +969,20 @@ async function queryClaudeSDK(command, options = {}, ws) {
     // Complete
 
   } catch (error) {
-    console.error('SDK query error:', error);
-
     // Clean up session on error
     if (capturedSessionId) {
       removeSession(capturedSessionId);
     }
 
-    const wasAborted = capturedSessionId ? abortedSessionIds.delete(capturedSessionId) : false;
+    const wasAborted = (capturedSessionId ? abortedSessionIds.delete(capturedSessionId) : false)
+      || ws?.isRunActive?.() === false;
     if (wasAborted) {
       // The abort already produced the terminal complete; a generator throw
       // caused by interrupt() is expected noise, not a user-facing error.
       return;
     }
+
+    console.error('SDK query error:', error);
 
     // Check if Claude CLI is installed for a clearer error message
     const installed = await providerAuthService.isProviderInstalled('claude');
@@ -987,6 +1000,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
       sessionName: sessionSummary,
       error
     });
+  } finally {
+    clearRuntimeAbort();
   }
 }
 

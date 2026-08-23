@@ -138,6 +138,33 @@ test('provider-id capture is idempotent across setSessionId and session_created'
   assert.equal(writer.getSessionId(), 'native-2');
 });
 
+test('an abort requested before provider startup fires when its handler is installed', async () => {
+  const { writer } = makeWriter();
+  let aborted = 0;
+
+  assert.equal(await writer.abort(), false, 'no provider resource exists yet');
+  writer.setAbortHandler(() => {
+    aborted += 1;
+    return true;
+  });
+  await Promise.resolve();
+
+  assert.equal(aborted, 1, 'the late-created provider resource is stopped immediately');
+});
+
+test('an installed provider abort handler is one-shot', async () => {
+  const { writer } = makeWriter();
+  let aborted = 0;
+  writer.setAbortHandler(() => {
+    aborted += 1;
+    return true;
+  });
+
+  assert.equal(await writer.abort(), true);
+  assert.equal(await writer.abort(), false);
+  assert.equal(aborted, 1);
+});
+
 test('a writer constructed with a resumed provider id does not re-announce it', () => {
   const { writer, providerIds } = makeWriter({ providerSessionId: 'resumed-native' });
 

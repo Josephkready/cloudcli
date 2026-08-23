@@ -45,6 +45,7 @@ type SpawnCall = {
   writer: {
     send: (message: Record<string, unknown>) => void;
     setSessionId: (id: string) => void;
+    setAbortHandler: (handler: () => boolean | Promise<boolean>) => void;
   };
   resolve: () => void;
   reject: (error: Error) => void;
@@ -743,7 +744,7 @@ test('an abort the runtime refuses still completes the run, reported as exitCode
   });
 });
 
-test('aborting a run with no provider id yet skips the runtime but still completes the run', async () => {
+test('aborting a run with no provider id yet cancels its provider resource', async () => {
   await withIsolatedDatabase(async () => {
     const { spawn, calls } = makeControllableSpawn();
     const { dependencies, aborts } = makeDependencies(spawn);
@@ -752,18 +753,24 @@ test('aborting a run with no provider id yet skips the runtime but still complet
     const socket = new FakeSocket();
     connect(socket, dependencies);
 
-    // The user hits stop before the runtime announced its native id: there is
-    // nothing to address, but the client must not be left "processing".
+    // The user hits stop before the runtime announced its native id. Its direct
+    // resource callback must still fire; waiting for an id would strand it.
     sendChat(socket, 'early-abort', 'hello');
     await settle();
+    let resourceAborts = 0;
+    (calls[0] as SpawnCall).writer.setAbortHandler(() => {
+      resourceAborts += 1;
+      return true;
+    });
     emit(socket, { type: 'chat.abort', sessionId: 'early-abort' });
     await settle();
 
     assert.equal(aborts.length, 0, 'no runtime call without a provider-native id');
+    assert.equal(resourceAborts, 1, 'the runtime resource is addressed directly');
     const completes = socket.framesOfKind('complete');
     assert.equal(completes.length, 1);
     assert.equal(completes[0]?.aborted, true);
-    assert.equal(completes[0]?.exitCode, 1);
+    assert.equal(completes[0]?.exitCode, 0);
     assert.equal(chatRunRegistry.isProcessing('early-abort'), false);
 
     (calls[0] as SpawnCall).resolve();

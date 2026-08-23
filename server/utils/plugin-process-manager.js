@@ -2,12 +2,77 @@ import path from 'path';
 
 // cross-spawn: drop-in spawn with Windows .cmd/PATHEXT resolution.
 import spawn from 'cross-spawn';
+
 import { scanPlugins, getPluginsConfig, getPluginDir } from './plugin-loader.js';
 
 // Map<pluginName, { process, port }>
 const runningPlugins = new Map();
 // Map<pluginName, Promise<port>> — in-flight start operations
 const startingPlugins = new Map();
+// Map<pluginName, ChildProcess> — resources that exist before ready/port discovery.
+const startingPluginProcesses = new Map();
+const terminatingPluginProcesses = new WeakMap();
+const PLUGIN_STOP_GRACE_MS = 5000;
+let stoppingAllPlugins = false;
+
+/**
+ * Stop a plugin child with bounded grace. The escalation timer itself retains
+ * the child until it exits or receives SIGKILL, including startup failures
+ * that have not yet entered `runningPlugins`.
+ */
+export function terminatePluginProcess(pluginProcess, onSettled = () => {}, graceMs = PLUGIN_STOP_GRACE_MS) {
+  const existing = terminatingPluginProcesses.get(pluginProcess);
+  if (existing) {
+    existing.callbacks.add(onSettled);
+    return;
+  }
+
+  let settled = false;
+  let forceKillTimer = null;
+  const callbacks = new Set([onSettled]);
+  const onExit = () => settle(true);
+  const settle = (success = true) => {
+    if (settled) return;
+    settled = true;
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+    pluginProcess.removeListener('exit', onExit);
+    terminatingPluginProcesses.delete(pluginProcess);
+    for (const callback of callbacks) callback(success);
+  };
+  terminatingPluginProcesses.set(pluginProcess, { callbacks });
+
+  pluginProcess.once('exit', onExit);
+  try {
+    const signalled = pluginProcess.kill('SIGTERM');
+    if (!signalled) {
+      console.error('[Plugins] Plugin process rejected SIGTERM');
+      settle(false);
+      return;
+    }
+  } catch (error) {
+    console.error('[Plugins] Failed to terminate plugin process:', error?.message || error);
+    settle(false);
+    return;
+  }
+
+  if (settled) return;
+
+  forceKillTimer = setTimeout(() => {
+    if (settled) return;
+    let signalled = false;
+    try {
+      signalled = pluginProcess.kill('SIGKILL');
+      if (!signalled) {
+        console.error('[Plugins] Plugin process rejected SIGKILL');
+      }
+    } catch (error) {
+      console.error('[Plugins] Failed to force-kill plugin process:', error?.message || error);
+    } finally {
+      settle(signalled);
+    }
+  }, graceMs);
+  forceKillTimer.unref?.();
+}
 
 /**
  * Build the environment handed to a plugin server subprocess.
@@ -49,7 +114,10 @@ function buildPluginEnv(name) {
  * The plugin's server entry must print a JSON line with { ready: true, port: <number> }
  * to stdout within 10 seconds.
  */
-export function startPluginServer(name, pluginDir, serverEntry) {
+export function startPluginServer(name, pluginDir, serverEntry, spawnProcess = spawn) {
+  if (stoppingAllPlugins) {
+    return Promise.reject(new Error('Plugin shutdown is in progress'));
+  }
   if (runningPlugins.has(name)) {
     return Promise.resolve(runningPlugins.get(name).port);
   }
@@ -63,11 +131,12 @@ export function startPluginServer(name, pluginDir, serverEntry) {
 
     const serverPath = path.join(pluginDir, serverEntry);
 
-    const pluginProcess = spawn('node', [serverPath], {
+    const pluginProcess = spawnProcess('node', [serverPath], {
       cwd: pluginDir,
       env: buildPluginEnv(name),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    startingPluginProcesses.set(name, pluginProcess);
 
     let resolved = false;
     let stdout = '';
@@ -75,7 +144,7 @@ export function startPluginServer(name, pluginDir, serverEntry) {
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        pluginProcess.kill();
+        terminatePluginProcess(pluginProcess);
         reject(new Error('Plugin server did not report ready within 10 seconds'));
       }
     }, 10000);
@@ -92,6 +161,11 @@ export function startPluginServer(name, pluginDir, serverEntry) {
           if (msg.ready && typeof msg.port === 'number') {
             clearTimeout(timeout);
             resolved = true;
+            if (stoppingAllPlugins) {
+              terminatePluginProcess(pluginProcess);
+              reject(new Error('Plugin shutdown started before server became ready'));
+              return;
+            }
             runningPlugins.set(name, { process: pluginProcess, port: msg.port });
 
             pluginProcess.on('exit', () => {
@@ -129,6 +203,7 @@ export function startPluginServer(name, pluginDir, serverEntry) {
     });
   }).finally(() => {
     startingPlugins.delete(name);
+    startingPluginProcesses.delete(name);
   });
 
   startingPlugins.set(name, startPromise);
@@ -137,32 +212,29 @@ export function startPluginServer(name, pluginDir, serverEntry) {
 
 /**
  * Stop a plugin's server subprocess.
- * Returns a Promise that resolves when the process has fully exited.
+ * Resolves when the process exits cleanly or the bounded termination sequence
+ * has issued its forced kill.
  */
 export function stopPluginServer(name) {
   const entry = runningPlugins.get(name);
   if (!entry) return Promise.resolve();
 
-  return new Promise((resolve) => {
-    const cleanup = () => {
-      clearTimeout(forceKillTimer);
-      runningPlugins.delete(name);
-      resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = (success) => {
+      if (runningPlugins.get(name) === entry) {
+        runningPlugins.delete(name);
+      }
+      if (success) {
+        console.log(`[Plugins] Server stopped for "${name}"`);
+        resolve();
+      } else {
+        reject(new Error(`Failed to stop plugin server "${name}"`));
+      }
     };
 
-    entry.process.once('exit', cleanup);
+    terminatePluginProcess(entry.process, cleanup);
 
-    entry.process.kill('SIGTERM');
-
-    // Force kill after 5 seconds if still running
-    const forceKillTimer = setTimeout(() => {
-      if (runningPlugins.has(name)) {
-        entry.process.kill('SIGKILL');
-        cleanup();
-      }
-    }, 5000);
-
-    console.log(`[Plugins] Server stopped for "${name}"`);
+    console.log(`[Plugins] Stopping server for "${name}"`);
   });
 }
 
@@ -183,12 +255,28 @@ export function isPluginRunning(name) {
 /**
  * Stop all running plugin servers (called on host shutdown).
  */
-export function stopAllPlugins() {
+export async function stopAllPlugins() {
+  stoppingAllPlugins = true;
   const stops = [];
   for (const [name] of runningPlugins) {
     stops.push(stopPluginServer(name));
   }
-  return Promise.all(stops);
+  for (const pluginProcess of startingPluginProcesses.values()) {
+    stops.push(new Promise((resolve, reject) => {
+      terminatePluginProcess(pluginProcess, (success) => {
+        if (success) resolve();
+        else reject(new Error('Failed to stop starting plugin server'));
+      });
+    }));
+  }
+
+  const results = await Promise.allSettled(stops);
+  const failures = results
+    .filter((result) => result.status === 'rejected')
+    .map((result) => result.reason);
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'One or more plugin servers failed to stop');
+  }
 }
 
 /**

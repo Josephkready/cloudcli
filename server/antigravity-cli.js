@@ -12,6 +12,50 @@ import {
 } from './shared/utils.js';
 
 const activeAntigravityProcesses = new Map();
+const abortEscalationTimers = new WeakMap();
+const ANTIGRAVITY_ABORT_GRACE_MS = 5000;
+
+/**
+ * Ask a live Antigravity child to stop, then force-kill it if SIGTERM is
+ * ignored. The timer retains the child until it exits, so it cannot become an
+ * untracked orphan during shutdown/abort cleanup.
+ */
+export function terminateAntigravityChild(child, graceMs = ANTIGRAVITY_ABORT_GRACE_MS) {
+  child.aborted = true;
+  if (abortEscalationTimers.has(child)) {
+    return true;
+  }
+
+  const clearEscalation = () => {
+    const timer = abortEscalationTimers.get(child);
+    if (timer) {
+      clearTimeout(timer);
+      abortEscalationTimers.delete(child);
+    }
+  };
+  const timer = setTimeout(() => {
+    try {
+      child.kill('SIGKILL');
+    } catch (error) {
+      console.error('[Antigravity] Failed to force-kill aborted process:', error?.message || error);
+    }
+  }, graceMs);
+  timer.unref?.();
+  abortEscalationTimers.set(child, timer);
+  child.once('close', clearEscalation);
+
+  try {
+    const signalled = child.kill('SIGTERM');
+    if (!signalled) {
+      clearEscalation();
+    }
+    return signalled;
+  } catch (error) {
+    clearEscalation();
+    console.error('[Antigravity] Failed to terminate process:', error?.message || error);
+    return false;
+  }
+}
 const MAX_PROVIDER_ERROR_LENGTH = 2_000;
 
 export function sanitizeAntigravityError(value) {
@@ -251,6 +295,7 @@ export async function spawnAntigravity(command, options = {}, writer) {
     });
 
     child.on('error', async (error) => {
+      writer.clearAbortHandler?.();
       cleanup();
       if (settled) {
         return;
@@ -281,6 +326,7 @@ export async function spawnAntigravity(command, options = {}, writer) {
     });
 
     child.on('close', (code, signal) => {
+      writer.clearAbortHandler?.();
       cleanup();
       if (settled) {
         return;
@@ -338,6 +384,11 @@ export async function spawnAntigravity(command, options = {}, writer) {
       });
       reject(error);
     });
+
+    // Install only after the close/error paths are listening. If Stop arrived
+    // before spawn completed, setAbortHandler invokes this immediately; the
+    // listeners must already exist so a fast exit cannot strand the promise.
+    writer.setAbortHandler?.(() => terminateAntigravityChild(child));
   });
 }
 
@@ -346,8 +397,7 @@ export function abortAntigravitySession(sessionId) {
   if (!child) {
     return false;
   }
-  child.aborted = true;
-  return child.kill('SIGTERM');
+  return terminateAntigravityChild(child);
 }
 
 export function isAntigravitySessionActive(sessionId) {
