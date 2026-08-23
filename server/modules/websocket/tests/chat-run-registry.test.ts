@@ -107,7 +107,7 @@ test('session_created is swallowed and persisted as the provider-id mapping', as
   });
 });
 
-test('complete marks the run finished and duplicate completes are dropped', async () => {
+test('complete marks the run finished and every later provider event is dropped', async () => {
   await withIsolatedDatabase(() => {
     sessionsDb.createAppSession('app-run-3', 'codex', '/workspace/demo');
     const connection = new FakeConnection();
@@ -123,9 +123,14 @@ test('complete marks the run finished and duplicate completes are dropped', asyn
     run.writer.send({ kind: 'complete', provider: 'codex', sessionId: 'native-3', exitCode: 0 });
     // Late duplicate from a killed runtime's exit handler.
     run.writer.send({ kind: 'complete', provider: 'codex', sessionId: 'native-3', exitCode: 1 });
+    run.writer.send({ kind: 'stream_delta', provider: 'codex', sessionId: 'native-3', content: 'ghost' });
+    run.writer.send({ kind: 'error', provider: 'codex', sessionId: 'native-3', content: 'late error' });
 
     const completes = connection.frames.filter((frame) => frame.kind === 'complete');
     assert.equal(completes.length, 1);
+    assert.equal(connection.frames.length, 1, 'no event can follow the terminal complete');
+    assert.equal(run.events.length, 1, 'late events are not retained for replay');
+    assert.equal(run.lastSeq, 1, 'late events do not consume sequence numbers');
     assert.equal(completes[0]?.actualSessionId, 'app-run-3');
     assert.equal(chatRunRegistry.isProcessing('app-run-3'), false);
 

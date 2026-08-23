@@ -293,11 +293,10 @@ function evictRunLater(runToEvict: ChatRun): void {
  * 4. Flip the run to `completed` when the terminal `complete` event passes by.
  */
 function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): NormalizedMessage | null {
-  // Exactly-one-complete contract: when a run is aborted the chat handler
-  // emits the terminal `complete` immediately, but the killed runtime may
-  // still emit its own `complete` from its exit handler moments later.
-  // Whichever arrives first wins; the duplicate is dropped here.
-  if (message.kind === 'complete' && run.status === 'completed') {
+  // A terminal event closes the stream permanently. An aborted runtime can
+  // take a moment to unwind and may emit deltas/errors as well as its own
+  // duplicate complete; none may escape into the already-finished run.
+  if (run.status === 'completed') {
     return null;
   }
 

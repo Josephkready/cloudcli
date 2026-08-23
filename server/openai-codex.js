@@ -256,6 +256,10 @@ export async function queryCodex(command, options = {}, ws) {
   let sessionCreatedSent = false;
   let terminalFailure = null;
   const abortController = new AbortController();
+  ws.setAbortHandler?.(() => {
+    abortController.abort();
+    return true;
+  });
 
   try {
     codex = new Codex();
@@ -366,7 +370,9 @@ export async function queryCodex(command, options = {}, ws) {
     // Send the terminal completion event — skipped for aborted runs, whose
     // terminal `complete` (aborted: true) was already sent by abort-session.
     const runSession = capturedSessionId ? activeCodexSessions.get(capturedSessionId) : null;
-    const runAborted = runSession?.status === 'aborted' || abortController.signal.aborted;
+    const runAborted = runSession?.status === 'aborted'
+      || abortController.signal.aborted
+      || ws?.isRunActive?.() === false;
     if (!runAborted) {
       sendMessage(ws, createCompleteMessage({
         provider: 'codex',
@@ -389,6 +395,7 @@ export async function queryCodex(command, options = {}, ws) {
     const session = capturedSessionId ? activeCodexSessions.get(capturedSessionId) : null;
     const wasAborted =
       session?.status === 'aborted' ||
+      ws?.isRunActive?.() === false ||
       error?.name === 'AbortError' ||
       String(error?.message || '').toLowerCase().includes('aborted');
 
@@ -419,6 +426,7 @@ export async function queryCodex(command, options = {}, ws) {
     }
 
   } finally {
+    ws.clearAbortHandler?.();
     // Update session status
     if (capturedSessionId) {
       const session = activeCodexSessions.get(capturedSessionId);

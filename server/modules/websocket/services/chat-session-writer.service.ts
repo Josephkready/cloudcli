@@ -89,6 +89,14 @@ export class ChatSessionWriter {
    * anyway, but the runtime-visible value must stay provider-native.
    */
   private providerSessionId: string | null;
+  /**
+   * One-shot cancellation hook installed by the provider as soon as its
+   * underlying query/child exists. `chat.abort` can arrive before that moment
+   * for a brand-new session, so `abortRequested` remembers the request and
+   * invokes a late-installed hook immediately instead of losing the stop.
+   */
+  private abortHandler: (() => boolean | Promise<boolean>) | null = null;
+  private abortRequested = false;
 
   constructor(options: ChatSessionWriterOptions) {
     this.options = options;
@@ -196,6 +204,38 @@ export class ChatSessionWriter {
    */
   isRunActive(): boolean {
     return this.options.isRunActive?.() ?? true;
+  }
+
+  /** Registers the provider resource's cancellation callback. */
+  setAbortHandler(handler: () => boolean | Promise<boolean>): void {
+    if (this.abortRequested || !this.isRunActive()) {
+      this.abortRequested = false;
+      void Promise.resolve(handler()).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[ChatSessionWriter] Deferred provider abort failed', message);
+      });
+      return;
+    }
+    this.abortHandler = handler;
+  }
+
+  /**
+   * Cancels the provider resource, or records a cancellation request when the
+   * runtime has not exposed that resource yet.
+   */
+  abort(): boolean | Promise<boolean> {
+    const handler = this.abortHandler;
+    this.abortHandler = null;
+    if (!handler) {
+      this.abortRequested = true;
+      return false;
+    }
+    return handler();
+  }
+
+  /** Releases a provider-owned callback after the resource has settled. */
+  clearAbortHandler(): void {
+    this.abortHandler = null;
   }
 
   private captureProviderSessionId(providerSessionId: string): void {

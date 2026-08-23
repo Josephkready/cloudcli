@@ -858,6 +858,10 @@ async function queryClaudeSDK(command, options = {}, ws) {
       }
 
       // Track the query instance for abort capability
+      ws.setAbortHandler?.(async () => {
+        await queryInstance.interrupt();
+        return true;
+      });
       if (capturedSessionId) {
         addSession(capturedSessionId, queryInstance, ws);
       }
@@ -943,7 +947,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
     // Send the terminal completion event — skipped for aborted runs, whose
     // terminal `complete` (aborted: true) was already sent by abort-session.
-    const wasAborted = capturedSessionId ? abortedSessionIds.delete(capturedSessionId) : false;
+    const wasAborted = (capturedSessionId ? abortedSessionIds.delete(capturedSessionId) : false)
+      || ws?.isRunActive?.() === false;
     if (!wasAborted) {
       ws.send(createCompleteMessage({ provider: 'claude', sessionId: capturedSessionId || sessionId || null, exitCode: 0 }));
     }
@@ -964,7 +969,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
       removeSession(capturedSessionId);
     }
 
-    const wasAborted = capturedSessionId ? abortedSessionIds.delete(capturedSessionId) : false;
+    const wasAborted = (capturedSessionId ? abortedSessionIds.delete(capturedSessionId) : false)
+      || ws?.isRunActive?.() === false;
     if (wasAborted) {
       // The abort already produced the terminal complete; a generator throw
       // caused by interrupt() is expected noise, not a user-facing error.
@@ -987,6 +993,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
       sessionName: sessionSummary,
       error
     });
+  } finally {
+    ws.clearAbortHandler?.();
   }
 }
 

@@ -688,7 +688,29 @@ async function handleChatAbort(
   const abortFn = dependencies.abortFns[run.provider];
   let success = false;
   if (abortFn && run.providerSessionId) {
-    success = Boolean(await abortFn(run.providerSessionId));
+    try {
+      success = Boolean(await abortFn(run.providerSessionId));
+    } catch (error) {
+      console.error('[Chat] Provider-id abort failed; trying the direct runtime handle', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (!success) {
+    // New provider sessions announce their native id asynchronously. The
+    // gateway writer owns a one-shot runtime cancellation callback so an abort
+    // in that window is delivered now, or as soon as the provider resource is
+    // created. It also serves as a fallback if a provider id was announced but
+    // the provider's global lookup no longer contains the resource.
+    try {
+      success = Boolean(await run.writer.abort());
+    } catch (error) {
+      console.error('[Chat] Direct runtime abort failed', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   // Scoped to THIS run, not the session: the Claude abort is async, and while it

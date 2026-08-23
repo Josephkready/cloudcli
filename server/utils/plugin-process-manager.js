@@ -2,12 +2,55 @@ import path from 'path';
 
 // cross-spawn: drop-in spawn with Windows .cmd/PATHEXT resolution.
 import spawn from 'cross-spawn';
+
 import { scanPlugins, getPluginsConfig, getPluginDir } from './plugin-loader.js';
 
 // Map<pluginName, { process, port }>
 const runningPlugins = new Map();
 // Map<pluginName, Promise<port>> — in-flight start operations
 const startingPlugins = new Map();
+const PLUGIN_STOP_GRACE_MS = 5000;
+
+/**
+ * Stop a plugin child with bounded grace. The escalation timer itself retains
+ * the child until it exits or receives SIGKILL, including startup failures
+ * that have not yet entered `runningPlugins`.
+ */
+export function terminatePluginProcess(pluginProcess, onSettled = () => {}, graceMs = PLUGIN_STOP_GRACE_MS) {
+  let settled = false;
+  let forceKillTimer = null;
+  const settle = () => {
+    if (settled) return;
+    settled = true;
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+    pluginProcess.removeListener('exit', settle);
+    onSettled();
+  };
+
+  pluginProcess.once('exit', settle);
+  try {
+    const signalled = pluginProcess.kill('SIGTERM');
+    if (!signalled) {
+      settle();
+      return;
+    }
+  } catch {
+    settle();
+    return;
+  }
+
+  forceKillTimer = setTimeout(() => {
+    if (settled) return;
+    try {
+      pluginProcess.kill('SIGKILL');
+    } catch (error) {
+      console.error('[Plugins] Failed to force-kill plugin process:', error?.message || error);
+    } finally {
+      settle();
+    }
+  }, graceMs);
+  forceKillTimer.unref?.();
+}
 
 /**
  * Build the environment handed to a plugin server subprocess.
@@ -75,7 +118,7 @@ export function startPluginServer(name, pluginDir, serverEntry) {
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        pluginProcess.kill();
+        terminatePluginProcess(pluginProcess);
         reject(new Error('Plugin server did not report ready within 10 seconds'));
       }
     }, 10000);
@@ -145,22 +188,13 @@ export function stopPluginServer(name) {
 
   return new Promise((resolve) => {
     const cleanup = () => {
-      clearTimeout(forceKillTimer);
-      runningPlugins.delete(name);
+      if (runningPlugins.get(name) === entry) {
+        runningPlugins.delete(name);
+      }
       resolve();
     };
 
-    entry.process.once('exit', cleanup);
-
-    entry.process.kill('SIGTERM');
-
-    // Force kill after 5 seconds if still running
-    const forceKillTimer = setTimeout(() => {
-      if (runningPlugins.has(name)) {
-        entry.process.kill('SIGKILL');
-        cleanup();
-      }
-    }, 5000);
+    terminatePluginProcess(entry.process, cleanup);
 
     console.log(`[Plugins] Server stopped for "${name}"`);
   });
