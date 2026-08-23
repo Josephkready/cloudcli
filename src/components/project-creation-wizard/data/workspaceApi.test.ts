@@ -3,7 +3,11 @@ import test, { mock } from 'node:test';
 
 import { api } from '../../../utils/api';
 
-import { browseFilesystemFolders, buildCloneProgressPayload } from './workspaceApi';
+import {
+  browseFilesystemFolders,
+  buildCloneProgressPayload,
+  cloneWorkspaceWithProgress,
+} from './workspaceApi';
 
 /*
  * #238: the folder picker needs to know whether it is sitting at
@@ -118,6 +122,49 @@ test('clone progress sends credentials in the request body rather than the URL',
     githubUrl: 'https://github.com/org/repo.git',
     newGithubToken: 'secret-token',
   });
+});
+
+test('clone progress uses an authenticated POST body and consumes the completion event', async (t) => {
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => key === 'auth-token' ? 'bearer-secret' : null,
+      setItem: () => {},
+    },
+  });
+  t.after(() => {
+    if (originalStorage) Object.defineProperty(globalThis, 'localStorage', originalStorage);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  });
+
+  let requestUrl = '';
+  let requestInit: RequestInit | undefined;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestInit = init;
+    return new Response('data: {"type":"complete","project":{"id":"p1"}}\n\n', {
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  });
+
+  const project = await cloneWorkspaceWithProgress({
+    workspacePath: '/workspace',
+    githubUrl: 'https://github.com/org/repo.git',
+    tokenMode: 'new',
+    selectedGithubToken: '',
+    newGithubToken: 'github-secret',
+  }, { onProgress: () => {} });
+
+  assert.equal(requestUrl, '/api/projects/clone-progress');
+  assert.equal(requestInit?.method, 'POST');
+  assert.equal(new Headers(requestInit?.headers).get('Authorization'), 'Bearer bearer-secret');
+  assert.deepEqual(JSON.parse(String(requestInit?.body)), {
+    path: '/workspace',
+    githubUrl: 'https://github.com/org/repo.git',
+    newGithubToken: 'github-secret',
+  });
+  assert.deepEqual(project, { id: 'p1' });
 });
 
 mock.reset();

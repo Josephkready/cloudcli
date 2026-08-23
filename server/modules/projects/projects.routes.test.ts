@@ -23,6 +23,11 @@ type TestServer = { port: number; close: () => Promise<void> };
 
 function startServer(): Promise<TestServer> {
   const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as typeof req & { user: { id: number } }).user = { id: 1 };
+    next();
+  });
   app.use('/api/projects', projectsRouter);
   const server = http.createServer(app);
 
@@ -34,6 +39,38 @@ function startServer(): Promise<TestServer> {
         close: () => new Promise((done) => server.close(() => done())),
       });
     });
+  });
+}
+
+function requestText(
+  port: number,
+  method: string,
+  requestPath: string,
+  body?: Record<string, unknown>,
+): Promise<{ statusCode: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const encodedBody = body ? JSON.stringify(body) : '';
+    const request = http.request({
+      host: '127.0.0.1',
+      port,
+      path: requestPath,
+      method,
+      headers: encodedBody
+        ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(encodedBody) }
+        : undefined,
+    }, (response) => {
+      let responseBody = '';
+      response.on('data', (chunk) => {
+        responseBody += chunk;
+      });
+      response.on('end', () => resolve({
+        statusCode: response.statusCode ?? 0,
+        body: responseBody,
+      }));
+    });
+    request.on('error', reject);
+    if (encodedBody) request.write(encodedBody);
+    request.end();
   });
 }
 
@@ -155,5 +192,23 @@ test('GET /api/projects?sync=1 opts back into awaiting the scan', async () => {
     } finally {
       mock.restoreAll();
     }
+  });
+});
+
+test('clone progress accepts POST JSON instead of credentials in a GET URL', async () => {
+  await withSeededDatabase(async (server) => {
+    const getResponse = await requestText(server.port, 'GET', '/api/projects/clone-progress');
+    assert.equal(getResponse.statusCode, 404);
+
+    const postResponse = await requestText(server.port, 'POST', '/api/projects/clone-progress', {
+      path: '/workspace',
+      githubUrl: '-invalid-option-like-url',
+      newGithubToken: 'body-only-secret',
+    });
+
+    assert.equal(postResponse.statusCode, 200);
+    assert.match(postResponse.body, /"type":"error"/);
+    assert.match(postResponse.body, /Invalid githubUrl/);
+    assert.doesNotMatch(postResponse.body, /body-only-secret/);
   });
 });
