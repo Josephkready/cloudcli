@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { closeConnection } from '@/modules/database/connection.js';
 import { initializeDatabase } from '@/modules/database/init-db.js';
+import { activeRunsDb } from '@/modules/database/repositories/active-runs.db.js';
 import { sessionsDb } from '@/modules/database/repositories/sessions.db.js';
 
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
@@ -95,6 +96,29 @@ test('assignProviderSessionId merges a watcher-created duplicate into the app ro
     // Transcript path and name from the duplicate are adopted.
     assert.equal(rows[0]?.jsonl_path, '/fake/provider-race.jsonl');
     assert.equal(rows[0]?.custom_name, 'Watcher Name');
+  });
+});
+
+test('assignProviderSessionId preserves active-run journals from the duplicate row', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('app-id-journal', 'claude', '/workspace/demo');
+    sessionsDb.createSession('provider-journal', 'claude', '/workspace/demo');
+    activeRunsDb.recordRunning({
+      sessionId: 'provider-journal',
+      provider: 'claude',
+      providerSessionId: 'provider-journal',
+      content: 'resume me',
+      options: {},
+      userId: '1',
+      enqueuedAt: 1,
+    });
+
+    sessionsDb.assignProviderSessionId('app-id-journal', 'provider-journal');
+
+    assert.equal(activeRunsDb.getBySession('provider-journal').length, 0);
+    const [journal] = activeRunsDb.getBySession('app-id-journal');
+    assert.equal(journal?.content, 'resume me');
+    assert.equal(journal?.provider_session_id, 'provider-journal');
   });
 });
 

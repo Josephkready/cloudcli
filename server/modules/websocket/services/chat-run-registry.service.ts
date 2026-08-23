@@ -268,11 +268,13 @@ async function broadcastCanonicalSessionUpsert(appSessionId: string): Promise<vo
   });
 }
 
-function evictRunLater(appSessionId: string): void {
+function evictRunLater(runToEvict: ChatRun): void {
   const timer = setTimeout(() => {
-    const run = runs.get(appSessionId);
-    if (run && run.status === 'completed') {
-      runs.delete(appSessionId);
+    if (
+      runs.get(runToEvict.appSessionId) === runToEvict
+      && runToEvict.status === 'completed'
+    ) {
+      runs.delete(runToEvict.appSessionId);
     }
   }, COMPLETED_RUN_RETENTION_MS);
 
@@ -316,7 +318,7 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
     outbound.actualSessionId = run.appSessionId;
     run.status = 'completed';
     run.completedAt = Date.now();
-    evictRunLater(run.appSessionId);
+    evictRunLater(run);
 
     // Single completion choke point (natural end, abort, and synthetic
     // safety-net all funnel through here): drop the durable journal record so a

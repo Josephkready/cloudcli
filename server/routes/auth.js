@@ -7,6 +7,18 @@ import { generateToken, authenticateToken } from '../middleware/auth.js';
 const router = express.Router();
 const db = getConnection();
 
+/** Atomically creates the one allowed user, or returns null once setup is complete. */
+export function createInitialUser(username, passwordHash, dependencies = {}) {
+  const database = dependencies.database || db;
+  const users = dependencies.users || userDb;
+  return database.transaction(() => {
+    if (users.hasUsers()) {
+      return null;
+    }
+    return users.createUser(username, passwordHash);
+  })();
+}
+
 // Check auth status and setup requirements
 router.get('/status', async (req, res) => {
   try {
@@ -35,40 +47,27 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Username must be at least 3 characters, password at least 6 characters' });
     }
     
-    // Use a transaction to prevent race conditions
-    db.prepare('BEGIN').run();
-    try {
-      // Check if users already exist (only allow one user)
-      const hasUsers = userDb.hasUsers();
-      if (hasUsers) {
-        db.prepare('ROLLBACK').run();
-        return res.status(403).json({ error: 'User already exists. This is a single-user system.' });
-      }
-      
-      // Hash password
-      const saltRounds = 12;
-      const passwordHash = await bcrypt.hash(password, saltRounds);
-      
-      // Create user
-      const user = userDb.createUser(username, passwordHash);
-      
-      // Generate token
-      const token = generateToken(user);
-      
-      db.prepare('COMMIT').run();
+    // Hash outside the shared SQLite connection's transaction. bcrypt yields
+    // to the event loop, and holding BEGIN across that await would pull every
+    // unrelated write on the singleton connection into this request.
+    const saltRounds = 12;
+    const passwordHash = await bcrypt.hash(password, saltRounds);
 
-      // Update last login (non-fatal, outside transaction)
-      userDb.updateLastLogin(user.id);
-
-      res.json({
-        success: true,
-        user: { id: user.id, username: user.username },
-        token
-      });
-    } catch (error) {
-      db.prepare('ROLLBACK').run();
-      throw error;
+    const user = createInitialUser(username, passwordHash);
+    if (!user) {
+      return res.status(403).json({ error: 'User already exists. This is a single-user system.' });
     }
+
+    const token = generateToken(user);
+
+    // Update last login (non-fatal, outside transaction)
+    userDb.updateLastLogin(user.id);
+
+    res.json({
+      success: true,
+      user: { id: user.id, username: user.username },
+      token
+    });
     
   } catch (error) {
     console.error('Registration error:', error);
