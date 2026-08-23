@@ -263,12 +263,20 @@ export async function startCloneProject(
     );
   }
 
+  const cleanOwnedClonePath = async (): Promise<void> => {
+    try {
+      await dependencies.removePath(clonePath);
+    } catch (cleanupError) {
+      dependencies.logError('Failed to clean up after clone failure:', cleanupError);
+    }
+  };
+
   handlers.onProgress(`Cloning into '${repoName}'...`);
   let gitProcess: GitCloneProcess;
   try {
     gitProcess = dependencies.spawnGitClone(cloneUrl, clonePath);
   } catch (error) {
-    await dependencies.removePath(clonePath);
+    await cleanOwnedClonePath();
     throw error;
   }
   let lastError = '';
@@ -290,14 +298,6 @@ export async function startCloneProject(
 
   const waitForCompletion = new Promise<void>((resolve, reject) => {
     let settled = false;
-    const cleanOwnedClonePath = async (): Promise<void> => {
-      try {
-        await dependencies.removePath(clonePath);
-      } catch (cleanupError) {
-        dependencies.logError('Failed to clean up after clone failure:', cleanupError);
-      }
-    };
-
     gitProcess.on('close', async (code) => {
       if (settled) {
         return;
