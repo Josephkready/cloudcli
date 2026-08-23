@@ -68,11 +68,21 @@ export function useGitPanelController({
   // Tracks the DB projectId so async requests can detect stale responses when
   // the user switches projects mid-flight.
   const selectedProjectIdRef = useRef<string | null>(selectedProject?.projectId ?? null);
-  selectedProjectIdRef.current = selectedProject?.projectId ?? null;
+  const selectedProjectGenerationRef = useRef(0);
+  const selectedProjectId = selectedProject?.projectId ?? null;
+  if (selectedProjectIdRef.current !== selectedProjectId) {
+    selectedProjectIdRef.current = selectedProjectId;
+    selectedProjectGenerationRef.current += 1;
+  }
+  const selectedProjectGeneration = selectedProjectGenerationRef.current;
 
   const isCurrentProject = useCallback(
-    (projectId: string, signal?: AbortSignal) => !signal?.aborted && selectedProjectIdRef.current === projectId,
-    [],
+    (projectId: string, signal?: AbortSignal) => (
+      !signal?.aborted
+      && selectedProjectIdRef.current === projectId
+      && selectedProjectGenerationRef.current === selectedProjectGeneration
+    ),
+    [selectedProjectGeneration],
   );
 
   const provider = useSelectedProvider();

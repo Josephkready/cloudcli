@@ -109,7 +109,7 @@ describe('useGitPanelController project-switch guards', () => {
     expect(view.result.current.recentCommits[0]?.hash).toBe('B-hash');
   });
 
-  it('does not apply a mutation success response to the newly selected project', async () => {
+  it('does not apply a mutation response after switching away and back', async () => {
     const staleCheckout = deferred<Response>();
 
     authenticatedFetch.mockImplementation((urlValue: string, options?: RequestInit) => {
@@ -138,9 +138,11 @@ describe('useGitPanelController project-switch guards', () => {
 
     view.rerender({ selectedProject: project('B') });
     await waitFor(() => expect(view.result.current.currentBranch).toBe('B-main'));
+    view.rerender({ selectedProject: project('A') });
+    await waitFor(() => expect(view.result.current.currentBranch).toBe('A-main'));
 
     staleCheckout.resolve(response({ success: true }));
     await expect(switchResult).resolves.toBe(false);
-    expect(view.result.current.currentBranch).toBe('B-main');
+    expect(view.result.current.currentBranch).toBe('A-main');
   });
 });
