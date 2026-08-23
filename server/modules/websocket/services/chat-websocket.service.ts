@@ -5,6 +5,7 @@ import type { WebSocket } from 'ws';
 import { activeRunsDb, sessionsDb } from '@/modules/database/index.js';
 import { broadcastSessionUpserted } from '@/modules/providers/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
+import { hasSeenClientMessage, rememberClientMessage } from '@/modules/websocket/services/chat-send-dedupe.service.js';
 import { deriveOpeningName, needsOpeningName } from '@/modules/websocket/utils/sessionOpeningName.js';
 import type { ChatRun, QueuedChatMessage } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
@@ -120,13 +121,26 @@ function sendProtocolError(
   ws: WebSocket,
   code: string,
   error: string,
-  sessionId?: string
+  sessionId?: string,
+  /**
+   * The client message type that caused this, when the failure is about the
+   * request's shape rather than a session. Lets a client recognise a rejection
+   * of its own liveness probe by a server too old to know `chat.ping`, and
+   * swallow it instead of surfacing it as a chat error (#389).
+   */
+  type?: string
 ): void {
   sendJson(ws, {
     kind: 'protocol_error',
     code,
     error,
     sessionId: sessionId ?? null,
+    // `!== undefined`, not truthiness: a malformed frame with no `type` field
+    // yields the empty string, and omitting the key for that case would make a
+    // CURRENT server's rejection wire-identical to an OLD server's rejection of
+    // `chat.ping`. A client would then be entitled to swallow a real error.
+    // Present-but-empty says "this server names types"; absent says "it cannot".
+    ...(type !== undefined ? { type } : {}),
     timestamp: new Date().toISOString(),
   });
 }
@@ -391,6 +405,18 @@ async function handleChatSend(
     return;
   }
 
+  const clientMessageId = typeof data.clientMessageId === 'string' ? data.clientMessageId : '';
+
+  // A resend of something already accepted. Re-ack it and stop: the client is
+  // retrying because it never saw the first ack, not because the server missed
+  // the message (#389). Running it again is precisely the duplicate this
+  // whole change exists to prevent, so the check goes BEFORE `submitMessage`.
+  if (hasSeenClientMessage(sessionId, clientMessageId)) {
+    console.warn('[Chat] Suppressing duplicate chat.send', { sessionId, clientMessageId });
+    sendChatSendAccepted(ws, sessionId, clientMessageId);
+    return;
+  }
+
   const message: QueuedChatMessage = {
     content: typeof data.content === 'string' ? data.content : '',
     options: (data.options ?? {}) as AnyRecord,
@@ -445,6 +471,21 @@ async function handleChatSend(
     return;
   }
 
+  // The server now owns this message, whether it runs immediately or waits in
+  // the FIFO. Say so (#389).
+  //
+  // Without this the client's only evidence of delivery was a transcript echo,
+  // which for a QUEUED message does not exist until the run ahead of it
+  // finishes — potentially many minutes. The resend grace is 30s
+  // (`DISPATCHED_RESEND_GRACE_MS`), so any turn longer than that and the client
+  // resent a message the server already had, and the user was asked the same
+  // thing twice. Acking here turns "probably delivered" into a fact, and it must
+  // be sent BEFORE the `await` below so a long run cannot delay its own ack.
+  // Recorded only now that the server has actually taken the message, so the
+  // rejection paths above stay retryable.
+  rememberClientMessage(sessionId, clientMessageId);
+  sendChatSendAccepted(ws, sessionId, clientMessageId);
+
   if (result.action === 'queued') {
     // A run is already in progress: the message now sits in the server-side
     // FIFO queue and the session's active dispatcher will send it in order.
@@ -457,6 +498,28 @@ async function handleChatSend(
   // the head run to completion, then drain anything that queued while it ran.
   await driveRunAndDrain(sessionId, result.run, message, dependencies);
 }
+
+/**
+ * Confirms receipt of a `chat.send` to the client that sent it.
+ *
+ * Echoes back the client's own `clientMessageId` so the sender can drop the
+ * matching entry from its pending-send store by id, with no text matching or
+ * timestamp window involved. Silently does nothing when the client did not send
+ * an id: older clients do not know about this frame, and an ack they cannot
+ * correlate is not worth a protocol error.
+ */
+function sendChatSendAccepted(ws: WebSocket, sessionId: string, clientMessageId: string): void {
+  if (!clientMessageId) {
+    return;
+  }
+  sendJson(ws, {
+    kind: 'chat_send_accepted',
+    sessionId,
+    clientMessageId,
+    timestamp: new Date().toISOString(),
+  });
+}
+
 
 /**
  * Parses a persisted `options_json` blob back into a chat.send options object,
@@ -799,8 +862,22 @@ export function handleChatConnection(
         case 'chat.permission-response':
           handlePermissionResponse(data, dependencies);
           return;
+        case 'chat.ping':
+          // Application-level liveness probe (#389). Browsers answer protocol
+          // ping frames automatically but never surface them to JavaScript, so a
+          // client that wants to *know* its socket is alive has no way to ask at
+          // the protocol level. This is that round trip: cheap, session-less, and
+          // deliberately not routed through any run state.
+          sendJson(ws, { kind: 'pong', timestamp: new Date().toISOString() });
+          return;
         default:
-          sendProtocolError(ws, 'UNKNOWN_MESSAGE_TYPE', `Unknown message type "${messageType}".`);
+          sendProtocolError(
+            ws,
+            'UNKNOWN_MESSAGE_TYPE',
+            `Unknown message type "${messageType}".`,
+            undefined,
+            messageType,
+          );
           return;
       }
     } catch (error) {

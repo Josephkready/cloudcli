@@ -6,6 +6,7 @@ import { showCompletionTitleIndicator } from '../../../utils/pageTitleNotificati
 import { playChatCompletionSound, playNotificationSound } from '../../../utils/notificationSound';
 import type { MarkSessionIdle, MarkSessionProcessing } from '../../../hooks/useSessionProtection';
 import type { PendingPermissionRequest } from '../types/types';
+import { removePendingSend } from '../utils/pendingSends';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
 import type { SessionStore, NormalizedMessage } from '../../../stores/useSessionStore';
 
@@ -145,6 +146,22 @@ export function useChatRealtimeHandlers({
               void playNotificationSound();
             }
           }
+          return;
+        }
+
+        case 'chat_send_accepted': {
+          // The server has taken ownership of this message — it is either
+          // running or sitting in the session's FIFO. Either way it will not be
+          // lost, so the durable pending entry has done its job and is retired
+          // by id (#389).
+          //
+          // This is the whole point of the ack: previously the only evidence of
+          // delivery was a transcript echo, which a QUEUED message does not
+          // produce until the run ahead of it finishes. Past the 30s resend
+          // grace that read as "never arrived" and the message was sent a second
+          // time. Confirming here makes delivery a fact rather than an inference.
+          if (!sid || typeof msg.clientMessageId !== 'string') return;
+          removePendingSend(sid, msg.clientMessageId);
           return;
         }
 

@@ -870,6 +870,10 @@ export function useChatComposerState({
         sessionId: targetSessionId,
         content: messageContent,
         options: sendOptions,
+        // Echoed back in `chat_send_accepted`, which is what confirms this entry
+        // outright instead of inferring delivery from a transcript echo that a
+        // queued message will not produce for minutes (#389).
+        clientMessageId: pendingSendId,
       });
 
       if (!dispatched) {

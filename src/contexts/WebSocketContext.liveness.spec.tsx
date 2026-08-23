@@ -1,0 +1,654 @@
+import { act, renderHook } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { WebSocketProvider, useWebSocket } from './WebSocketContext';
+
+/**
+ * Liveness detection for the chat websocket (#389).
+ *
+ * WHY THIS SUITE EXISTS. The reported bug was "chats are stuck until you close
+ * and reopen the app". The cause: a socket whose connection has black-holed —
+ * the Mac slept, the network changed — stays `readyState === OPEN` forever. It
+ * fires no `close` and no `error`, and the reconnect was keyed solely on
+ * `onclose`, so the app sat wedged with `isConnected === true`, accepting sends
+ * that evaporated, until the page was reloaded.
+ *
+ * WHAT THESE TESTS CAN AND CANNOT SHOW. A half-open socket is *defined* by
+ * observable behaviour at the WebSocket API boundary — readyState stays OPEN,
+ * no frames arrive, `send()` reports success — so a fake socket models it
+ * faithfully; there is no engine-specific rendering involved the way there is in
+ * a layout bug. What a fake cannot prove is that a real Safari leaves the socket
+ * OPEN rather than closing it, which is the premise, not the logic. These lock
+ * the state machine: probe when silent, tear down when unanswered, and never
+ * tear down a socket that is talking.
+ */
+
+const CONNECTING = 0;
+const OPEN = 1;
+const CLOSING = 2;
+const CLOSED = 3;
+
+/** Mirrors the provider's own timings. */
+const LIVENESS_CHECK_INTERVAL_MS = 5_000;
+const IDLE_BEFORE_PROBE_MS = 20_000;
+const PONG_TIMEOUT_MS = 10_000;
+const RECONNECT_DELAY_MS = 3_000;
+const CONNECT_TIMEOUT_MS = 15_000;
+
+/**
+ * Liveness is judged on a tick, so a deadline is noticed at the first tick
+ * *after* it passes, not the instant it elapses. Tests add a tick of slack
+ * rather than assuming the arithmetic lands exactly on a boundary.
+ */
+const SLACK_MS = LIVENESS_CHECK_INTERVAL_MS * 2;
+/** Long enough for a probe to go out AND its deadline to be judged. */
+const TIME_TO_DEATH_MS = IDLE_BEFORE_PROBE_MS + PONG_TIMEOUT_MS + SLACK_MS;
+
+class FakeWebSocket {
+  static CONNECTING = 0;
+  static OPEN = OPEN;
+  static CLOSING = CLOSING;
+  static CLOSED = CLOSED;
+  static instances: FakeWebSocket[] = [];
+
+  readyState = 0;
+  sent: string[] = [];
+  closeCalls = 0;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: ((error: unknown) => void) | null = null;
+
+  constructor(public url: string) {
+    FakeWebSocket.instances.push(this);
+  }
+
+  send(data: string): void {
+    if (this.readyState !== OPEN) throw new Error('socket is not open');
+    this.sent.push(data);
+  }
+
+  close(): void {
+    this.closeCalls += 1;
+    this.readyState = CLOSED;
+  }
+
+  /* ---- test drivers ---- */
+
+  /** Completes the handshake. */
+  open(): void {
+    this.readyState = OPEN;
+    this.onopen?.();
+  }
+
+  /** Delivers an inbound frame — the app's only proof of life. */
+  deliver(payload: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(payload) });
+  }
+
+  /** The browser noticing the socket died and telling us. */
+  fireClose(): void {
+    this.readyState = CLOSED;
+    this.onclose?.();
+  }
+
+  frames(): Array<Record<string, unknown>> {
+    return this.sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+  }
+
+  pings(): Array<Record<string, unknown>> {
+    return this.frames().filter((frame) => frame.type === 'chat.ping');
+  }
+}
+
+vi.mock('../components/auth/context/AuthContext', () => ({
+  useAuth: () => ({ token: 'test-token' }),
+}));
+
+function setup() {
+  const listener = vi.fn();
+  const view = renderHook(() => useWebSocket(), {
+    wrapper: ({ children }) => <WebSocketProvider>{children}</WebSocketProvider>,
+  });
+  act(() => {
+    view.result.current.subscribe(listener);
+  });
+  return { ...view, listener };
+}
+
+/** The socket the provider most recently created. */
+function latestSocket(): FakeWebSocket {
+  const socket = FakeWebSocket.instances.at(-1);
+  if (!socket) throw new Error('no socket was created');
+  return socket;
+}
+
+async function advance(ms: number): Promise<void> {
+  await act(async () => {
+    vi.advanceTimersByTime(ms);
+  });
+}
+
+/**
+ * Advances a tick at a time until `predicate` holds.
+ *
+ * Preferred over a single long `advance()` wherever the assertion is "this
+ * eventually happens": overshooting is not harmless here, because a replacement
+ * socket left unopened will itself hit the handshake timeout and be replaced
+ * again. Stopping as soon as the condition holds keeps these tests about the
+ * behaviour rather than about tick arithmetic.
+ */
+async function advanceUntil(predicate: () => boolean, limitMs = 180_000): Promise<void> {
+  let elapsed = 0;
+  while (!predicate() && elapsed < limitMs) {
+    await advance(LIVENESS_CHECK_INTERVAL_MS);
+    elapsed += LIVENESS_CHECK_INTERVAL_MS;
+  }
+  if (!predicate()) {
+    throw new Error(`condition never held within ${limitMs}ms of fake time`);
+  }
+}
+
+beforeEach(() => {
+  FakeWebSocket.instances = [];
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe('probing a silent socket', () => {
+  it('sends a liveness probe once the socket has been quiet', async () => {
+    setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    expect(socket.pings()).toHaveLength(0);
+
+    await advance(IDLE_BEFORE_PROBE_MS + 1_000);
+    expect(socket.pings()).toHaveLength(1);
+  });
+
+  it('never probes a socket that is actively receiving frames', async () => {
+    setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    // A streaming run: frames keep arriving well inside the idle threshold.
+    for (let i = 0; i < 10; i += 1) {
+      await advance(5_000);
+      await act(async () => socket.deliver({ kind: 'assistant', seq: i }));
+    }
+
+    expect(socket.pings()).toHaveLength(0);
+    expect(socket.closeCalls).toBe(0);
+  });
+
+  it('does not stack probes while one is already outstanding', async () => {
+    setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await advance(IDLE_BEFORE_PROBE_MS + 1_000);
+    // Still inside the pong deadline: the checker runs repeatedly but must not
+    // send a second probe.
+    await advance(PONG_TIMEOUT_MS - 2_000);
+
+    expect(socket.pings()).toHaveLength(1);
+  });
+});
+
+describe('a half-open socket — the #389 case', () => {
+  it('tears down and reconnects when a probe goes unanswered', async () => {
+    const { result } = setup();
+    const dead = latestSocket();
+    await act(async () => dead.open());
+    expect(result.current.isConnected).toBe(true);
+
+    // The socket is black-holed: it still reports OPEN and accepts writes, but
+    // nothing comes back. Before this fix, nothing in the app ever noticed.
+    await advance(IDLE_BEFORE_PROBE_MS + LIVENESS_CHECK_INTERVAL_MS);
+    expect(dead.pings()).toHaveLength(1);
+    expect(dead.readyState).toBe(OPEN); // still "open" — the whole problem
+
+    await advance(PONG_TIMEOUT_MS + SLACK_MS);
+
+    expect(dead.closeCalls).toBe(1);
+    expect(result.current.isConnected).toBe(false);
+
+    // And it comes back on its own, rather than waiting for a page reload.
+    await advanceUntil(() => FakeWebSocket.instances.length >= 2);
+
+    const replacement = latestSocket();
+    expect(replacement).not.toBe(dead);
+    await act(async () => replacement.open());
+    expect(result.current.isConnected).toBe(true);
+  });
+
+  it('reports the socket as unwritable once it is declared dead', async () => {
+    const { result } = setup();
+    const dead = latestSocket();
+    await act(async () => dead.open());
+
+    expect(result.current.sendMessage({ type: 'chat.send' })).toBe(true);
+
+    await advance(TIME_TO_DEATH_MS);
+
+    // The critical half: a send must now FAIL rather than silently evaporate,
+    // so the pending-send store keeps the message instead of believing it left.
+    expect(result.current.sendMessage({ type: 'chat.send' })).toBe(false);
+  });
+
+  it('keeps the socket when the probe is answered', async () => {
+    const { result } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await advance(IDLE_BEFORE_PROBE_MS + 1_000);
+    await act(async () => socket.deliver({ kind: 'pong' }));
+
+    await advance(PONG_TIMEOUT_MS + 5_000);
+
+    expect(socket.closeCalls).toBe(0);
+    expect(result.current.isConnected).toBe(true);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it('accepts any inbound frame as proof of life, not just a pong', async () => {
+    setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await advance(IDLE_BEFORE_PROBE_MS + 1_000);
+    await act(async () => socket.deliver({ kind: 'assistant', content: 'hi' }));
+    await advance(PONG_TIMEOUT_MS + 5_000);
+
+    expect(socket.closeCalls).toBe(0);
+  });
+});
+
+describe('probe frames stay out of the application', () => {
+  it('does not dispatch pong frames to subscribers', async () => {
+    const { listener } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await act(async () => socket.deliver({ kind: 'pong' }));
+    expect(listener).not.toHaveBeenCalled();
+
+    await act(async () => socket.deliver({ kind: 'assistant' }));
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('swallows a current server rejecting the probe, which names the type', async () => {
+    const { listener } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    // Dispatching this would render an error message into the conversation and
+    // stop the spinner, so a version skew must not be user-visible.
+    await act(async () => socket.deliver({
+      kind: 'protocol_error',
+      code: 'UNKNOWN_MESSAGE_TYPE',
+      type: 'chat.ping',
+      error: 'Unknown message type "chat.ping".',
+    }));
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  // The case the first attempt at this got wrong. A server old enough not to
+  // know `chat.ping` is also old enough not to echo `type` back, so matching on
+  // `type` alone swallowed nothing on the ONLY server that needed it — and
+  // sprayed a fake error into the open session every probe interval.
+  it('swallows an OLD server rejecting the probe, which sends no type at all', async () => {
+    const { listener } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await advance(IDLE_BEFORE_PROBE_MS + LIVENESS_CHECK_INTERVAL_MS);
+    expect(socket.pings()).toHaveLength(1);
+
+    await act(async () => socket.deliver({
+      kind: 'protocol_error',
+      code: 'UNKNOWN_MESSAGE_TYPE',
+      sessionId: null,
+      error: 'Unknown message type "chat.ping".',
+    }));
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  // The attribution must survive other traffic. An unrelated push landing
+  // between the probe and an old server's rejection used to clear the flag that
+  // identified the rejection, letting it through into the chat.
+  it('still swallows an untyped rejection after an unrelated frame arrives first', async () => {
+    const { listener } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await advance(IDLE_BEFORE_PROBE_MS + LIVENESS_CHECK_INTERVAL_MS);
+    expect(socket.pings()).toHaveLength(1);
+
+    // A sidebar delta races ahead of the rejection.
+    await act(async () => socket.deliver({ kind: 'session_upserted', sessionId: 's1' }));
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    await act(async () => socket.deliver({
+      kind: 'protocol_error',
+      code: 'UNKNOWN_MESSAGE_TYPE',
+      sessionId: null,
+      error: 'Unknown message type "chat.ping".',
+    }));
+
+    expect(listener).toHaveBeenCalledTimes(1); // still just the sidebar delta
+  });
+
+  it('does not swallow an untyped rejection long after any probe', async () => {
+    const { listener } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await advance(IDLE_BEFORE_PROBE_MS + LIVENESS_CHECK_INTERVAL_MS);
+    await act(async () => socket.deliver({ kind: 'pong' }));
+
+    // Well outside the window in which a rejection could be answering a probe.
+    await advance(PONG_TIMEOUT_MS + LIVENESS_CHECK_INTERVAL_MS);
+    await act(async () => socket.deliver({
+      kind: 'protocol_error',
+      code: 'UNKNOWN_MESSAGE_TYPE',
+      error: 'Unknown message type "chat.whatever".',
+    }));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('still dispatches an unknown-type error that is NOT answering a probe', async () => {
+    const { listener } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    // No probe outstanding, so this rejection is about some other message and
+    // the user should see it.
+    await act(async () => socket.deliver({
+      kind: 'protocol_error',
+      code: 'UNKNOWN_MESSAGE_TYPE',
+      error: 'Unknown message type "chat.nonsense".',
+    }));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('still dispatches protocol errors that are about real requests', async () => {
+    const { listener } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await act(async () => socket.deliver({
+      kind: 'protocol_error',
+      code: 'SESSION_NOT_FOUND',
+      error: 'nope',
+    }));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('resuming from background', () => {
+  it('probes immediately when the tab becomes visible again', async () => {
+    setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    expect(socket.pings()).toHaveLength(0);
+
+    // Returning to a tab is the single most likely moment to be holding a dead
+    // socket, so it must not wait out the idle threshold first.
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(socket.pings()).toHaveLength(1);
+  });
+
+  it('probes when the network comes back', async () => {
+    setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+
+    expect(socket.pings()).toHaveLength(1);
+  });
+
+  it('reconnects at once when resume finds the socket already closed', async () => {
+    const { result } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    // The browser noticed the drop while the tab was hidden. Waiting out a
+    // liveness cycle would be pointless — go now.
+    socket.readyState = CLOSED;
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+
+    expect(result.current.isConnected).toBe(false);
+    await advance(RECONNECT_DELAY_MS + SLACK_MS);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it('a resume probe that goes unanswered still reconnects', async () => {
+    const { result } = setup();
+    const dead = latestSocket();
+    await act(async () => dead.open());
+
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await advance(PONG_TIMEOUT_MS + SLACK_MS);
+
+    expect(dead.closeCalls).toBe(1);
+    expect(result.current.isConnected).toBe(false);
+
+    await advance(RECONNECT_DELAY_MS + SLACK_MS);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+});
+
+describe('socket identity', () => {
+  it('ignores a stale socket closing after it has been replaced', async () => {
+    const { result } = setup();
+    const first = latestSocket();
+    await act(async () => first.open());
+
+    // Kill the first socket and let the replacement connect.
+    await advanceUntil(() => FakeWebSocket.instances.length >= 2);
+    const second = latestSocket();
+    expect(second).not.toBe(first);
+    await act(async () => second.open());
+    expect(result.current.isConnected).toBe(true);
+
+    // The browser finally gets around to reporting the first socket's close.
+    // That must not disturb the live socket that replaced it.
+    await act(async () => first.fireClose());
+
+    expect(result.current.isConnected).toBe(true);
+    expect(result.current.sendMessage({ type: 'chat.send' })).toBe(true);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it('reconnects when the live socket closes normally', async () => {
+    const { result } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await act(async () => socket.fireClose());
+    expect(result.current.isConnected).toBe(false);
+
+    await advance(RECONNECT_DELAY_MS + SLACK_MS);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it('discards a socket that finally opens after being superseded', async () => {
+    const { result } = setup();
+    const stale = latestSocket();
+
+    // `stale` never opens. The handshake timeout abandons it and a replacement
+    // is created.
+    await advanceUntil(() => FakeWebSocket.instances.length >= 2);
+    const live = latestSocket();
+    expect(live).not.toBe(stale);
+    await act(async () => live.open());
+    expect(result.current.isConnected).toBe(true);
+
+    // The abandoned handshake completes late. It must not take over the slot —
+    // that orphan hijacking `wsRef` behind the replacement's back is the race
+    // this guard exists for.
+    await act(async () => stale.open());
+
+    expect(stale.closeCalls).toBeGreaterThan(0);
+    expect(result.current.isConnected).toBe(true);
+    // Frames from the discarded socket must not reach the app either.
+    expect(result.current.sendMessage({ type: 'chat.send' })).toBe(true);
+    expect(live.frames().some((frame) => frame.type === 'chat.send')).toBe(true);
+  });
+});
+
+describe('the auth token stays out of logs', () => {
+  it('logs only the error type, never the raw Event', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    // The raw Event's `target` is the socket, whose `url` carries `?token=...`.
+    // Serializing it anywhere (devtools, log shipping) leaks the token.
+    await act(async () => {
+      socket.onerror?.(new Event('error'));
+    });
+
+    expect(consoleError).toHaveBeenCalled();
+    for (const call of consoleError.mock.calls) {
+      for (const arg of call) {
+        expect(arg).not.toBeInstanceOf(Event);
+        expect(String(arg)).not.toContain('token');
+      }
+    }
+    consoleError.mockRestore();
+  });
+});
+
+describe('under StrictMode', () => {
+  it('settles on exactly one live socket after the double mount', async () => {
+    // React runs effects twice in StrictMode, and the real app renders inside
+    // it. That mount -> cleanup -> mount cycle is precisely what used to leave a
+    // still-CONNECTING socket orphaned and able to hijack the provider's slot.
+    const view = renderHook(() => useWebSocket(), {
+      wrapper: ({ children }) => (
+        <StrictMode>
+          <WebSocketProvider>{children}</WebSocketProvider>
+        </StrictMode>
+      ),
+    });
+
+    const live = latestSocket();
+    await act(async () => live.open());
+
+    expect(view.result.current.isConnected).toBe(true);
+    expect(view.result.current.sendMessage({ type: 'chat.send' })).toBe(true);
+    expect(live.frames().some((frame) => frame.type === 'chat.send')).toBe(true);
+
+    // Any socket created and discarded by the first effect pass must have been
+    // closed, not left connecting in the background.
+    for (const socket of FakeWebSocket.instances) {
+      if (socket !== live) {
+        expect(socket.closeCalls).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
+describe('a handshake that never completes', () => {
+  it('abandons a socket stuck in CONNECTING and tries again', async () => {
+    const { result } = setup();
+    const stuck = latestSocket();
+    expect(stuck.readyState).toBe(CONNECTING);
+
+    // No open, no close, no error — the one state the liveness timer cannot
+    // cover, because it only starts at onopen.
+    await advance(CONNECT_TIMEOUT_MS + SLACK_MS);
+    expect(stuck.closeCalls).toBe(1);
+    expect(result.current.isConnected).toBe(false);
+
+    await advanceUntil(() => FakeWebSocket.instances.length >= 2);
+    expect(latestSocket()).not.toBe(stuck);
+  });
+
+  it('does not abandon a socket that opened in time', async () => {
+    const { result } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    await advance(CONNECT_TIMEOUT_MS + SLACK_MS);
+
+    expect(socket.closeCalls).toBe(0);
+    expect(result.current.isConnected).toBe(true);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it('clears the handshake timer on open rather than relying on its guard', async () => {
+    setup();
+    const socket = latestSocket();
+    const whileConnecting = vi.getTimerCount();
+
+    await act(async () => socket.open());
+
+    // Opening swaps one pending timeout for the recurring liveness interval; if
+    // the explicit clear were dropped, the abandoned timeout would still be
+    // queued here. The readyState guard inside it would make that harmless
+    // today, which is exactly why the behavioural test alone cannot catch it.
+    expect(vi.getTimerCount()).toBeLessThanOrEqual(whileConnecting);
+  });
+});
+
+describe('repeated failure', () => {
+  it('keeps retrying at a steady interval without stacking sockets or timers', async () => {
+    setup();
+
+    // Three reconnect cycles where the replacement immediately closes, the
+    // shape of a server that is simply down.
+    for (let i = 0; i < 3; i += 1) {
+      const socket = latestSocket();
+      await act(async () => socket.open());
+      await act(async () => socket.fireClose());
+      await advance(RECONNECT_DELAY_MS + SLACK_MS);
+    }
+
+    // One new socket per cycle — no doubling, no runaway storm.
+    expect(FakeWebSocket.instances).toHaveLength(4);
+  });
+
+  it('a probe that cannot be written tears down immediately', async () => {
+    const { result } = setup();
+    const socket = latestSocket();
+    await act(async () => socket.open());
+
+    // `send` throwing while the socket still claims OPEN is unambiguous: gone.
+    socket.send = () => {
+      throw new Error('INVALID_STATE_ERR');
+    };
+
+    await advance(IDLE_BEFORE_PROBE_MS + LIVENESS_CHECK_INTERVAL_MS);
+
+    expect(socket.closeCalls).toBe(1);
+    expect(result.current.isConnected).toBe(false);
+  });
+});

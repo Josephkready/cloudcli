@@ -83,8 +83,36 @@ test('an entry with no echo is resent as chat.send for the session', () => {
     sessionId: SESSION,
     content: 'lost',
     options: { images: [] },
+    clientMessageId: 'p1',
   });
-  assert.equal(persisted?.length, 1, 'stays pending until the server echoes it');
+  assert.equal(persisted?.length, 1, 'stays pending until the server confirms it');
+});
+
+// The id is what lets the server's `chat_send_accepted` retire this exact entry
+// (#389). Without it a resend can only be confirmed by a transcript echo, which
+// a queued message does not produce until the run ahead of it finishes — the
+// window in which the message was sent a second time.
+test('a resent entry carries its own id so the server ack can confirm it', () => {
+  const { sent } = harness(
+    [pending({ id: 'pending_abc', content: 'lost' })],
+    [],
+  );
+  assert.equal(sent[0].clientMessageId, 'pending_abc');
+});
+
+test('each entry in a drained burst carries its own id, not a shared one', () => {
+  const { sent } = harness(
+    [
+      pending({ id: 'pending_1', content: 'one' }),
+      pending({ id: 'pending_2', content: 'two' }),
+      pending({ id: 'pending_3', content: 'three' }),
+    ],
+    [],
+  );
+  assert.deepEqual(
+    sent.map((frame) => frame.clientMessageId),
+    ['pending_1', 'pending_2', 'pending_3'],
+  );
 });
 
 test('resent entries carry their queue-time options through', () => {

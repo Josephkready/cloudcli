@@ -137,6 +137,10 @@ export function retryPendingSends({
       sessionId,
       content: entry.content,
       options: { ...(entry.options ?? {}), images: [] },
+      // Lets the server's ack confirm this entry by id, so a resend that lands
+      // is retired on acknowledgement rather than waiting on the transcript
+      // (#389).
+      clientMessageId: entry.id,
     });
 
     if (dispatched) {

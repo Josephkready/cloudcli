@@ -91,6 +91,10 @@ describe('useChatComposerState — Antigravity send options', () => {
         model: 'gemini-alt',
         effort: 'default',
       }),
+      // Without this the server cannot ack the send, and the pending entry can
+      // only be retired by a transcript echo — the window that produced the
+      // duplicate sends in #389.
+      clientMessageId: expect.any(String),
     }));
   });
 });
