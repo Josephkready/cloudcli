@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { mapWithConcurrency, readFileTail } from '@/shared/utils.js';
+import { mapWithConcurrency, readFileHead, readFileTail } from '@/shared/utils.js';
 
 async function withTempFile(contents: string, run: (filePath: string) => Promise<void>): Promise<void> {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'utils-file-scan-'));
@@ -46,6 +46,15 @@ test('readFileTail of an empty file is an empty string', async () => {
 test('readFileTail with a zero-byte window returns an empty string', async () => {
   await withTempFile('some content here', async (filePath) => {
     assert.equal(await readFileTail(filePath, 0), '');
+  });
+});
+
+test('readFileHead returns only the requested prefix of a large file', async () => {
+  await withTempFile('first-line\n' + 'x'.repeat(1000), async (filePath) => {
+    const head = await readFileHead(filePath, 32);
+    assert.equal(Buffer.byteLength(head, 'utf8'), 32);
+    assert.ok(head.startsWith('first-line\n'));
+    assert.equal(head.includes('x'.repeat(100)), false);
   });
 });
 

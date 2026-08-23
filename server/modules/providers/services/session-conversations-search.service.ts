@@ -1,4 +1,4 @@
-import fsSync from 'node:fs';
+import fsSync, { promises as fsPromises } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 
@@ -13,6 +13,7 @@ import {
   isAgentAuthoredUserTurn,
   isInternalContent as isClaudeInternalContent,
 } from '@/modules/providers/list/claude/claude-sessions.provider.js';
+import { mapWithConcurrency } from '@/shared/utils.js';
 
 type AnyRecord = Record<string, any>;
 type SearchableProvider = 'claude' | 'codex' | 'antigravity';
@@ -21,6 +22,16 @@ type SearchSnippetHighlight = {
   start: number;
   end: number;
 };
+
+export function isIgnorableRipgrepMissingFileError(code: number | null, stderr: string): boolean {
+  if (code !== 2) return false;
+  const lines = stderr.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.length > 0 && lines.every((line) => (
+    /no such file or directory/i.test(line)
+    || /os error 2/i.test(line)
+    || /the system cannot find the file/i.test(line)
+  ));
+}
 
 type SessionConversationMatch = {
   role: string;
@@ -495,7 +506,7 @@ function extractCodexText(content: unknown): string {
     .join(' ');
 }
 
-function normalizeSearchableSessions(rows: SessionRepositoryRow[]): SearchableSessionRow[] {
+export async function normalizeSearchableSessions(rows: SessionRepositoryRow[]): Promise<SearchableSessionRow[]> {
   const normalizedRows: SearchableSessionRow[] = [];
   const projectArchiveStateByPath = new Map<string, boolean>();
 
@@ -511,10 +522,6 @@ function normalizeSearchableSessions(rows: SessionRepositoryRow[]): SearchableSe
     }
 
     const absoluteJsonlPath = path.resolve(rawJsonlPath);
-    if (!fsSync.existsSync(absoluteJsonlPath)) {
-      continue;
-    }
-
     /**
      * Active session rows can still belong to an archived project because
      * project archiving intentionally preserves the underlying session data.
@@ -543,7 +550,15 @@ function normalizeSearchableSessions(rows: SessionRepositoryRow[]): SearchableSe
     });
   }
 
-  return normalizedRows;
+  const existingRows = await mapWithConcurrency(normalizedRows, 32, async (row) => {
+    try {
+      await fsPromises.access(row.jsonl_path);
+      return row;
+    } catch {
+      return null;
+    }
+  });
+  return existingRows.filter((row): row is SearchableSessionRow => row !== null);
 }
 
 function buildProjectBuckets(searchableSessions: SearchableSessionRow[]): ProjectBucket[] {
@@ -616,7 +631,6 @@ async function runRipgrepFilesWithMatches(
   return new Promise((resolve, reject) => {
     const args = [
       '--files-with-matches',
-      '--no-messages',
       '--ignore-case',
       '--fixed-strings',
       '--',
@@ -672,8 +686,8 @@ async function runRipgrepFilesWithMatches(
         return;
       }
 
-      if (code !== 0 && code !== 1) {
-        const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
+      const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
+      if (code !== 0 && code !== 1 && !isIgnorableRipgrepMissingFileError(code, stderr)) {
         reject(new Error(`ripgrep failed with code ${String(code)}: ${stderr}`));
         return;
       }
@@ -1199,7 +1213,7 @@ export async function searchConversations(
     return { results: [], totalMatches: 0, query: safeQuery };
   }
 
-  const searchableSessions = normalizeSearchableSessions(sessionsDb.getAllSessions());
+  const searchableSessions = await normalizeSearchableSessions(sessionsDb.getAllSessions());
   if (searchableSessions.length === 0) {
     return { results: [], totalMatches: 0, query: safeQuery };
   }

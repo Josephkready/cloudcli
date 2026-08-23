@@ -1333,6 +1333,24 @@ export async function readFileTail(filePath: string, maxBytes: number): Promise<
   }
 }
 
+/** Reads at most `maxBytes` from the start of a file as UTF-8 text. */
+export async function readFileHead(filePath: string, maxBytes: number): Promise<string> {
+  const handle = await open(filePath, 'r');
+  try {
+    const { size } = await handle.stat();
+    const readBytes = Math.min(size, Math.max(0, Math.floor(maxBytes)));
+    if (readBytes === 0) {
+      return '';
+    }
+
+    const buffer = Buffer.alloc(readBytes);
+    await handle.read(buffer, 0, readBytes, 0);
+    return buffer.toString('utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
 /**
  * Maps over `items` running at most `concurrency` workers at a time, preserving
  * input order in the returned results.
