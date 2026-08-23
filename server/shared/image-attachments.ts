@@ -215,9 +215,22 @@ export function buildCodexInputItems(prompt: string, images: unknown, cwd?: stri
       console.warn(`[Images] Refusing to attach image outside allowed roots: ${descriptor.path}`);
       continue;
     }
+
+    let canonicalPath: string;
+    try {
+      canonicalPath = realpathSync(resolvedPath);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[Images] Failed to resolve image ${descriptor.path}: ${message}`);
+      continue;
+    }
+    if (!isAllowedImageSourcePath(canonicalPath, cwd)) {
+      console.warn(`[Images] Refusing to attach symlinked image outside allowed roots: ${descriptor.path}`);
+      continue;
+    }
     items.push({
       type: 'local_image',
-      path: resolvedPath,
+      path: canonicalPath,
     });
   }
   return items;

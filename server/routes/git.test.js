@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { cleanCommitMessage, parseGitLogWithStats, parseGitStatusOutput } from './git.js';
+import {
+  cleanCommitMessage,
+  parseGitLogWithStats,
+  parseGitStatusOutput,
+  validateBranchName,
+} from './git.js';
 
 // Builds `git status --porcelain=v1 -z` output: NUL-separated entries with a
 // trailing NUL, exactly as git emits it.
@@ -124,4 +129,29 @@ test('cleanCommitMessage drops preamble before the conventional-commit line', ()
 test('cleanCommitMessage removes wrapping quotes and markdown headers', () => {
   assert.equal(cleanCommitMessage('"chore: update deps"'), 'chore: update deps');
   assert.equal(cleanCommitMessage('# chore: bump version'), 'chore: bump version');
+});
+
+test('validateBranchName accepts ordinary and nested branch names', () => {
+  for (const branch of ['main', 'feature/fix-123', 'release/v1.2.3', 'user_name/topic']) {
+    assert.equal(validateBranchName(branch), branch);
+  }
+});
+
+test('validateBranchName rejects option, pathspec, and invalid ref shapes', () => {
+  for (const branch of [
+    '-f',
+    '--force',
+    '.',
+    '..',
+    '.hidden',
+    'feature/.hidden',
+    '/main',
+    'main/',
+    'feature//topic',
+    'feature..topic',
+    'topic.',
+    'topic.lock',
+  ]) {
+    assert.throws(() => validateBranchName(branch), /Invalid branch name/, branch);
+  }
 });

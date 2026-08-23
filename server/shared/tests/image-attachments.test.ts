@@ -176,16 +176,42 @@ test('buildClaudeUserContent accepts images under a symlinked cwd', async (t) =>
   }
 });
 
-test('buildCodexInputItems emits text plus absolute local_image paths', () => {
-  const cwd = path.join(os.tmpdir(), 'codex-project');
-  const items = buildCodexInputItems('Describe this image:', [{ path: '.cloudcli/assets/pic.jpg' }], cwd);
+test('buildCodexInputItems emits text plus canonical local_image paths', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'codex-project-'));
+  try {
+    const imagePath = path.join(cwd, 'pic.jpg');
+    await writeFile(imagePath, PNG_BYTES);
+    const items = buildCodexInputItems('Describe this image:', [{ path: 'pic.jpg' }], cwd);
 
-  assert.equal(items.length, 2);
-  assert.deepEqual(items[0], { type: 'text', text: 'Describe this image:' });
-  assert.equal(items[1].type, 'local_image');
-  const imageItem = items[1] as Extract<(typeof items)[number], { type: 'local_image' }>;
-  assert.ok(path.isAbsolute(imageItem.path));
-  assert.equal(imageItem.path, path.resolve(cwd, '.cloudcli/assets/pic.jpg'));
+    assert.equal(items.length, 2);
+    assert.deepEqual(items[0], { type: 'text', text: 'Describe this image:' });
+    assert.equal(items[1].type, 'local_image');
+    const imageItem = items[1] as Extract<(typeof items)[number], { type: 'local_image' }>;
+    assert.ok(path.isAbsolute(imageItem.path));
+    assert.equal(imageItem.path, imagePath);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test('buildCodexInputItems refuses symlinked images outside allowed roots', async (t) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'codex-image-attachments-'));
+  const outsideDir = await mkdtemp(path.join(os.tmpdir(), 'codex-image-secret-'));
+  try {
+    const outsideFile = path.join(outsideDir, 'secret.png');
+    await writeFile(outsideFile, PNG_BYTES);
+    const linkPath = path.join(tempDir, 'linked-secret.png');
+    if (!(await createSymlinkIfSupported(outsideFile, linkPath, 'file'))) {
+      t.skip('Symlink creation is not supported in this environment');
+      return;
+    }
+
+    const items = buildCodexInputItems('prompt', [{ path: 'linked-secret.png' }], tempDir);
+    assert.deepEqual(items, [{ type: 'text', text: 'prompt' }]);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+    await rm(outsideDir, { recursive: true, force: true });
+  }
 });
 
 test('isAllowedImageSourcePath only accepts the upload store and the run cwd', () => {

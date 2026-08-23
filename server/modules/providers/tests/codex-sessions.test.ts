@@ -301,6 +301,34 @@ test('multi-file apply_patch history attaches the shared result to exactly one E
   }
 });
 
+test('Codex history read failures remain distinguishable from empty sessions', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codex-history-error-'));
+  try {
+    await withIsolatedDatabase(async () => {
+      const missingPath = path.join(tempRoot, 'missing-rollout.jsonl');
+      sessionsDb.createSession(
+        'codex-missing',
+        'codex',
+        tempRoot,
+        'Missing history',
+        undefined,
+        undefined,
+        missingPath,
+      );
+
+      await assert.rejects(
+        new CodexSessionsProvider().fetchHistory('codex-missing'),
+        (error: unknown) => {
+          assert.equal((error as { code?: string }).code, 'SESSION_TRANSCRIPT_UNREADABLE');
+          return true;
+        },
+      );
+    });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 /**
  * Writes `~/.codex/session_index.jsonl`, where Codex records the `thread_name`
  * it settles on for a thread. This is Codex's real *title*, as distinct from the

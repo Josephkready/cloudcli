@@ -4,6 +4,7 @@ import { sessionsDb } from '@/modules/database/index.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import {
+  AppError,
   createNormalizedMessage,
   generateMessageId,
   readObjectRecord,
@@ -140,7 +141,11 @@ export class AntigravitySessionsProvider implements IProviderSessions {
       }
     } catch (error) {
       console.warn(`[AntigravityProvider] Failed to load session ${sessionId}:`, error);
-      return { messages: [], total: 0, hasMore: false, offset, limit };
+      throw new AppError(`Could not read the transcript for session "${sessionId}".`, {
+        code: 'SESSION_TRANSCRIPT_UNREADABLE',
+        statusCode: 500,
+        details: { cause: error instanceof Error ? error.message : String(error) },
+      });
     }
 
     const normalizedLimit = limit === null ? null : Math.max(0, limit);

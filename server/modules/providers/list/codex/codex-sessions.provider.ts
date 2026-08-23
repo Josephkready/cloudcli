@@ -5,7 +5,7 @@ import { sessionsDb } from '@/modules/database/index.js';
 import { toImageAttachments } from '@/shared/image-attachments.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
-import { createNormalizedMessage, generateMessageId, readObjectRecord, sliceTailPage } from '@/shared/utils.js';
+import { AppError, createNormalizedMessage, generateMessageId, readObjectRecord, sliceTailPage } from '@/shared/utils.js';
 
 import { parseApplyPatch } from './apply-patch.js';
 
@@ -341,7 +341,11 @@ async function getCodexSessionMessages(
     return { messages, tokenUsage };
   } catch (error) {
     console.error(`Error reading Codex session messages for ${sessionId}:`, error);
-    return { messages: [], total: 0, hasMore: false };
+    throw new AppError(`Could not read the transcript for session "${sessionId}".`, {
+      code: 'SESSION_TRANSCRIPT_UNREADABLE',
+      statusCode: 500,
+      details: { cause: error instanceof Error ? error.message : String(error) },
+    });
   }
 }
 
@@ -614,7 +618,7 @@ export class CodexSessionsProvider implements IProviderSessions {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[CodexProvider] Failed to load session ${sessionId}:`, message);
-      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
+      throw error;
     }
 
     const rawMessages = Array.isArray(result) ? result : (result.messages || []);
