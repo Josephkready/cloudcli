@@ -75,3 +75,29 @@ test('a focus that arrives with the keyboard already up does not erase the heigh
     })
     .toBeGreaterThan(settled * 0.8);
 });
+
+test('keeps sampling after focus when iOS settles without another resize (#442)', async ({ page }) => {
+  await page.goto('/');
+  const composer = page.locator('[data-slot="prompt-input-textarea"]');
+  await expect(composer).toBeVisible();
+
+  await composer.click();
+  await page.evaluate(async (keyboard) => {
+    const viewport = window.visualViewport;
+    if (!viewport) throw new Error('visualViewport is unavailable in this browser');
+
+    // Let the focus fallback take its first sample while the viewport is still
+    // full-height, then settle at the keyboard geometry without dispatching a
+    // resize. This is #442's captured state: visual viewport short, published
+    // inset still 0px.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const visibleHeight = window.innerHeight - keyboard;
+    Object.defineProperty(viewport, 'height', { configurable: true, get: () => visibleHeight });
+  }, KEYBOARD);
+
+  await expect
+    .poll(() => publishedHeight(page), {
+      message: 'focus sampling must catch a keyboard that settles without another resize',
+    })
+    .toBeGreaterThan(KEYBOARD * 0.8);
+});

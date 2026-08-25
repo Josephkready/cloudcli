@@ -40,7 +40,8 @@ interface Harness {
 
 function makeHarness(options: { innerHeight?: number } = {}): Harness {
   const listeners: Record<string, Array<() => void>> = {};
-  const frames: Array<() => void> = [];
+  const frames: Array<(timestamp: number) => void> = [];
+  let frameTimestamp = 0;
   const properties: Record<string, string> = {};
   const scrollCalls: Array<[number, number]> = [];
 
@@ -66,7 +67,7 @@ function makeHarness(options: { innerHeight?: number } = {}): Harness {
       win.scrollY = y;
       viewport.offsetTop = y;
     },
-    requestAnimationFrame: (callback: () => void) => {
+    requestAnimationFrame: (callback: (timestamp: number) => void) => {
       frames.push(callback);
       return frames.length;
     },
@@ -101,7 +102,8 @@ function makeHarness(options: { innerHeight?: number } = {}): Harness {
     fireFocusIn: () => fire('focusin'),
     runFrames: () => {
       const queued = frames.splice(0, frames.length);
-      for (const callback of queued) callback();
+      frameTimestamp += 16;
+      for (const callback of queued) callback(frameTimestamp);
     },
     properties,
     scrollCalls,
@@ -348,6 +350,44 @@ test('focusing re-samples after the frame, catching a mid-animation height', () 
 
   assert.equal(harness.properties['--keyboard-height'], '300px');
   teardown();
+});
+
+test('focus keeps sampling until a late keyboard viewport settles without resize (#442)', () => {
+  const harness = makeHarness({ innerHeight: 797 });
+  const teardown = installKeyboardViewportSync(harness.win, harness.doc);
+  harness.doc.activeElement = { tagName: 'TEXTAREA' };
+
+  // iOS has focused the composer, but the keyboard animation has not changed
+  // the visual viewport yet. The old one-frame fallback samples this 0px state
+  // and then stops.
+  harness.fireFocusIn();
+  harness.runFrames();
+  assert.equal(harness.properties['--keyboard-height'], '0px');
+
+  // The viewport later reaches the exact geometry captured in #442, without a
+  // resize event the app can use: layout 797px, visible 394px. A bounded focus
+  // sampling window must still publish the final 403px inset.
+  harness.win.visualViewport!.height = 394;
+  harness.runFrames();
+
+  assert.equal(harness.properties['--keyboard-height'], '403px');
+  teardown();
+});
+
+test('teardown stops an in-flight focus sampling window', () => {
+  const harness = makeHarness({ innerHeight: 797 });
+  const teardown = installKeyboardViewportSync(harness.win, harness.doc);
+  harness.doc.activeElement = { tagName: 'TEXTAREA' };
+
+  harness.fireFocusIn();
+  harness.runFrames();
+  assert.equal(harness.properties['--keyboard-height'], '0px');
+
+  teardown();
+  harness.win.visualViewport!.height = 394;
+  harness.runFrames();
+
+  assert.equal(harness.properties['--keyboard-height'], '0px');
 });
 
 test('focusing a non-text element does not publish a keyboard height', () => {
