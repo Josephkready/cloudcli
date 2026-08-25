@@ -167,7 +167,7 @@ export function installKeyboardViewportSync(win: WindowLike, doc: DocumentLike):
     //
     // Sampled on the next frame, not during the event: both the height and the
     // displacement are applied after focus. Idempotent with the resize path —
-    // when that already published the settled value this rewrites the same one,
+    // when that already published the settled value this leaves it unchanged,
     // which is why the two cannot fight.
     // One next-frame sample is still too early on affected iPhones: #442
     // captured a 797px layout viewport, a settled 394px visual viewport, and a

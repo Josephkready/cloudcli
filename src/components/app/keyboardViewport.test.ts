@@ -33,7 +33,8 @@ interface Harness {
   fireResize: () => void;
   fireViewportScroll: () => void;
   fireFocusIn: () => void;
-  runFrames: () => void;
+  runFrames: (count?: number) => void;
+  pendingFrameCount: () => number;
   properties: Record<string, string>;
   scrollCalls: Array<[number, number]>;
 }
@@ -100,11 +101,14 @@ function makeHarness(options: { innerHeight?: number } = {}): Harness {
     fireResize: () => fire('resize'),
     fireViewportScroll: () => fire('scroll'),
     fireFocusIn: () => fire('focusin'),
-    runFrames: () => {
-      const queued = frames.splice(0, frames.length);
-      frameTimestamp += 16;
-      for (const callback of queued) callback(frameTimestamp);
+    runFrames: (count = 1) => {
+      for (let frame = 0; frame < count && frames.length > 0; frame += 1) {
+        const queued = frames.splice(0, frames.length);
+        frameTimestamp += 16;
+        for (const callback of queued) callback(frameTimestamp);
+      }
     },
+    pendingFrameCount: () => frames.length,
     properties,
     scrollCalls,
   };
@@ -388,6 +392,42 @@ test('teardown stops an in-flight focus sampling window', () => {
   harness.runFrames();
 
   assert.equal(harness.properties['--keyboard-height'], '0px');
+});
+
+test('a new text focus supersedes the previous sampling window', () => {
+  const harness = makeHarness({ innerHeight: 797 });
+  const teardown = installKeyboardViewportSync(harness.win, harness.doc);
+  harness.doc.activeElement = { tagName: 'TEXTAREA' };
+
+  harness.fireFocusIn();
+  harness.doc.activeElement = { tagName: 'INPUT' };
+  harness.fireFocusIn();
+  assert.equal(harness.pendingFrameCount(), 2);
+
+  // Both initial callbacks were queued already, but only the newest generation
+  // is allowed to continue sampling.
+  harness.runFrames();
+  assert.equal(harness.pendingFrameCount(), 1);
+
+  harness.win.visualViewport!.height = 394;
+  harness.runFrames();
+  assert.equal(harness.properties['--keyboard-height'], '403px');
+  teardown();
+});
+
+test('focus sampling stops after its bounded settle window', () => {
+  const harness = makeHarness({ innerHeight: 797 });
+  const teardown = installKeyboardViewportSync(harness.win, harness.doc);
+  harness.doc.activeElement = { tagName: 'TEXTAREA' };
+
+  harness.fireFocusIn();
+  harness.runFrames(64); // 16ms steps span just over the 1000ms window.
+  assert.equal(harness.pendingFrameCount(), 0);
+
+  harness.win.visualViewport!.height = 394;
+  harness.runFrames();
+  assert.equal(harness.properties['--keyboard-height'], '0px');
+  teardown();
 });
 
 test('focusing a non-text element does not publish a keyboard height', () => {
