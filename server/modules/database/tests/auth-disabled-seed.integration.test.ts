@@ -93,3 +93,15 @@ test('does not clobber or duplicate a pre-existing user when the flag is enabled
     assert.equal(userDb.getFirstUser()?.username, 'someone');
   });
 });
+
+test('revokeTokens atomically advances one active user version', async () => {
+  await withIsolatedDatabase(false, () => {
+    const created = userDb.createUser('someone', 'real-bcrypt-hash');
+    assert.equal(created.token_version, 0);
+    assert.equal(userDb.getUserById(Number(created.id))?.token_version, 0);
+
+    assert.equal(userDb.revokeTokens(Number(created.id)), true);
+    assert.equal(userDb.getUserById(Number(created.id))?.token_version, 1);
+    assert.equal(userDb.revokeTokens(999_999), false);
+  });
+});

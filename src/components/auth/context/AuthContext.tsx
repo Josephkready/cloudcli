@@ -197,7 +197,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     clearSession();
 
     if (tokenToInvalidate) {
-      void api.auth.logout().catch((caughtError: unknown) => {
+      void api.auth.logout(tokenToInvalidate).catch((caughtError: unknown) => {
         console.error('Logout endpoint error:', caughtError);
       });
     }

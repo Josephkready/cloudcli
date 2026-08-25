@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 
 import { userDb } from '../modules/database/index.js';
 import { getConnection } from '../modules/database/connection.js';
+import { closeWebSocketsForUser } from '../modules/websocket/services/websocket-session-revocation.service.js';
 import { generateToken, authenticateToken } from '../middleware/auth.js';
 
 import { LoginAttemptLimiter } from './login-attempt-limiter.js';
@@ -175,6 +176,36 @@ export function createLoginHandler(dependencies = {}) {
   };
 }
 
+export function createLogoutHandler(dependencies = {}) {
+  const users = dependencies.users || userDb;
+  const closeUserWebSockets = dependencies.closeUserWebSockets || closeWebSocketsForUser;
+
+  return (req, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!Number.isSafeInteger(userId) || !users.revokeTokens(userId)) {
+        return res.status(401).json({ error: 'Invalid or revoked token' });
+      }
+      // authenticateToken may have refreshed an old-but-current JWT before
+      // this handler revoked it. Never send that now-stale token to the client.
+      res.removeHeader('X-Refreshed-Token');
+      const webSocketServer = req.app?.locals?.wss;
+      let failedConnections = 0;
+      if (webSocketServer) {
+        failedConnections = closeUserWebSockets(webSocketServer, userId).failed;
+      }
+      return res.json({
+        success: true,
+        message: 'Logged out successfully',
+        ...(failedConnections > 0 ? { connectionCleanupFailed: failedConnections } : {}),
+      });
+    } catch (error) {
+      console.error('Logout error:', error);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+}
+
 // User login
 router.post('/login', createLoginHandler());
 
@@ -185,11 +216,7 @@ router.get('/user', authenticateToken, (req, res) => {
   });
 });
 
-// Logout (client-side token removal, but this endpoint can be used for logging)
-router.post('/logout', authenticateToken, (req, res) => {
-  // In a simple JWT system, logout is mainly client-side
-  // This endpoint exists for consistency and potential future logging
-  res.json({ success: true, message: 'Logged out successfully' });
-});
+// Logout revokes every JWT issued for this user by advancing token_version.
+router.post('/logout', authenticateToken, createLogoutHandler());
 
 export default router;

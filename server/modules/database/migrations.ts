@@ -463,6 +463,13 @@ export const runMigrations = (db: Database) => {
       'has_completed_onboarding',
       'BOOLEAN DEFAULT 0'
     );
+    addColumnToTableIfNotExists(
+      db,
+      'users',
+      userColumnNames,
+      'token_version',
+      'INTEGER NOT NULL DEFAULT 0'
+    );
 
     db.exec(APP_CONFIG_TABLE_SCHEMA_SQL);
     db.exec(USER_NOTIFICATION_PREFERENCES_TABLE_SCHEMA_SQL);

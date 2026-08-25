@@ -18,9 +18,13 @@ type UserRow = {
   git_name: string | null;
   git_email: string | null;
   has_completed_onboarding: number;
+  token_version: number;
 };
 
-type UserPublicRow = Pick<UserRow, 'id' | 'username' | 'created_at' | 'last_login'>;
+type UserPublicRow = Pick<
+  UserRow,
+  'id' | 'username' | 'created_at' | 'last_login' | 'token_version'
+>;
 
 type UserGitConfig = {
   git_name: string | null;
@@ -30,6 +34,7 @@ type UserGitConfig = {
 type CreateUserResult = {
   id: number | bigint;
   username: string;
+  token_version: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -52,7 +57,7 @@ export const userDb = {
     const result = db
       .prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)')
       .run(username, passwordHash);
-    return { id: result.lastInsertRowid, username };
+    return { id: result.lastInsertRowid, username, token_version: 0 };
   },
 
   /**
@@ -84,7 +89,8 @@ export const userDb = {
     const db = getConnection();
     return db
       .prepare(
-        'SELECT id, username, created_at, last_login FROM users WHERE id = ? AND is_active = 1'
+        `SELECT id, username, created_at, last_login, token_version
+         FROM users WHERE id = ? AND is_active = 1`
       )
       .get(userId) as UserPublicRow | undefined;
   },
@@ -94,9 +100,21 @@ export const userDb = {
     const db = getConnection();
     return db
       .prepare(
-        'SELECT id, username, created_at, last_login FROM users WHERE is_active = 1 LIMIT 1'
+        `SELECT id, username, created_at, last_login, token_version
+         FROM users WHERE is_active = 1 LIMIT 1`
       )
       .get() as UserPublicRow | undefined;
+  },
+
+  /** Invalidates every JWT previously issued for this active user. */
+  revokeTokens(userId: number): boolean {
+    const db = getConnection();
+    const result = db.prepare(
+      `UPDATE users
+       SET token_version = token_version + 1
+       WHERE id = ? AND is_active = 1`
+    ).run(userId);
+    return result.changes === 1;
   },
 
   /** Stores the user's preferred git name and email. */

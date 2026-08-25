@@ -57,7 +57,16 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
     user: () => authenticatedFetch('/api/auth/user'),
-    logout: () => authenticatedFetch('/api/auth/logout', { method: 'POST' }),
+    logout: (token) => fetch('/api/auth/logout', {
+      method: 'POST',
+      // AuthContext clears storage immediately for responsive local logout, so
+      // explicitly carry the token that the server must revoke. Use fetch
+      // directly so a logout response can never persist a refreshed token.
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    }),
   },
 
   // Protected endpoints
