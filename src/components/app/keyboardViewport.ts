@@ -37,10 +37,17 @@ export interface WindowLike {
   scrollY: number;
   visualViewport?: VisualViewportLike | null;
   scrollTo(x: number, y: number): void;
-  requestAnimationFrame(callback: () => void): number;
+  requestAnimationFrame(callback: (timestamp: number) => void): number;
   addEventListener(type: string, listener: (event: Event) => void): void;
   removeEventListener(type: string, listener: (event: Event) => void): void;
 }
+
+// iOS can finish its keyboard animation without delivering a usable final
+// VisualViewport resize. Keep the focus fallback alive long enough to observe
+// that settled geometry even on a 120Hz screen. The work is only two numbers
+// and a conditional CSS write per frame, and stops immediately when focus leaves
+// the text field.
+const KEYBOARD_FOCUS_SETTLE_MS = 1000;
 
 export interface DocumentLike {
   activeElement: { tagName?: string; isContentEditable?: boolean } | null;
@@ -109,8 +116,16 @@ export function installKeyboardViewportSync(win: WindowLike, doc: DocumentLike):
   const viewport = win.visualViewport;
   if (!viewport) return () => {};
 
+  let installed = true;
+  let focusSamplingGeneration = 0;
+  let lastPublishedKeyboardHeight: number | null = null;
+
   const applyKeyboardHeight = () => {
     const keyboardHeight = computeKeyboardHeight(win.innerHeight, viewport.height);
+    if (keyboardHeight === lastPublishedKeyboardHeight) {
+      return;
+    }
+    lastPublishedKeyboardHeight = keyboardHeight;
     doc.documentElement.style.setProperty('--keyboard-height', `${keyboardHeight}px`);
   };
 
@@ -152,14 +167,37 @@ export function installKeyboardViewportSync(win: WindowLike, doc: DocumentLike):
     //
     // Sampled on the next frame, not during the event: both the height and the
     // displacement are applied after focus. Idempotent with the resize path —
-    // when that already published the settled value this rewrites the same one,
+    // when that already published the settled value this leaves it unchanged,
     // which is why the two cannot fight.
-    win.requestAnimationFrame(() => {
-      if (isTextEntryElement(doc.activeElement)) {
-        applyKeyboardHeight();
+    // One next-frame sample is still too early on affected iPhones: #442
+    // captured a 797px layout viewport, a settled 394px visual viewport, and a
+    // published 0px inset. That is the signature of the first focus sample
+    // landing before the keyboard animation and no later usable resize event.
+    // Sample for a bounded animation window so the final geometry wins even in
+    // that ordering. A generation makes repeated focus changes replace, rather
+    // than multiply, the active sampler.
+    const generation = ++focusSamplingGeneration;
+    let startedAt: number | null = null;
+
+    const sampleFocusedViewport = (timestamp: number) => {
+      if (
+        !installed
+        || generation !== focusSamplingGeneration
+        || !isTextEntryElement(doc.activeElement)
+      ) {
+        return;
       }
+
+      startedAt ??= timestamp;
+      applyKeyboardHeight();
       pinViewport();
-    });
+
+      if (timestamp - startedAt < KEYBOARD_FOCUS_SETTLE_MS) {
+        win.requestAnimationFrame(sampleFocusedViewport);
+      }
+    };
+
+    win.requestAnimationFrame(sampleFocusedViewport);
   };
 
   viewport.addEventListener('resize', handleResize);
@@ -167,6 +205,8 @@ export function installKeyboardViewportSync(win: WindowLike, doc: DocumentLike):
   win.addEventListener('focusin', handleFocusIn);
 
   return () => {
+    installed = false;
+    focusSamplingGeneration += 1;
     viewport.removeEventListener('resize', handleResize);
     viewport.removeEventListener('scroll', handleViewportScroll);
     win.removeEventListener('focusin', handleFocusIn);
