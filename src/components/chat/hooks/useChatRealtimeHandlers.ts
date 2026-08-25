@@ -71,8 +71,9 @@ function resolveEventProvider(value: unknown, fallback: LLMProvider): LLMProvide
  * This is intentionally a thin reducer over the unified `kind`-based
  * protocol: every frame is keyed by the stable app session id, so there is
  * no session-id handoff, no provider branching, and no navigation here.
- * Sidebar events (`session_upserted`, `loading_progress`) are handled by
- * `useProjectsState`, not in this hook.
+ * Sidebar/global events (`session_upserted`, `loading_progress`,
+ * `projects_snapshot_stale`) are handled by `useProjectsState`, not in this
+ * hook.
  */
 export function useChatRealtimeHandlers({
   subscribe,
