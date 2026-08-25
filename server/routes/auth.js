@@ -190,10 +190,15 @@ export function createLogoutHandler(dependencies = {}) {
       // this handler revoked it. Never send that now-stale token to the client.
       res.removeHeader('X-Refreshed-Token');
       const webSocketServer = req.app?.locals?.wss;
+      let failedConnections = 0;
       if (webSocketServer) {
-        closeUserWebSockets(webSocketServer, userId);
+        failedConnections = closeUserWebSockets(webSocketServer, userId).failed;
       }
-      return res.json({ success: true, message: 'Logged out successfully' });
+      return res.json({
+        success: true,
+        message: 'Logged out successfully',
+        ...(failedConnections > 0 ? { connectionCleanupFailed: failedConnections } : {}),
+      });
     } catch (error) {
       console.error('Logout error:', error);
       return res.status(500).json({ error: 'Internal server error' });

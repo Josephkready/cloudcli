@@ -9,6 +9,12 @@ type RevocableWebSocket = WebSocket & {
   authenticatedUserId?: string | number;
 };
 
+export type WebSocketRevocationResult = {
+  closed: number;
+  forceTerminated: number;
+  failed: number;
+};
+
 export function tagAuthenticatedWebSocket(
   socket: WebSocket,
   user: AuthenticatedWebSocketUser | undefined,
@@ -23,8 +29,10 @@ export function tagAuthenticatedWebSocket(
 export function closeWebSocketsForUser(
   server: Pick<WebSocketServer, 'clients'>,
   userId: string | number,
-): number {
+): WebSocketRevocationResult {
   let closed = 0;
+  let forceTerminated = 0;
+  let failed = 0;
   for (const socket of server.clients) {
     const revocableSocket = socket as RevocableWebSocket;
     if (revocableSocket.authenticatedUserId !== userId) {
@@ -33,10 +41,22 @@ export function closeWebSocketsForUser(
     try {
       revocableSocket.close(SESSION_REVOKED_CLOSE_CODE, SESSION_REVOKED_CLOSE_REASON);
       closed += 1;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error('[Auth] Failed to close a revoked WebSocket', { error: message });
+    } catch {
+      try {
+        revocableSocket.terminate();
+        forceTerminated += 1;
+      } catch {
+        failed += 1;
+      }
     }
   }
-  return closed;
+  if (forceTerminated > 0) {
+    console.warn('[Auth] Force-terminated WebSockets after graceful revocation failed', {
+      count: forceTerminated,
+    });
+  }
+  if (failed > 0) {
+    console.error('[Auth] Failed to disconnect revoked WebSockets', { count: failed });
+  }
+  return { closed, forceTerminated, failed };
 }

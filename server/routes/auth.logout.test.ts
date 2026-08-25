@@ -51,6 +51,7 @@ test('logout advances the persisted version and removes a just-refreshed token h
     closeUserWebSockets: (server: unknown, userId: number) => {
       assert.equal(server, webSocketServer);
       disconnectedUserIds.push(userId);
+      return { closed: 1, forceTerminated: 0, failed: 0 };
     },
   });
   const response = createResponse();
@@ -65,6 +66,25 @@ test('logout advances the persisted version and removes a just-refreshed token h
   assert.deepEqual(disconnectedUserIds, [9]);
   assert.deepEqual(response.headers, {});
   assert.deepEqual(response.body, { success: true, message: 'Logged out successfully' });
+});
+
+test('logout reports the exceptional live-connection cleanup failure without undoing revocation', () => {
+  const handler = createLogoutHandler({
+    users: { revokeTokens: () => true },
+    closeUserWebSockets: () => ({ closed: 0, forceTerminated: 0, failed: 2 }),
+  });
+  const response = createResponse();
+
+  handler({
+    user: { id: 9 },
+    app: { locals: { wss: { clients: new Set() } } },
+  }, response);
+
+  assert.deepEqual(response.body, {
+    success: true,
+    message: 'Logged out successfully',
+    connectionCleanupFailed: 2,
+  });
 });
 
 test('a logout makes the same signed JWT fail the next REST authentication', async () => {
