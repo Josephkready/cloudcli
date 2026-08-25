@@ -10,6 +10,27 @@ import { LoginAttemptLimiter } from './login-attempt-limiter.js';
 const router = express.Router();
 const db = getConnection();
 const loginAttemptLimiter = new LoginAttemptLimiter();
+const LOGIN_THROTTLE_LOG_INTERVAL_MS = 60_000;
+
+export function createLoginThrottleLogger(dependencies = {}) {
+  const clock = dependencies.clock || Date.now;
+  const warn = dependencies.warn || console.warn;
+  let lastLoggedAt = Number.NEGATIVE_INFINITY;
+  let suppressed = 0;
+
+  return (reason) => {
+    const now = clock();
+    if (now - lastLoggedAt < LOGIN_THROTTLE_LOG_INTERVAL_MS) {
+      suppressed += 1;
+      return;
+    }
+    warn('[Auth] Login attempts rate limited', { reason, suppressed });
+    lastLoggedAt = now;
+    suppressed = 0;
+  };
+}
+
+const logLoginThrottle = createLoginThrottleLogger();
 
 /** Atomically creates the one allowed user, or returns null once setup is complete. */
 export function createInitialUser(username, passwordHash, dependencies = {}) {
@@ -93,9 +114,10 @@ export function createLoginHandler(dependencies = {}) {
   const comparePassword = dependencies.comparePassword || bcrypt.compare;
   const createToken = dependencies.createToken || generateToken;
   const limiter = dependencies.limiter || loginAttemptLimiter;
+  const onRateLimited = dependencies.onRateLimited || logLoginThrottle;
 
   return async (req, res) => {
-    let activeUsername = null;
+    let activeAttemptId = null;
     try {
       const { username, password } = req.body || {};
 
@@ -106,29 +128,30 @@ export function createLoginHandler(dependencies = {}) {
 
       const decision = limiter.beginAttempt(readLoginClientAddress(req), username);
       if (!decision.allowed) {
+        onRateLimited(decision.reason);
         res.setHeader('Retry-After', String(decision.retryAfterSeconds));
         return res.status(429).json({ error: 'Too many login attempts. Try again later.' });
       }
-      activeUsername = username;
+      activeAttemptId = decision.attemptId;
 
       // Get user from database
       const user = users.getUserByUsername(username);
       if (!user) {
-        limiter.recordFailure(username);
-        activeUsername = null;
+        limiter.recordFailure(activeAttemptId);
+        activeAttemptId = null;
         return res.status(401).json({ error: 'Invalid username or password' });
       }
 
       // Verify password
       const isValidPassword = await comparePassword(password, user.password_hash);
       if (!isValidPassword) {
-        limiter.recordFailure(username);
-        activeUsername = null;
+        limiter.recordFailure(activeAttemptId);
+        activeAttemptId = null;
         return res.status(401).json({ error: 'Invalid username or password' });
       }
 
-      limiter.recordSuccess(username);
-      activeUsername = null;
+      limiter.recordSuccess(activeAttemptId);
+      activeAttemptId = null;
 
       // Generate token
       const token = createToken(user);
@@ -143,8 +166,8 @@ export function createLoginHandler(dependencies = {}) {
       });
 
     } catch (error) {
-      if (activeUsername !== null) {
-        limiter.cancelAttempt(activeUsername);
+      if (activeAttemptId !== null) {
+        limiter.cancelAttempt(activeAttemptId);
       }
       console.error('Login error:', error);
       res.status(500).json({ error: 'Internal server error' });

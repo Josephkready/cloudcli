@@ -1,5 +1,5 @@
 export type LoginAttemptDecision =
-  | { allowed: true }
+  | { allowed: true; attemptId: number }
   | { allowed: false; retryAfterSeconds: number; reason: 'ip' | 'username' };
 
 type LoginAttemptLimiterOptions = {
@@ -26,6 +26,7 @@ type UsernameAttemptState = {
   lastFailureAt: number | null;
   blockedUntil: number;
   inFlightUntil: number;
+  activeAttemptId: number | null;
   lastSeenAt: number;
 };
 
@@ -81,7 +82,9 @@ export class LoginAttemptLimiter {
   private readonly sweepIntervalMs: number;
   private readonly ipAttempts = new Map<string | symbol, IpAttemptState>();
   private readonly usernameAttempts = new Map<string | symbol, UsernameAttemptState>();
+  private readonly activeAttempts = new Map<number, string | symbol>();
   private lastSweepAt = 0;
+  private nextAttemptId = 1;
 
   constructor(options: LoginAttemptLimiterOptions = {}) {
     this.clock = options.clock ?? Date.now;
@@ -118,7 +121,10 @@ export class LoginAttemptLimiter {
     ipState.attempts.push(now);
 
     const usernameKey = normalizeLoginUsername(username);
-    const usernameState = this.getOrCreateUsernameState(usernameKey, now);
+    const { key: boundedUsernameKey, state: usernameState } = this.getOrCreateUsernameState(
+      usernameKey,
+      now,
+    );
     this.resetStaleFailures(usernameState, now);
     usernameState.lastSeenAt = now;
     const blockedUntil = Math.max(usernameState.blockedUntil, usernameState.inFlightUntil);
@@ -131,19 +137,25 @@ export class LoginAttemptLimiter {
     }
 
     // Serialize password checks for one normalized username across client IPs.
+    if (usernameState.activeAttemptId !== null) {
+      this.activeAttempts.delete(usernameState.activeAttemptId);
+    }
+    const attemptId = this.nextAttemptId;
+    this.nextAttemptId += 1;
+    usernameState.activeAttemptId = attemptId;
     usernameState.inFlightUntil = now + this.inFlightMs;
-    return { allowed: true };
+    this.activeAttempts.set(attemptId, boundedUsernameKey);
+    return { allowed: true, attemptId };
   }
 
-  recordFailure(username: string): void {
+  recordFailure(attemptId: number): void {
     const now = this.clock();
-    const usernameKey = normalizeLoginUsername(username);
-    const state = this.getOrCreateUsernameState(usernameKey, now);
+    const state = this.completeActiveAttempt(attemptId);
+    if (!state) return;
     this.resetStaleFailures(state, now);
     state.failures += 1;
     state.lastFailureAt = now;
     state.lastSeenAt = now;
-    state.inFlightUntil = 0;
 
     const backoff = state.failures >= this.maxFailures
       ? this.lockoutMs
@@ -151,21 +163,20 @@ export class LoginAttemptLimiter {
     state.blockedUntil = now + backoff;
   }
 
-  recordSuccess(username: string): void {
-    const usernameKey = this.resolveBoundedKey(
-      this.usernameAttempts,
-      normalizeLoginUsername(username),
-    );
+  recordSuccess(attemptId: number): void {
+    const usernameKey = this.activeAttempts.get(attemptId);
+    const state = usernameKey === undefined ? undefined : this.usernameAttempts.get(usernameKey);
+    if (usernameKey === undefined || state?.activeAttemptId !== attemptId) return;
+    this.activeAttempts.delete(attemptId);
     this.usernameAttempts.delete(usernameKey);
   }
 
-  cancelAttempt(username: string): void {
-    const usernameKey = this.resolveBoundedKey(
-      this.usernameAttempts,
-      normalizeLoginUsername(username),
-    );
-    const state = this.usernameAttempts.get(usernameKey);
-    if (!state) return;
+  cancelAttempt(attemptId: number): void {
+    const usernameKey = this.activeAttempts.get(attemptId);
+    const state = usernameKey === undefined ? undefined : this.usernameAttempts.get(usernameKey);
+    if (usernameKey === undefined || state?.activeAttemptId !== attemptId) return;
+    this.activeAttempts.delete(attemptId);
+    state.activeAttemptId = null;
     state.inFlightUntil = 0;
     if (state.failures === 0) {
       this.usernameAttempts.delete(usernameKey);
@@ -181,19 +192,33 @@ export class LoginAttemptLimiter {
     return created;
   }
 
-  private getOrCreateUsernameState(key: string, now: number): UsernameAttemptState {
+  private getOrCreateUsernameState(
+    key: string,
+    now: number,
+  ): { key: string | symbol; state: UsernameAttemptState } {
     const boundedKey = this.resolveBoundedKey(this.usernameAttempts, key);
     const existing = this.usernameAttempts.get(boundedKey);
-    if (existing) return existing;
+    if (existing) return { key: boundedKey, state: existing };
     const created = {
       failures: 0,
       lastFailureAt: null,
       blockedUntil: 0,
       inFlightUntil: 0,
+      activeAttemptId: null,
       lastSeenAt: now,
     };
     this.usernameAttempts.set(boundedKey, created);
-    return created;
+    return { key: boundedKey, state: created };
+  }
+
+  private completeActiveAttempt(attemptId: number): UsernameAttemptState | null {
+    const usernameKey = this.activeAttempts.get(attemptId);
+    const state = usernameKey === undefined ? undefined : this.usernameAttempts.get(usernameKey);
+    if (usernameKey === undefined || state?.activeAttemptId !== attemptId) return null;
+    this.activeAttempts.delete(attemptId);
+    state.activeAttemptId = null;
+    state.inFlightUntil = 0;
+    return state;
   }
 
   private resolveBoundedKey<T>(entries: Map<string | symbol, T>, key: string): string | symbol {
@@ -228,7 +253,10 @@ export class LoginAttemptLimiter {
       const inactive = state.inFlightUntil <= now && state.blockedUntil <= now;
       const failuresExpired = state.lastFailureAt === null
         || now - state.lastFailureAt >= this.failureResetMs;
-      if (inactive && failuresExpired) this.usernameAttempts.delete(key);
+      if (inactive && failuresExpired) {
+        if (state.activeAttemptId !== null) this.activeAttempts.delete(state.activeAttemptId);
+        this.usernameAttempts.delete(key);
+      }
     }
   }
 }
