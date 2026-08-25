@@ -198,6 +198,19 @@ describe('stream buffering', () => {
   });
 });
 
+describe('global gateway events', () => {
+  it('does not append a projects snapshot refresh signal to the viewed conversation', () => {
+    const { deliver, sessionStore } = setup();
+
+    deliver({
+      kind: 'projects_snapshot_stale',
+      timestamp: '2026-08-25T20:43:47.118Z',
+    });
+
+    expect(sessionStore.appendRealtime).not.toHaveBeenCalled();
+  });
+});
+
 describe('chat_send_accepted', () => {
   it('retires the acknowledged entry from the pending store', () => {
     seedPending(SESSION, 'pending_1');
