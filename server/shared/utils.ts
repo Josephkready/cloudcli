@@ -460,6 +460,134 @@ export function createCompleteMessage(opts: {
 
 // ---------------------------
 //----------------- CONVERSATION HISTORY PAGINATION UTILITIES ------------
+type HistoryPageCollectorOptions<T> = {
+  limit: number | null;
+  offset: number;
+  compare?: (left: T, right: T) => number;
+};
+
+type SequencedHistoryItem<T> = {
+  item: T;
+  sequence: number;
+};
+
+function normalizeHistoryPageNumber(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+/** Matches Array.sort's prior behavior by treating unparseable timestamps as equal. */
+export function compareHistoryTimestamps(left: unknown, right: unknown): number {
+  const toTime = (value: unknown): number => {
+    if (value instanceof Date) return value.getTime();
+    return new Date(typeof value === 'string' || typeof value === 'number' ? value : 0).getTime();
+  };
+  const leftTime = toTime(left);
+  const rightTime = toTime(right);
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) ? leftTime - rightTime : 0;
+}
+
+/**
+ * Retains only the tail that can contribute to one history page while still
+ * counting every item in a stream.
+ *
+ * `offset` rows newer than the requested page stay in the retained window on
+ * purpose: a tool result in those rows may belong to a tool use on the page.
+ * With `limit: null`, callers explicitly requested full history, so the
+ * collector deliberately retains everything.
+ */
+export class HistoryPageCollector<T> {
+  readonly limit: number | null;
+  readonly offset: number;
+
+  private readonly capacity: number | null;
+  private readonly compare?: (left: T, right: T) => number;
+  private readonly retained: Array<SequencedHistoryItem<T>> = [];
+  private nextSequence = 0;
+
+  totalItems = 0;
+
+  constructor(options: HistoryPageCollectorOptions<T>) {
+    this.limit = options.limit === null ? null : normalizeHistoryPageNumber(options.limit);
+    this.offset = normalizeHistoryPageNumber(options.offset);
+    this.capacity = this.limit === null ? null : this.limit + this.offset;
+    this.compare = options.compare;
+  }
+
+  get retainedItems(): number {
+    return this.retained.length;
+  }
+
+  add(item: T): void {
+    const sequenced = { item, sequence: this.nextSequence };
+    this.nextSequence += 1;
+    this.totalItems += 1;
+
+    if (this.capacity === 0) {
+      return;
+    }
+
+    // An unbounded request is sorted once at the end instead of paying an O(n)
+    // insertion cost for every line in a large full-history request.
+    if (!this.compare || this.capacity === null) {
+      this.retained.push(sequenced);
+    } else {
+      const insertionIndex = this.findInsertionIndex(sequenced);
+      this.retained.splice(insertionIndex, 0, sequenced);
+    }
+
+    if (this.capacity !== null && this.retained.length > this.capacity) {
+      this.retained.shift();
+    }
+  }
+
+  page(): { items: T[]; hasMore: boolean } {
+    const retained = this.sortedRetained();
+
+    if (this.limit === null) {
+      const end = Math.max(0, retained.length - this.offset);
+      return { items: retained.slice(0, end), hasMore: false };
+    }
+
+    const end = Math.max(0, retained.length - this.offset);
+    const start = Math.max(0, end - this.limit);
+    return {
+      items: retained.slice(start, end),
+      hasMore: Math.max(0, this.totalItems - this.offset - this.limit) > 0,
+    };
+  }
+
+  private sortedRetained(): T[] {
+    const sequenced = this.compare && this.capacity === null
+      ? [...this.retained].sort((left, right) => this.compareSequenced(left, right))
+      : this.retained;
+    return sequenced.map((entry) => entry.item);
+  }
+
+  private findInsertionIndex(entry: SequencedHistoryItem<T>): number {
+    let low = 0;
+    let high = this.retained.length;
+
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (this.compareSequenced(this.retained[middle], entry) <= 0) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+
+    return low;
+  }
+
+  private compareSequenced(
+    left: SequencedHistoryItem<T>,
+    right: SequencedHistoryItem<T>,
+  ): number {
+    const compared = this.compare?.(left.item, right.item) ?? 0;
+    return compared === 0 ? left.sequence - right.sequence : compared;
+  }
+}
+
 /**
  * Slices one page from the END of a chronologically ordered message list.
  *

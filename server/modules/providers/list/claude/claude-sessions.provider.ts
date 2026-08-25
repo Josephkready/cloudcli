@@ -6,7 +6,15 @@ import readline from 'node:readline';
 
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
-import { AppError, createNormalizedMessage, generateMessageId, readObjectRecord, sliceTailPage } from '@/shared/utils.js';
+import {
+  AppError,
+  compareHistoryTimestamps,
+  createNormalizedMessage,
+  generateMessageId,
+  HistoryPageCollector,
+  readObjectRecord,
+  sliceTailPage,
+} from '@/shared/utils.js';
 import { sessionsDb } from '@/modules/database/index.js';
 
 const PROVIDER = 'claude';
@@ -82,23 +90,14 @@ type ClaudeToolResult = {
   toolUseResult?: unknown;
 };
 
-type ClaudeHistoryResult =
-  | AnyRecord[]
-  | {
-    messages?: AnyRecord[];
-    total?: number;
-    hasMore?: boolean;
-  };
-
-type ClaudeHistoryMessagesResult =
-  | AnyRecord[]
-  | {
-    messages: AnyRecord[];
-    total: number;
-    hasMore: boolean;
-    offset?: number;
-    limit?: number | null;
-  };
+type ClaudeHistoryMessagesResult = {
+  messages: NormalizedMessage[];
+  total: number;
+  itemTotal: number;
+  hasMore: boolean;
+  offset: number;
+  limit: number | null;
+};
 
 async function parseAgentTools(filePath: string): Promise<AnyRecord[]> {
   const tools: AnyRecord[] = [];
@@ -169,6 +168,7 @@ async function parseAgentTools(filePath: string): Promise<AnyRecord[]> {
 async function getSessionMessages(
   sessionId: string,
   providerSessionId: string,
+  normalize: (raw: AnyRecord) => NormalizedMessage[],
   limit: number | null,
   offset: number,
 ): Promise<ClaudeHistoryMessagesResult> {
@@ -184,15 +184,16 @@ async function getSessionMessages(
     );
 
     if (!jsonLPath) {
-      return { messages: [], total: 0, hasMore: false };
+      return { messages: [], total: 0, itemTotal: 0, hasMore: false, offset: 0, limit };
     }
 
     const projectDir = path.dirname(jsonLPath);
-    const files = await fsp.readdir(projectDir);
-    const agentFiles = files.filter((file) => file.endsWith('.jsonl') && file.startsWith('agent-'));
-
-    const messages: AnyRecord[] = [];
-    const agentToolsCache = new Map<string, AnyRecord[]>();
+    const collector = new HistoryPageCollector<NormalizedMessage>({
+      limit,
+      offset,
+      compare: (left, right) => compareHistoryTimestamps(left.timestamp, right.timestamp),
+    });
+    let visibleTotal = 0;
 
     const fileStream = fs.createReadStream(jsonLPath);
     const rl = readline.createInterface({
@@ -208,64 +209,56 @@ async function getSessionMessages(
       try {
         const entry = JSON.parse(line) as AnyRecord;
         if (entry.sessionId === providerSessionId) {
-          messages.push(entry);
+          for (const message of normalize(entry)) {
+            collector.add(message);
+            if (message.kind !== 'tool_result') {
+              visibleTotal += 1;
+            }
+          }
         }
       } catch {
         // Skip malformed JSONL lines that can happen during concurrent writes.
       }
     }
 
+    const { items, hasMore } = collector.page();
     const agentIds = new Set<string>();
-    for (const message of messages) {
-      const agentId = message.toolUseResult?.agentId;
+    for (const message of items) {
+      const agentId = readObjectRecord(message.toolUseResult)?.agentId;
       if (agentId) {
         agentIds.add(String(agentId));
       }
     }
 
-    for (const agentId of agentIds) {
-      const agentFileName = `agent-${agentId}.jsonl`;
-      if (!agentFiles.includes(agentFileName)) {
-        continue;
+    if (agentIds.size > 0) {
+      const files = new Set(await fsp.readdir(projectDir));
+      const agentToolsCache = new Map<string, AnyRecord[]>();
+      for (const agentId of agentIds) {
+        const agentFileName = `agent-${agentId}.jsonl`;
+        if (!files.has(agentFileName)) {
+          continue;
+        }
+
+        const tools = await parseAgentTools(path.join(projectDir, agentFileName));
+        agentToolsCache.set(agentId, tools);
       }
 
-      const agentFilePath = path.join(projectDir, agentFileName);
-      const tools = await parseAgentTools(agentFilePath);
-      agentToolsCache.set(agentId, tools);
-    }
-
-    for (const message of messages) {
-      const agentId = message.toolUseResult?.agentId;
-      if (!agentId) {
-        continue;
-      }
-
-      const agentTools = agentToolsCache.get(String(agentId));
-      if (agentTools && agentTools.length > 0) {
-        message.subagentTools = agentTools;
+      for (const message of items) {
+        const agentId = readObjectRecord(message.toolUseResult)?.agentId;
+        const agentTools = agentId ? agentToolsCache.get(String(agentId)) : undefined;
+        if (agentTools && agentTools.length > 0) {
+          message.subagentTools = agentTools;
+        }
       }
     }
-
-    const sortedMessages = messages.sort(
-      (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime(),
-    );
-    const total = sortedMessages.length;
-
-    if (limit === null) {
-      return sortedMessages;
-    }
-
-    const startIndex = Math.max(0, total - offset - limit);
-    const endIndex = total - offset;
-    const paginatedMessages = sortedMessages.slice(startIndex, endIndex);
-    const hasMore = startIndex > 0;
 
     return {
-      messages: paginatedMessages,
-      total,
+      messages: items,
+      total: visibleTotal,
+      itemTotal: collector.totalItems,
       hasMore,
-      offset,
-      limit,
+      offset: collector.offset,
+      limit: collector.limit,
     };
   } catch (error) {
     // Deliberately NOT swallowed into an empty result. Returning `[]` here made
@@ -734,46 +727,41 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     sessionId: string,
     options: FetchHistoryOptions = {},
   ): Promise<FetchHistoryResult> {
-    const { limit = null, offset = 0 } = options;
+    const normalizedOffset = Math.max(0, options.offset ?? 0);
+    const normalizedLimit = options.limit === null || options.limit === undefined
+      ? null
+      : Math.max(0, options.limit);
+    const retentionLimit = normalizedLimit === null
+      ? null
+      : normalizedLimit + normalizedOffset;
     const providerSessionId = options.providerSessionId ?? sessionId;
 
-    // Load full history first so `total` reflects frontend-normalized messages,
-    // not raw JSONL records.
-    //
     // A read failure is intentionally allowed to propagate to the route rather
     // than being reported as an empty page. Presenting a failure as "no
     // messages" is what let a transient read error blank a live conversation
     // (#320); an honest error lets the client show a retryable error state
     // instead of an empty thread that reads as data loss.
-    const result: ClaudeHistoryResult = await getSessionMessages(
+    const result = await getSessionMessages(
       sessionId,
       providerSessionId,
-      null,
+      (raw) => this.normalizeMessage(raw, sessionId),
+      retentionLimit,
       0,
     );
 
-    const rawMessages = Array.isArray(result) ? result : (result.messages || []);
-
     const toolResultMap = new Map<string, ClaudeToolResult>();
-    for (const raw of rawMessages) {
-      if (raw.message?.role === 'user' && Array.isArray(raw.message?.content)) {
-        for (const part of raw.message.content) {
-          if (part.type === 'tool_result' && part.tool_use_id) {
-            toolResultMap.set(part.tool_use_id, {
-              content: part.content,
-              isError: Boolean(part.is_error),
-              subagentTools: raw.subagentTools,
-              toolUseResult: raw.toolUseResult,
-            });
-          }
-        }
+    for (const message of result.messages) {
+      if (message.kind === 'tool_result' && message.toolId) {
+        toolResultMap.set(message.toolId, {
+          content: message.content,
+          isError: Boolean(message.isError),
+          subagentTools: message.subagentTools,
+          toolUseResult: message.toolUseResult,
+        });
       }
     }
 
-    const normalized: NormalizedMessage[] = [];
-    for (const raw of rawMessages) {
-      normalized.push(...this.normalizeMessage(raw, sessionId));
-    }
+    const normalized = result.messages;
 
     for (const msg of normalized) {
       if (msg.kind === 'tool_use' && msg.toolId && toolResultMap.has(msg.toolId)) {
@@ -793,19 +781,14 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       }
     }
 
-    let total = 0;
-    for (const msg of normalized) {
-      if (msg.kind !== 'tool_result') {
-        total += 1;
-      }
-    }
-    const normalizedOffset = Math.max(0, offset);
-    const normalizedLimit = limit === null ? null : Math.max(0, limit);
-    const { page, hasMore } = sliceTailPage(normalized, normalizedLimit, normalizedOffset);
+    const { page } = sliceTailPage(normalized, normalizedLimit, normalizedOffset);
+    const hasMore = normalizedLimit === null
+      ? false
+      : Math.max(0, result.itemTotal - normalizedOffset - normalizedLimit) > 0;
 
     return {
       messages: page,
-      total,
+      total: result.total,
       hasMore,
       offset: normalizedOffset,
       limit: normalizedLimit,
