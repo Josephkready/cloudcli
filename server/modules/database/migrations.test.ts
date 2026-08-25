@@ -55,3 +55,35 @@ test('session backfills update null legacy fields once without rewriting populat
     db.close();
   }
 });
+
+test('legacy users gain a durable zero-valued token version exactly once', () => {
+  const db = new Database(':memory:');
+  try {
+    db.exec(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_login DATETIME,
+        is_active BOOLEAN DEFAULT 1,
+        git_name TEXT,
+        git_email TEXT,
+        has_completed_onboarding BOOLEAN DEFAULT 0
+      );
+      INSERT INTO users (username, password_hash) VALUES ('alice', 'hash');
+    `);
+
+    runMigrations(db);
+    runMigrations(db);
+
+    const columns = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+    assert.equal(columns.filter((column) => column.name === 'token_version').length, 1);
+    const user = db.prepare(
+      "SELECT token_version FROM users WHERE username = 'alice'"
+    ).get() as { token_version: number };
+    assert.equal(user.token_version, 0);
+  } finally {
+    db.close();
+  }
+});

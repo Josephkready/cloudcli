@@ -22,6 +22,11 @@ also admits at most ten login checks per minute from one direct network peer,
 before bcrypt runs. Blocked requests return HTTP `429` with `Retry-After`;
 limiter state is process-local and resets when the server restarts. Reverse
 proxy deployments therefore share the proxy peer's conservative IP budget.
+Fallback-auth logout also revokes every outstanding JWT for that user, across
+REST and WebSocket connections, while leaving other users and the installation
+signing secret untouched. The database migration intentionally invalidates JWTs
+issued by an older CloudCLI version once, because those tokens have no revocable
+version claim.
 
 Because of that shape, this fork **intentionally diverges** from upstream. Feature removals are kept as atomic, well-labeled commits so future upstream syncs resolve to a simple "re-delete."
 

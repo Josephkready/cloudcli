@@ -6,6 +6,7 @@ import { handleChatConnection } from '@/modules/websocket/services/chat-websocke
 import { verifyWebSocketClient } from '@/modules/websocket/services/websocket-auth.service.js';
 import { handlePluginWsProxy } from '@/modules/websocket/services/plugin-websocket-proxy.service.js';
 import { handleShellConnection } from '@/modules/websocket/services/shell-websocket.service.js';
+import { tagAuthenticatedWebSocket } from '@/modules/websocket/services/websocket-session-revocation.service.js';
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
 
 type WebSocketServerDependencies = {
@@ -115,6 +116,7 @@ export function createWebSocketServer(
     const incomingRequest = request as AuthenticatedWebSocketRequest;
     const url = incomingRequest.url ?? '/';
     const pathname = new URL(url, 'http://localhost').pathname;
+    tagAuthenticatedWebSocket(ws, incomingRequest.user);
 
     // Path only — never the raw URL, which carries `?token=...`.
     attachHeartbeat(ws as unknown as HeartbeatSocket, HEARTBEAT_INTERVAL_MS, globalThis as never, pathname);
