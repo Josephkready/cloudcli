@@ -66,21 +66,21 @@ test('a comparator retains the chronologically newest items from out-of-order in
   assert.equal(collector.retainedItems, 3);
 });
 
-test('invalid timestamps preserve stream order instead of corrupting bounded insertion', () => {
+test('invalid timestamps sort before valid history without evicting newer dated items', () => {
   const collector = new HistoryPageCollector<{ id: string; timestamp: string }>({
-    limit: 3,
+    limit: 2,
     offset: 0,
     compare: (left, right) => compareHistoryTimestamps(left.timestamp, right.timestamp),
   });
   for (const item of [
-    { id: 'first', timestamp: '2026-01-01T00:00:00Z' },
+    { id: 'newest', timestamp: '2026-01-03T00:00:00Z' },
     { id: 'invalid', timestamp: 'not-a-date' },
-    { id: 'last', timestamp: '2026-01-01T00:00:02Z' },
+    { id: 'oldest-valid', timestamp: '2026-01-01T00:00:00Z' },
   ]) {
     collector.add(item);
   }
 
-  assert.deepEqual(collector.page().items.map((item) => item.id), ['first', 'invalid', 'last']);
+  assert.deepEqual(collector.page().items.map((item) => item.id), ['oldest-valid', 'newest']);
 });
 
 test('null limit deliberately retains and returns the full stream before offset', () => {

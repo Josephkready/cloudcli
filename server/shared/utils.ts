@@ -475,7 +475,7 @@ function normalizeHistoryPageNumber(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }
 
-/** Matches Array.sort's prior behavior by treating unparseable timestamps as equal. */
+/** Sorts malformed timestamps before dated history while preserving their stream order. */
 export function compareHistoryTimestamps(left: unknown, right: unknown): number {
   const toTime = (value: unknown): number => {
     if (value instanceof Date) return value.getTime();
@@ -483,7 +483,14 @@ export function compareHistoryTimestamps(left: unknown, right: unknown): number 
   };
   const leftTime = toTime(left);
   const rightTime = toTime(right);
-  return Number.isFinite(leftTime) && Number.isFinite(rightTime) ? leftTime - rightTime : 0;
+  const leftIsValid = Number.isFinite(leftTime);
+  const rightIsValid = Number.isFinite(rightTime);
+  if (!leftIsValid || !rightIsValid) {
+    if (leftIsValid) return 1;
+    if (rightIsValid) return -1;
+    return 0;
+  }
+  return leftTime - rightTime;
 }
 
 /**
