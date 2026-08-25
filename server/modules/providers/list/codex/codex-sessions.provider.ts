@@ -5,7 +5,15 @@ import { sessionsDb } from '@/modules/database/index.js';
 import { toImageAttachments } from '@/shared/image-attachments.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
-import { AppError, createNormalizedMessage, generateMessageId, readObjectRecord, sliceTailPage } from '@/shared/utils.js';
+import {
+  AppError,
+  compareHistoryTimestamps,
+  createNormalizedMessage,
+  generateMessageId,
+  HistoryPageCollector,
+  readObjectRecord,
+  sliceTailPage,
+} from '@/shared/utils.js';
 
 import { parseApplyPatch } from './apply-patch.js';
 
@@ -49,16 +57,15 @@ export function attachCodexToolResults(normalized: NormalizedMessage[]): void {
   }
 }
 
-type CodexHistoryResult =
-  | AnyRecord[]
-  | {
-      messages?: AnyRecord[];
-      total?: number;
-      hasMore?: boolean;
-      offset?: number;
-      limit?: number | null;
-      tokenUsage?: unknown;
-    };
+type CodexHistoryResult = {
+  messages: NormalizedMessage[];
+  total: number;
+  itemTotal: number;
+  hasMore: boolean;
+  offset: number;
+  limit: number | null;
+  tokenUsage?: unknown;
+};
 
 function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boolean {
   if (!payload || payload.type !== 'user_message') {
@@ -135,6 +142,7 @@ function extractCodexTextContent(content: unknown): string {
 
 async function getCodexSessionMessages(
   sessionId: string,
+  normalize: (raw: AnyRecord) => NormalizedMessage[],
   limit: number | null = null,
   offset = 0,
 ): Promise<CodexHistoryResult> {
@@ -143,11 +151,24 @@ async function getCodexSessionMessages(
 
     if (!sessionFilePath) {
       console.warn(`Codex session file not found for session ${sessionId}`);
-      return { messages: [], total: 0, hasMore: false };
+      return { messages: [], total: 0, itemTotal: 0, hasMore: false, offset: 0, limit };
     }
 
-    const messages: AnyRecord[] = [];
+    const collector = new HistoryPageCollector<NormalizedMessage>({
+      limit,
+      offset,
+      compare: (left, right) => compareHistoryTimestamps(left.timestamp, right.timestamp),
+    });
+    let visibleTotal = 0;
     let tokenUsage: AnyRecord | null = null;
+    const addHistoryEntry = (raw: AnyRecord) => {
+      for (const message of normalize(raw)) {
+        collector.add(message);
+        if (message.kind !== 'tool_result') {
+          visibleTotal += 1;
+        }
+      }
+    };
     const fileStream = fsSync.createReadStream(sessionFilePath);
     const rl = readline.createInterface({
       input: fileStream,
@@ -174,7 +195,7 @@ async function getCodexSessionMessages(
         }
 
         if (entry.type === 'event_msg' && isVisibleCodexUserMessage(entry.payload as AnyRecord)) {
-          messages.push({
+          addHistoryEntry({
             type: 'user',
             timestamp: entry.timestamp,
             message: {
@@ -192,7 +213,7 @@ async function getCodexSessionMessages(
         ) {
           const textContent = extractCodexTextContent(entry.payload.content);
           if (textContent.trim()) {
-            messages.push({
+            addHistoryEntry({
               type: 'assistant',
               timestamp: entry.timestamp,
               message: {
@@ -212,7 +233,7 @@ async function getCodexSessionMessages(
             : '';
 
           if (summaryText.trim()) {
-            messages.push({
+            addHistoryEntry({
               type: 'thinking',
               timestamp: entry.timestamp,
               message: {
@@ -237,7 +258,7 @@ async function getCodexSessionMessages(
             }
           }
 
-          messages.push({
+          addHistoryEntry({
             type: 'tool_use',
             timestamp: entry.timestamp,
             toolName,
@@ -247,7 +268,7 @@ async function getCodexSessionMessages(
         }
 
         if (entry.type === 'response_item' && entry.payload?.type === 'function_call_output') {
-          messages.push({
+          addHistoryEntry({
             type: 'tool_result',
             timestamp: entry.timestamp,
             toolCallId: entry.payload.call_id,
@@ -269,7 +290,7 @@ async function getCodexSessionMessages(
             if (patchFiles.length === 0) {
               // Nothing parseable (e.g. an empty patch) — pass the raw call
               // through so it still appears in the transcript.
-              messages.push({
+              addHistoryEntry({
                 type: 'tool_use',
                 timestamp: entry.timestamp,
                 toolName,
@@ -278,7 +299,7 @@ async function getCodexSessionMessages(
               });
             } else {
               for (const file of patchFiles) {
-                messages.push({
+                addHistoryEntry({
                   type: 'tool_use',
                   timestamp: entry.timestamp,
                   toolName: 'Edit',
@@ -294,7 +315,7 @@ async function getCodexSessionMessages(
               }
             }
           } else {
-            messages.push({
+            addHistoryEntry({
               type: 'tool_use',
               timestamp: entry.timestamp,
               toolName,
@@ -305,7 +326,7 @@ async function getCodexSessionMessages(
         }
 
         if (entry.type === 'response_item' && entry.payload?.type === 'custom_tool_call_output') {
-          messages.push({
+          addHistoryEntry({
             type: 'tool_result',
             timestamp: entry.timestamp,
             toolCallId: entry.payload.call_id,
@@ -317,28 +338,16 @@ async function getCodexSessionMessages(
       }
     }
 
-    messages.sort(
-      (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime(),
-    );
-    const total = messages.length;
-
-    if (limit !== null) {
-      const startIndex = Math.max(0, total - offset - limit);
-      const endIndex = total - offset;
-      const paginatedMessages = messages.slice(startIndex, endIndex);
-      const hasMore = startIndex > 0;
-
-      return {
-        messages: paginatedMessages,
-        total,
-        hasMore,
-        offset,
-        limit,
-        tokenUsage,
-      };
-    }
-
-    return { messages, tokenUsage };
+    const { items, hasMore } = collector.page();
+    return {
+      messages: items,
+      total: visibleTotal,
+      itemTotal: collector.totalItems,
+      hasMore,
+      offset: collector.offset,
+      limit: collector.limit,
+      tokenUsage,
+    };
   } catch (error) {
     console.error(`Error reading Codex session messages for ${sessionId}:`, error);
     throw new AppError(`Could not read the transcript for session "${sessionId}".`, {
@@ -608,46 +617,44 @@ export class CodexSessionsProvider implements IProviderSessions {
     sessionId: string,
     options: FetchHistoryOptions = {},
   ): Promise<FetchHistoryResult> {
-    const { limit = null, offset = 0 } = options;
+    const normalizedOffset = Math.max(0, options.offset ?? 0);
+    const normalizedLimit = options.limit === null || options.limit === undefined
+      ? null
+      : Math.max(0, options.limit);
+    const retentionLimit = normalizedLimit === null
+      ? null
+      : normalizedLimit + normalizedOffset;
 
     let result: CodexHistoryResult;
     try {
-      // Load full history first so `total` reflects frontend-normalized messages,
-      // not raw JSONL records.
-      result = await getCodexSessionMessages(sessionId, null, 0);
+      result = await getCodexSessionMessages(
+        sessionId,
+        (raw) => this.normalizeHistoryEntry(raw, sessionId),
+        retentionLimit,
+        0,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[CodexProvider] Failed to load session ${sessionId}:`, message);
       throw error;
     }
 
-    const rawMessages = Array.isArray(result) ? result : (result.messages || []);
-    const tokenUsage = Array.isArray(result) ? undefined : result.tokenUsage;
-
-    const normalized: NormalizedMessage[] = [];
-    for (const raw of rawMessages) {
-      normalized.push(...this.normalizeHistoryEntry(raw, sessionId));
-    }
+    const normalized = result.messages;
 
     attachCodexToolResults(normalized);
 
-    let total = 0;
-    for (const msg of normalized) {
-      if (msg.kind !== 'tool_result') {
-        total += 1;
-      }
-    }
-    const normalizedOffset = Math.max(0, offset);
-    const normalizedLimit = limit === null ? null : Math.max(0, limit);
-    const { page, hasMore } = sliceTailPage(normalized, normalizedLimit, normalizedOffset);
+    const { page } = sliceTailPage(normalized, normalizedLimit, normalizedOffset);
+    const hasMore = normalizedLimit === null
+      ? false
+      : Math.max(0, result.itemTotal - normalizedOffset - normalizedLimit) > 0;
 
     return {
       messages: page,
-      total,
+      total: result.total,
       hasMore,
       offset: normalizedOffset,
       limit: normalizedLimit,
-      tokenUsage,
+      tokenUsage: result.tokenUsage,
     };
   }
 }

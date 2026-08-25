@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import readline from 'node:readline';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
@@ -7,9 +8,9 @@ import {
   AppError,
   createNormalizedMessage,
   generateMessageId,
+  HistoryPageCollector,
   readObjectRecord,
   readOptionalString,
-  sliceTailPage,
 } from '@/shared/utils.js';
 
 import { stripAntigravityTranscriptTags } from './antigravity-session-synchronizer.provider.js';
@@ -125,16 +126,19 @@ export class AntigravitySessionsProvider implements IProviderSessions {
       return { messages: [], total: 0, hasMore: false, offset, limit };
     }
 
-    const normalized: NormalizedMessage[] = [];
+    const collector = new HistoryPageCollector<NormalizedMessage>({ limit, offset });
     try {
-      const lines = (await readFile(transcriptPath, 'utf8')).split(/\r?\n/);
-      for (const line of lines) {
+      const fileStream = createReadStream(transcriptPath);
+      const lines = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+      for await (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) {
           continue;
         }
         try {
-          normalized.push(...normalizeAntigravityHistoryStep(JSON.parse(trimmed), sessionId));
+          for (const message of normalizeAntigravityHistoryStep(JSON.parse(trimmed), sessionId)) {
+            collector.add(message);
+          }
         } catch {
           // Ignore a malformed or partially-written line without losing history.
         }
@@ -148,14 +152,13 @@ export class AntigravitySessionsProvider implements IProviderSessions {
       });
     }
 
-    const normalizedLimit = limit === null ? null : Math.max(0, limit);
-    const { page, hasMore } = sliceTailPage(normalized, normalizedLimit, offset);
+    const { items, hasMore } = collector.page();
     return {
-      messages: page,
-      total: normalized.length,
+      messages: items,
+      total: collector.totalItems,
       hasMore,
-      offset,
-      limit: normalizedLimit,
+      offset: collector.offset,
+      limit: collector.limit,
     };
   }
 }
