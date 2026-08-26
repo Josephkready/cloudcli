@@ -2,9 +2,14 @@
 
 Upstream is not a channel for getting fixes. In the six weeks after our
 2026-07-15 fork point, [siteboon/claudecodeui](https://github.com/siteboon/claudecodeui)
-merged **20 commits** while carrying ~80 open PRs and ~200 open issues; we were
+merged **20 commits** while carrying ~80 open PRs and ~120 open issues; we were
 226 commits ahead over the same window. PRs sit for months, and most of the open
 ones duplicate work this fork already shipped.
+
+Every figure in this document is from the **2026-08-25** sweep. They are
+point-in-time observations and they age — re-run the discovery below rather than
+trusting them. (One trap while doing so: the repo's `open_issues_count` field
+counts open PRs as issues, so it reads ~200 rather than the ~120 above.)
 
 The useful traffic is **lateral**. A handful of other people are running this app
 as their daily driver on a phone, hitting the same mobile/PWA/chat bugs, and
@@ -12,9 +17,10 @@ fixing them in their own forks. That is where to look.
 
 ## Finding the live forks
 
-Upstream has ~1900 forks and roughly all of them are untouched mirrors. **Sorting
-by stars finds nothing** — the top fork by stars has 7 and was last pushed
-months ago. The only signal that works is recent pushes plus real divergence.
+Upstream had ~1900 forks at the last sweep and roughly all of them are untouched
+mirrors. **Sorting by stars finds nothing** — the top fork by stars had 7, last
+pushed months earlier. The only signal that works is recent pushes plus real
+divergence.
 
 ```bash
 # 1. every fork with its last push, newest first
@@ -40,8 +46,7 @@ Three traps in that second step:
 
 ## The roster
 
-Last swept **2026-08-25**. Re-run the discovery above rather than trusting this
-list; it ages.
+As of the 2026-08-25 sweep.
 
 | Fork | Branch | Character |
 |---|---|---|

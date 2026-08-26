@@ -37,19 +37,10 @@ against ~80 open PRs — so it is not a useful source of fixes. A handful of *ot
 forks are, though: people running this app on a phone every day, hitting the same
 mobile, PWA, and chat bugs, and fixing them.
 
-Finding them takes a specific search. Upstream has ~1900 forks and almost all are
-untouched mirrors; sorting by stars surfaces none of the live ones. Filter by
-recent pushes, then measure real divergence:
-
-```bash
-gh api --paginate "repos/siteboon/claudecodeui/forks?per_page=100" \
-  --jq '.[] | [.full_name, .pushed_at] | @tsv' | sort -t$'\t' -k2,2r
-gh api "repos/siteboon/claudecodeui/compare/main...OWNER:BRANCH" \
-  --jq '"ahead=\(.ahead_by) behind=\(.behind_by)"'
-```
-
-The current roster, the acceptance filter for a single-user fork, and the process
-for reading a fork and deciding what is worth porting:
+Finding them takes a specific search — upstream has thousands of forks and almost
+all are untouched mirrors, so sorting by stars surfaces none of the live ones.
+The discovery commands, the current roster, the acceptance filter for a
+single-user fork, and the process for deciding what is worth porting all live in
 [`docs/fork-harvesting.md`](docs/fork-harvesting.md).
 
 ## Development
