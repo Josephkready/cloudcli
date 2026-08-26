@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -57,8 +57,11 @@ test('the diff rows sit inside a horizontal scroll container', () => {
 test('index.css exempts data-scrolls-x descendants from the max-width clamp', () => {
   // The other end of the contract. Without this selector the rows are clamped to
   // the scroller's width and the diff silently wraps again.
+  // Resolved from this file, not `process.cwd()` — the latter passes under
+  // `npm run test:unit` (which runs from the repo root) but throws ENOENT for an
+  // IDE runner or a single-file run started from a subdirectory.
   const css = readFileSync(
-    path.join(process.cwd(), 'src/index.css'),
+    fileURLToPath(new URL('../../../../index.css', import.meta.url)),
     'utf8',
   );
   assert.match(

@@ -874,8 +874,17 @@
      structure and scrolls sideways, as every code surface here does.
      `word-break: break-all` is gone with the `pre` half of the old selector —
      it chopped identifiers at an arbitrary character rather than at a word
-     boundary, which `overflow-wrap` already handles. */
-  .chat-message :not(pre) > code {
+     boundary, which `overflow-wrap` already handles.
+
+     `:where()` is load-bearing, not decoration. It contributes no specificity,
+     so this selector scores (0,1,0) — a tie with any Tailwind utility, which
+     `@tailwind utilities` then wins by being emitted after `@layer components`.
+     Written bare, `.chat-message :not(pre) > code` scores (0,1,2) and silently
+     beats a component's own class: the collapsed Bash command row asks to
+     `truncate` to one line and would wrap instead, which is exactly what the
+     old `!important` rule did to it. This is a DEFAULT for otherwise-unstyled
+     inline code, so it has to lose to an explicit intent, not override it. */
+  .chat-message :where(:not(pre) > code) {
     white-space: pre-wrap;
     overflow-wrap: break-word;
   }
