@@ -199,6 +199,12 @@ export type GatewayEventKind =
   // entry on a fact instead of inferring delivery from a transcript echo that a
   // queued message will not produce until the run ahead of it finishes.
   | 'chat_send_accepted'
+  // Ack for `chat.resume`, reporting how many stranded runs were re-dispatched
+  // (#70). Emitted since the feature shipped but never declared here, which is
+  // part of why it slipped into the chat transcript: nothing typed it as a
+  // gateway frame, and the client persisted anything it did not recognise. Like
+  // every gateway frame it carries no `id` (#450).
+  | 'chat_resumed'
   // Answer to a `chat.ping` liveness probe (#389). Pure plumbing: the client
   // consumes it to prove the socket is alive and never dispatches it onward.
   | 'pong'

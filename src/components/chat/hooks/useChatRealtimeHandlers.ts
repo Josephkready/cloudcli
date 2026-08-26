@@ -8,7 +8,101 @@ import type { MarkSessionIdle, MarkSessionProcessing } from '../../../hooks/useS
 import type { PendingPermissionRequest } from '../types/types';
 import { removePendingSend } from '../utils/pendingSends';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
-import type { SessionStore, NormalizedMessage } from '../../../stores/useSessionStore';
+import type { SessionStore, NormalizedMessage, MessageKind } from '../../../stores/useSessionStore';
+
+/**
+ * The only `kind`s that may be written into a session transcript.
+ *
+ * This is an ALLOW-list on purpose. It replaced an exclude-list of four control
+ * kinds, under which every frame the client did not recognise was cast to a
+ * `NormalizedMessage` and appended to the store — gateway frames included.
+ * `chat_resumed` (one click on the interrupted-run banner) carries no `id`, and
+ * an id-less row made the merge throw, froze the slot's `merged` view for good,
+ * and took the composer's post-send bookkeeping down with it (#450/#389).
+ *
+ * Membership is exactly `MessageKind` — the provider-message union mirrored
+ * from `server/shared/types.ts` — minus the control kinds this hook consumes as
+ * events rather than rows (`complete`, `status`, `permission_request`,
+ * `permission_cancelled`). So it persists precisely what the exclude-list
+ * persisted for every kind either side knows about; the only behaviour change
+ * is that unrecognised frames are now dropped instead of stored.
+ *
+ * Every kind here is minted by `createNormalizedMessage` (server) or
+ * `chatMessageToNormalized` (client), both of which guarantee an `id`. Gateway
+ * kinds are absent by construction: none of them is a `MessageKind`.
+ *
+ * Adding a provider kind? Add it here too, or it will never reach a transcript.
+ * `KNOWN_CONTROL_KINDS` below exists so that omission is loud rather than
+ * silent.
+ */
+const PERSISTED_MESSAGE_KINDS: ReadonlySet<string> = new Set<MessageKind>([
+  'text',
+  'tool_use',
+  'tool_result',
+  'thinking',
+  // Both stream kinds are intercepted further down and reach the store through
+  // `updateStreaming`/`finalizeStreaming` instead of a raw append, so neither
+  // actually reaches this check today. Listed anyway so the allow-list is a
+  // faithful "these are transcript content" statement rather than a description
+  // of the current control flow — if the interception ever moves, the rows are
+  // already allowed rather than silently dropped.
+  'stream_delta',
+  'stream_end',
+  'error',
+  'session_created',
+  // Client-only kinds: no server emits them, but they reach the store through
+  // the same optimistic-echo path and must survive the filter.
+  'interactive_prompt',
+  'task_notification',
+]);
+
+/**
+ * Frames that are legitimately not transcript rows.
+ *
+ * Purely so an unrecognised kind can be told apart from a deliberately excluded
+ * one and warned about. Without this, a new provider kind would be dropped in
+ * silence — the failure mode an allow-list has to guard against.
+ */
+const KNOWN_CONTROL_KINDS: ReadonlySet<string> = new Set([
+  // Provider lifecycle, handled as events by the switch below.
+  'complete',
+  'status',
+  'permission_request',
+  'permission_cancelled',
+  // Gateway frames, consumed above or by other hooks (`useInterruptedResume`
+  // taps `chat_resumed` off its own subscription; `pong` is swallowed by
+  // `WebSocketContext` before dispatch).
+  'chat_subscribed',
+  'chat_send_accepted',
+  'chat_resumed',
+  'pong',
+  'session_upserted',
+  'loading_progress',
+  'projects_snapshot_stale',
+  'protocol_error',
+  'websocket_reconnected',
+]);
+
+/** Kinds already warned about, so one unknown frame per run does not spam. */
+const warnedUnknownKinds = new Set<string>();
+
+function shouldPersistKind(kind: unknown): boolean {
+  if (typeof kind !== 'string') {
+    return false;
+  }
+  if (PERSISTED_MESSAGE_KINDS.has(kind)) {
+    return true;
+  }
+  if (!KNOWN_CONTROL_KINDS.has(kind) && !warnedUnknownKinds.has(kind)) {
+    warnedUnknownKinds.add(kind);
+    console.warn(
+      `[Chat] Unrecognised websocket frame kind "${kind}" — not shown in the `
+      + 'transcript. If this is a new provider message, add it to '
+      + 'PERSISTED_MESSAGE_KINDS.',
+    );
+  }
+  return false;
+}
 
 const isActionablePermissionRequest = (request: { toolName?: unknown } | null | undefined): boolean => {
   return request?.toolName !== 'ExitPlanMode' && request?.toolName !== 'exit_plan_mode';
@@ -201,6 +295,14 @@ export function useChatRealtimeHandlers({
           return;
         }
 
+        // Ack for `chat.resume`. Owned by `useInterruptedResume`, which taps the
+        // websocket fan-out on its own subscription, so there is nothing to do
+        // here — but it must be named rather than left to fall through: it is a
+        // gateway frame with no `id`, and appending one of those to the store
+        // was what wedged the session in the first place (#450).
+        case 'chat_resumed':
+          return;
+
         // Sidebar/global events — owned by useProjectsState.
         case 'session_upserted':
         case 'loading_progress':
@@ -258,11 +360,7 @@ export function useChatRealtimeHandlers({
       }
 
       // --- All other messages: route to store ---
-      const shouldPersist =
-        msg.kind !== 'complete'
-        && msg.kind !== 'status'
-        && msg.kind !== 'permission_request'
-        && msg.kind !== 'permission_cancelled';
+      const shouldPersist = shouldPersistKind(msg.kind);
 
       if (sid && shouldPersist) {
         sessionStore.appendRealtime(sid, msg as unknown as NormalizedMessage);
