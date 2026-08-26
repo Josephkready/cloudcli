@@ -1,7 +1,7 @@
 /**
  * Pure helpers for the in-app bug reporter.
  *
- * The route layer owns the side effects (running `gh issue create`); everything
+ * The route layer owns the side effects (inserting into `issue-queue`); everything
  * that shapes an issue out of a user's description plus the session metadata the
  * client collects lives here so it can be unit tested without a GitHub round trip.
  */

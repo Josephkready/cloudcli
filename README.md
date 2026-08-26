@@ -88,13 +88,15 @@ a verdict. Give it a long window (90+ days — rare is not dead), and rule out
 
 The bug icon in the app's top panel opens a reporter: write what went wrong, and
 the app attaches the session details (versions, provider, space, active tab,
-browser) and files a GitHub issue for you. It shows you exactly what it will
-send before it sends it.
+browser) and durably queues a GitHub issue for you. It shows you exactly what it
+will send before it sends it.
 
-Filing runs the **host's `gh` CLI**, so the server needs `gh` installed and
-authenticated (`gh auth login`) — otherwise the dialog reports the failure and
-files nothing. Reports go to `Josephkready/cloudcli` unless `BUG_REPORT_REPO`
-says otherwise.
+The POST returns as soon as the host-local `issue-queue` SQLite database owns
+the report. The dialog then polls a content-free authenticated status endpoint
+for the final issue link; a separate worker owns GitHub authentication, rate
+limits, retries, and ambiguous-create reconciliation. The server and worker
+must share `ISSUE_QUEUE_DB`. Reports go to `Josephkready/cloudcli` unless
+`BUG_REPORT_REPO` says otherwise.
 
 ## Deployment
 

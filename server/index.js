@@ -246,7 +246,7 @@ app.use('/api/agent', agentRoutes);
 
 app.use('/api/voice', authenticateToken, voiceRoutes);
 
-// In-app bug reporter — files a GitHub issue via the host's `gh` CLI (protected)
+// In-app bug reporter — durably queues GitHub issues through the host-local worker (protected)
 app.use('/api/bug-report', authenticateToken, bugReportRoutes);
 
 // Serve the SPA's index.html through a small response transform so we can

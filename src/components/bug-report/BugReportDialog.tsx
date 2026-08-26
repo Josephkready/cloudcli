@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bug, CheckCircle2, ExternalLink, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Bug, CheckCircle2, ExternalLink, Loader2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Button, Dialog, DialogContent, DialogTitle, disabledBusyControlClasses } from '../../shared/view/ui';
@@ -21,6 +21,10 @@ const MAX_DESCRIPTION_LENGTH = 20000;
 /** Long enough to rule out an accidental submit, short enough not to nag. */
 const MIN_DESCRIPTION_LENGTH = 10;
 
+/** Presentation polling only; the worker continues after this dialog stops asking. */
+const POLL_INTERVAL_MS = 2000;
+const MAX_POLL_ATTEMPTS = 30;
+
 type BugReportDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -37,7 +41,10 @@ type BugReportDialogProps = {
 type SubmitState =
   | { status: 'idle' }
   | { status: 'submitting' }
+  | { status: 'queued'; jobId: string }
   | { status: 'submitted'; issueUrl: string }
+  | { status: 'delayed' }
+  | { status: 'savedError'; message: string }
   | { status: 'error'; message: string };
 
 /** One metadata row in the "what gets sent" disclosure. */
@@ -60,8 +67,8 @@ function MetadataRow({ label, value }: { label: string; value: string }) {
  * Bug reporter opened from the top panel.
  *
  * The user writes what went wrong; the session metadata is collected for them
- * and shown up front (nothing is sent that they can't see first), and the server
- * files it as a GitHub issue.
+ * and shown up front (nothing is sent that they can't see first). The server
+ * durably queues it, then this dialog polls for the final GitHub link.
  */
 export default function BugReportDialog({
   open,
@@ -120,6 +127,64 @@ export default function BugReportDialog({
     setShowMetadata(false);
   }, [open]);
 
+  useEffect(() => {
+    if (submitState.status !== 'queued') return undefined;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const jobId = submitState.jobId;
+
+    const stopWithStatusError = (message: string) => {
+      if (!cancelled) setSubmitState({ status: 'savedError', message });
+    };
+
+    const poll = async () => {
+      attempts += 1;
+      try {
+        const response = await api.getBugReportStatus(jobId);
+        const payload = await response.json().catch(() => null);
+        if (cancelled) return;
+
+        if (!response.ok) {
+          stopWithStatusError(
+            payload?.error?.message || payload?.error || t('bugReport.statusUnavailable'),
+          );
+          return;
+        }
+
+        const status = payload?.data?.status;
+        if (status === 'filed') {
+          const issueUrl = payload?.data?.url;
+          if (typeof issueUrl === 'string') {
+            setSubmitState({ status: 'submitted', issueUrl });
+          } else {
+            stopWithStatusError(t('bugReport.statusUnavailable'));
+          }
+          return;
+        }
+        if (status === 'failed') {
+          stopWithStatusError(payload?.data?.detail || t('bugReport.filingNeedsAttention'));
+          return;
+        }
+      } catch {
+        // A transient browser/network failure says nothing about the durable worker. Retry below.
+      }
+
+      if (attempts >= MAX_POLL_ATTEMPTS) {
+        setSubmitState({ status: 'delayed' });
+        return;
+      }
+      timer = setTimeout(() => { void poll(); }, POLL_INTERVAL_MS);
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [submitState, t]);
+
   const trimmedLength = description.trim().length;
   const canSubmit =
     trimmedLength >= MIN_DESCRIPTION_LENGTH &&
@@ -142,14 +207,14 @@ export default function BugReportDialog({
         return;
       }
 
-      const issueUrl = payload?.data?.issueUrl;
-      if (typeof issueUrl !== 'string') {
+      const jobId = payload?.data?.id;
+      if (payload?.data?.status !== 'queued' || typeof jobId !== 'string') {
         setSubmitState({ status: 'error', message: t('bugReport.genericError') });
         return;
       }
 
       recordFeatureUse('bug_report.submit');
-      setSubmitState({ status: 'submitted', issueUrl });
+      setSubmitState({ status: 'queued', jobId });
     } catch {
       setSubmitState({ status: 'error', message: t('bugReport.networkError') });
     }
@@ -157,6 +222,7 @@ export default function BugReportDialog({
 
   const metadataEntries = Object.entries(metadata);
   const isSubmitting = submitState.status === 'submitting';
+  const showsForm = submitState.status === 'idle' || isSubmitting || submitState.status === 'error';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -201,6 +267,24 @@ export default function BugReportDialog({
                 {t('bugReport.viewIssue')}
                 <ExternalLink className="h-3.5 w-3.5" />
               </a>
+            </div>
+          ) : submitState.status === 'queued' ? (
+            <div className="flex flex-col items-center gap-3 py-8 text-center" role="status">
+              <Loader2 className="h-10 w-10 animate-spin text-primary" />
+              <p className="text-base font-semibold text-foreground">{t('bugReport.queuedTitle')}</p>
+              <p className="max-w-sm text-sm text-muted-foreground">{t('bugReport.queuedBody')}</p>
+            </div>
+          ) : submitState.status === 'delayed' ? (
+            <div className="flex flex-col items-center gap-3 py-8 text-center" role="status">
+              <CheckCircle2 className="h-10 w-10 text-emerald-500" />
+              <p className="text-base font-semibold text-foreground">{t('bugReport.delayedTitle')}</p>
+              <p className="max-w-sm text-sm text-muted-foreground">{t('bugReport.delayedBody')}</p>
+            </div>
+          ) : submitState.status === 'savedError' ? (
+            <div className="flex flex-col items-center gap-3 py-8 text-center" role="alert">
+              <AlertTriangle className="h-10 w-10 text-amber-500" />
+              <p className="text-base font-semibold text-foreground">{t('bugReport.savedErrorTitle')}</p>
+              <p className="max-w-sm text-sm text-muted-foreground">{submitState.message}</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -261,7 +345,7 @@ export default function BugReportDialog({
           </p>
         )}
 
-        {submitState.status !== 'submitted' && (
+        {showsForm && (
           <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border/70 bg-muted/20 px-4 py-3 sm:px-6">
             <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)} className="rounded-xl">
               {t('bugReport.cancel')}
