@@ -2,7 +2,7 @@
  * Keeps the fixed app shell aligned with the visible area while the iOS soft
  * keyboard is up.
  *
- * Two separate things go wrong on iOS, and they need separate answers:
+ * Three separate things go wrong on iOS, and they need separate answers:
  *
  * 1. The layout viewport does not shrink when the keyboard opens — only the
  *    visual viewport does — so a `position: fixed; inset: 0` shell keeps its
@@ -21,8 +21,20 @@
  *    `overflow: hidden` and the shell is fixed, so a non-zero document scroll
  *    is never legitimate here — undoing it can only ever remove the artefact.
  *
- * Extracted from the component so both rules are testable against a fake
+ * 3. The gap between the two viewports is not zero when no keyboard is up. That
+ *    is the assumption behind reading the keyboard height as a difference, and
+ *    on standalone (home-screen) iOS PWAs it is false by a constant amount, so
+ *    the resting state reads as a permanent phantom keyboard. Answer: calibrate
+ *    that constant from samples taken while no text field has focus, and report
+ *    only what exceeds it. See `reviseRestingViewportGap`.
+ *
+ * Extracted from the component so the rules are testable against a fake
  * viewport; there is no way to provoke WebKit's scroll-into-view in a test.
+ *
+ * The bound on all of it, and it is a hard one: standalone display mode is the
+ * one environment none of this can be exercised in. Playwright cannot enter it,
+ * so neither the WebKit e2e sweep nor any node fake reaches the state these
+ * rules exist for. The suites pin the behaviour; only a device confirms the bug.
  */
 
 export interface VisualViewportLike {
@@ -74,9 +86,79 @@ export function keyboardAwareBottomStyle(
   return { ...style, bottom: 'var(--keyboard-height, 0px)' };
 }
 
-/** Height the keyboard is covering. Clamped: the two viewports can disagree by a rounding error. */
-export function computeKeyboardHeight(innerHeight: number, viewportHeight: number): number {
-  return Math.max(0, innerHeight - viewportHeight);
+/**
+ * Inset for a `position: fixed` surface that must span the whole layout viewport.
+ *
+ * Set inline, and without the `inset-0` utility, on purpose. `src/index.css`
+ * carries an app-global `body.pwa-mode .fixed.inset-0` rule that moves the origin
+ * of *any* element carrying both classes down by the header safe area, and
+ * `pwa-mode` is only added in standalone display mode — so the shift exists in
+ * the installed home-screen PWA and in no browser, emulator or test. Everything
+ * here counts from the layout viewport's origin: `--keyboard-height` is derived
+ * from `window.innerHeight`, which is measured from y=0, so a shell whose box
+ * starts lower is being driven by a number from a different coordinate space.
+ *
+ * Following MetalZealot/CLIde ADR 0010, the answer is for the surface to state
+ * its own inset rather than to fight the rule from the other side: inline wins
+ * against it, and there is nothing left to remember. The safe-area treatment the
+ * rule was providing is preserved as *padding* by `.pwa-shell-safe`, which insets
+ * the content without moving the box.
+ */
+export function viewportShellStyle(
+  style: Record<string, unknown> = {},
+): Record<string, unknown> & { top: string; right: string; bottom: string; left: string } {
+  return { ...keyboardAwareBottomStyle(style), top: '0px', right: '0px', left: '0px' };
+}
+
+/**
+ * Height the keyboard is covering.
+ *
+ * `restingGap` is what the two viewports disagree by with *no* keyboard up; see
+ * {@link reviseRestingViewportGap}. Clamped at both ends: the two can also
+ * disagree by a rounding error in the other direction.
+ */
+export function computeKeyboardHeight(
+  innerHeight: number,
+  viewportHeight: number,
+  restingGap = 0,
+): number {
+  return Math.max(0, innerHeight - viewportHeight - restingGap);
+}
+
+/**
+ * The `innerHeight - viewportHeight` disagreement that is *not* the keyboard.
+ *
+ * The keyboard height is read as the gap between the layout and visual
+ * viewports, which assumes the gap is zero when no keyboard is up. On standalone
+ * iOS PWAs it is not: the two disagree by a constant amount (they do not agree
+ * on whether the home-indicator area counts), so the resting state reads as a
+ * permanent phantom keyboard and leaves a gap under the composer at rest.
+ *
+ * Calibrated rather than guessed, under two rules that between them make a wrong
+ * value self-correcting:
+ *
+ * - **Only samples with no text field focused count.** With the keyboard up the
+ *   gap is the keyboard, and adopting it would make the keyboard measure zero —
+ *   the original bug. A `null` return means "not calibrated yet", which callers
+ *   read as zero: over-reporting the keyboard costs a small gap, under-reporting
+ *   it puts the composer behind the keyboard, and only one of those is the bug.
+ * - **It only ever shrinks.** Focus leaves a field before iOS finishes
+ *   retracting the keyboard, so a sample can arrive unfocused while the viewport
+ *   is still short. Taking the minimum means such a sample cannot inflate the
+ *   baseline; the settled sample that follows is the one that lands.
+ *
+ * The residual: a rotation whose true resting gap is *larger* keeps the smaller
+ * calibration and leaves a proportionally small phantom, since nothing raises the
+ * baseline. That is strictly better than the fixed zero it replaces, and the
+ * safe direction to be wrong in.
+ */
+export function reviseRestingViewportGap(
+  current: number | null,
+  sample: { innerHeight: number; viewportHeight: number; textEntryFocused: boolean },
+): number | null {
+  if (sample.textEntryFocused) return current;
+  const gap = Math.max(0, sample.innerHeight - sample.viewportHeight);
+  return current === null ? gap : Math.min(current, gap);
 }
 
 /** Does this element take text, i.e. is it the kind of focus that summons the keyboard? */
@@ -107,7 +189,7 @@ export function isViewportDisplaced(input: {
 }
 
 /**
- * Wires both rules to a window. Returns the teardown.
+ * Wires all three rules to a window. Returns the teardown.
  *
  * No-ops without a Visual Viewport API — on Chrome for Android the layout
  * viewport shrinks by itself and `inset-0` already tracks it.
@@ -118,10 +200,29 @@ export function installKeyboardViewportSync(win: WindowLike, doc: DocumentLike):
 
   let installed = true;
   let focusSamplingGeneration = 0;
+  let resizeSamplingGeneration = 0;
   let lastPublishedKeyboardHeight: number | null = null;
 
+  const sampleViewport = () => ({
+    innerHeight: win.innerHeight,
+    viewportHeight: viewport.height,
+    textEntryFocused: isTextEntryElement(doc.activeElement),
+  });
+
+  // Seeded from the geometry at mount, which is the app's best chance at a
+  // resting sample: nothing is focused yet, so the two viewports are showing
+  // their standing disagreement and nothing else. Re-calibrated by every later
+  // resting sample — see `reviseRestingViewportGap` for why that can only help.
+  let restingViewportGap = reviseRestingViewportGap(null, sampleViewport());
+
   const applyKeyboardHeight = () => {
-    const keyboardHeight = computeKeyboardHeight(win.innerHeight, viewport.height);
+    const sample = sampleViewport();
+    restingViewportGap = reviseRestingViewportGap(restingViewportGap, sample);
+    const keyboardHeight = computeKeyboardHeight(
+      sample.innerHeight,
+      sample.viewportHeight,
+      restingViewportGap ?? 0,
+    );
     if (keyboardHeight === lastPublishedKeyboardHeight) {
       return;
     }
@@ -145,7 +246,23 @@ export function installKeyboardViewportSync(win: WindowLike, doc: DocumentLike):
     // thing that changes `viewport.height`. Deriving it from `offsetTop`, or
     // recomputing it on scroll, makes the value fluctuate during ordinary
     // scrolling and the shell visibly bounces.
-    applyKeyboardHeight();
+    //
+    // Read two frames late, not in the handler. `index.html` asks for
+    // `interactive-widget=resizes-content`, so the browser already shrinks
+    // `window.innerHeight` for the keyboard by itself — but on standalone iOS
+    // PWAs it does not do so in the same tick as this event. Sampling now can
+    // catch `innerHeight` still at its full value against a visual viewport that
+    // has already shrunk, which reads as a whole keyboard's worth of gap and
+    // stacks a second shift on top of the browser's own. Two frames is enough
+    // for both numbers to settle; the generation makes a later resize replace an
+    // in-flight read rather than queue behind it.
+    const generation = ++resizeSamplingGeneration;
+    win.requestAnimationFrame(() => {
+      win.requestAnimationFrame(() => {
+        if (!installed || generation !== resizeSamplingGeneration) return;
+        applyKeyboardHeight();
+      });
+    });
     // Now, and again after the frame WebKit uses to apply its own
     // scroll-into-view — whichever of the two ran first, one of these lands
     // after it.
@@ -207,6 +324,7 @@ export function installKeyboardViewportSync(win: WindowLike, doc: DocumentLike):
   return () => {
     installed = false;
     focusSamplingGeneration += 1;
+    resizeSamplingGeneration += 1;
     viewport.removeEventListener('resize', handleResize);
     viewport.removeEventListener('scroll', handleViewportScroll);
     win.removeEventListener('focusin', handleFocusIn);

@@ -41,8 +41,9 @@ const OVERLAY = /fixed inset-0|fixed bottom-0 left-0 right-0 top-0/;
 /** Marks something the soft keyboard would open for. */
 const TEXT_ENTRY = /<input|<textarea|contentEditable|<Input\b|cmdk-input/;
 
-/** Either the shared helper, the raw variable, or delegation to the shared Dialog. */
-const KEYBOARD_AWARE = /keyboardAwareBottomStyle|--keyboard-height|DialogContent/;
+/** Either the shared helpers, the raw variable, or delegation to the shared Dialog. */
+const KEYBOARD_AWARE =
+  /keyboardAwareBottomStyle|viewportShellStyle|--keyboard-height|DialogContent/;
 
 /**
  * Overlays exempted by inspection, each with the reason.
@@ -121,6 +122,33 @@ test('every full-screen overlay holding a text field accounts for the keyboard',
       'the field sits behind the keyboard on iOS (#357). Give the full-screen element ' +
       "`style={keyboardAwareBottomStyle()}` — or add it to EXEMPT with a reason:\n  " +
       offenders.join('\n  '),
+  );
+});
+
+test('the app shell states its inset inline rather than taking inset-0', () => {
+  // `body.pwa-mode .fixed.inset-0` in `src/index.css` moves the origin of
+  // anything carrying both classes down by the header safe area, and only in the
+  // installed home-screen PWA — Playwright cannot emulate standalone display
+  // mode, so no browser test can reach the state it creates. The shell is the
+  // element `--keyboard-height` is computed for, and that number is derived from
+  // `window.innerHeight`, measured from y=0. Taking `inset-0` here would drive
+  // the shell with a coordinate it no longer shares, invisibly to every suite.
+  //
+  // Structural, because the failure has no local symptom: nothing else in the
+  // repo would notice the class coming back.
+  const source = fs.readFileSync(path.join(SRC, 'components/app/AppContent.tsx'), 'utf8');
+  const shell = source.match(/<div className="[^"]*\bfixed\b[^"]*" style=\{viewportShellStyle/);
+
+  assert.ok(
+    shell,
+    'the app shell must be a `fixed` element styled by `viewportShellStyle()`; if it '
+      + 'was refactored, move this check with it rather than deleting it',
+  );
+  assert.doesNotMatch(
+    shell[0],
+    /\binset-0\b/,
+    'the app shell must not carry `inset-0`: `body.pwa-mode .fixed.inset-0` would then '
+      + 'shift its origin by the header safe area inside the installed PWA only',
   );
 });
 
