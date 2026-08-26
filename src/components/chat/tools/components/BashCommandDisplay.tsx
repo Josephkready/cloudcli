@@ -99,10 +99,14 @@ export const BashCommandDisplay: React.FC<BashCommandDisplayProps> = ({
         <span className="flex-shrink-0 select-none font-mono text-xs font-semibold text-emerald-500 dark:text-emerald-400">
           $
         </span>
+        {/* The expanded header still wraps rather than scrolling: it is a
+            ~16px row, too short to be a usable drag target. It wraps at word
+            boundaries now instead of `break-all`, which chopped paths and
+            identifiers mid-token. */}
         <code
           className={cn(
             'min-w-0 flex-1 font-mono text-xs text-foreground',
-            open ? 'whitespace-pre-wrap break-all' : 'truncate',
+            open ? 'whitespace-pre-wrap break-words' : 'truncate',
           )}
         >
           {command}
@@ -143,7 +147,7 @@ export const BashCommandDisplay: React.FC<BashCommandDisplayProps> = ({
           )}
           <pre
             className={cn(
-              'max-h-80 overflow-auto whitespace-pre-wrap break-all px-3 py-2 font-mono text-xs leading-relaxed',
+              'max-h-80 overflow-auto whitespace-pre px-3 py-2 font-mono text-xs leading-relaxed',
               isError ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground',
             )}
           >

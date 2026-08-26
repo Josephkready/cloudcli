@@ -19,8 +19,69 @@ import { randomUUID } from 'node:crypto';
 
 import { createCompleteMessage, createNormalizedMessage } from '../shared/utils.js';
 
+import {
+  MOCK_CODE_BLOCK_SENTINEL,
+  MOCK_DIFF_FILE,
+  MOCK_DIFF_NEW,
+  MOCK_DIFF_OLD,
+  MOCK_LONG_CODE_LINE,
+  MOCK_LONG_INLINE_TOKEN,
+  MOCK_WIDE_BASH_COMMAND,
+  MOCK_WIDE_BASH_OUTPUT,
+} from './mock-agent-fixtures.js';
+
 /** Assistant prose, split across frames the way real adapters chunk a reply. */
 const ASSISTANT_TEXT_PARTS = ['Hello from ', 'the mock provider.'];
+
+/**
+ * Reply used when the task message carries `MOCK_CODE_BLOCK_SENTINEL`.
+ *
+ * A code block is the one thing a layout regression can be measured on, and
+ * measuring it needs a real engine, so `e2e/code-block-scroll.spec.ts` drives
+ * this path to check that a long line scrolls rather than wraps (it cannot be
+ * checked in jsdom, which has no layout). The literals live in
+ * `mock-agent-fixtures.js` so the spec can read them without importing this
+ * module's server-side dependencies.
+ */
+const CODE_SURFACE_TEXT_PARTS = [
+  `Inline \`${MOCK_LONG_INLINE_TOKEN}\` inside a sentence still wraps.\n\n`,
+  '```ts\n' + MOCK_LONG_CODE_LINE + '\nconst short = 1;\n```\n',
+];
+
+/**
+ * Tool frames emitted alongside the code-surface reply.
+ *
+ * These exist so the wide-output Bash block and the diff viewer — the other two
+ * surfaces the force-wrap rule used to hit — can be measured in a real engine
+ * and captured in the before/after screenshots, rather than being argued about
+ * from their class lists.
+ */
+const CODE_SURFACE_TOOL_FRAMES = [
+  {
+    kind: 'tool_use',
+    toolName: 'Bash',
+    toolId: 'mock-tool-bash',
+    toolInput: { command: MOCK_WIDE_BASH_COMMAND, description: 'search the tool renderers' },
+  },
+  {
+    // A standalone tool_result carries its payload in `content` (the frontend's
+    // toolResultMap reads `msg.content`), not in a nested `toolResult`.
+    kind: 'tool_result',
+    toolId: 'mock-tool-bash',
+    content: MOCK_WIDE_BASH_OUTPUT,
+    isError: false,
+  },
+  {
+    kind: 'tool_use',
+    toolName: 'Edit',
+    toolId: 'mock-tool-edit',
+    toolInput: {
+      file_path: MOCK_DIFF_FILE,
+      old_string: MOCK_DIFF_OLD,
+      new_string: MOCK_DIFF_NEW,
+    },
+  },
+];
 
 /** The full assistant reply the collector should reconstruct. */
 export const MOCK_ASSISTANT_TEXT = ASSISTANT_TEXT_PARTS.join('');
@@ -46,7 +107,9 @@ export const MOCK_TOKEN_BUDGET = {
  *    This is the seam the Playwright e2e suite drives so a full browser chat turn
  *    (send -> streamed frames -> terminal `complete`) runs with no real CLI/SDK.
  *
- * @param {string} message - The user's task message (echoed only via logs).
+ * @param {string} message - The user's task message. Only inspected for
+ *        `MOCK_CODE_BLOCK_SENTINEL`, which swaps the prose reply for one made
+ *        of code surfaces; otherwise echoed via logs alone.
  * @param {{ sessionId?: string|null, provider?: string }} [options] - Run options;
  *        `sessionId` seeds the emitted session id when provided (a fresh unique id
  *        is minted otherwise so concurrent app sessions never share a provider id),
@@ -73,8 +136,17 @@ export async function runMockAgentProvider(message, options = {}, writer) {
   // A non-assistant frame that must NOT appear in getAssistantMessages().
   writer.send(createNormalizedMessage({ kind: 'status', text: 'thinking', sessionId, provider }));
 
-  for (const content of ASSISTANT_TEXT_PARTS) {
+  const wantsCodeSurfaces = String(message || '').includes(MOCK_CODE_BLOCK_SENTINEL);
+  const textParts = wantsCodeSurfaces ? CODE_SURFACE_TEXT_PARTS : ASSISTANT_TEXT_PARTS;
+
+  for (const content of textParts) {
     writer.send(createNormalizedMessage({ kind: 'text', role: 'assistant', content, sessionId, provider }));
+  }
+
+  if (wantsCodeSurfaces) {
+    for (const frame of CODE_SURFACE_TOOL_FRAMES) {
+      writer.send(createNormalizedMessage({ ...frame, sessionId, provider }));
+    }
   }
 
   // Cumulative token-budget snapshot the collector reads for the token summary.

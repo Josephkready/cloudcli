@@ -34,7 +34,7 @@ export const TextContent: React.FC<TextContentProps> = ({
 
   if (format === 'code') {
     return (
-      <pre className={`mt-1 max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded border border-gray-200/50 bg-gray-50 p-2 font-mono text-xs text-gray-700 dark:border-gray-700/50 dark:bg-gray-800/50 dark:text-gray-300 ${className}`}>
+      <pre className={`mt-1 max-h-80 overflow-auto whitespace-pre rounded border border-gray-200/50 bg-gray-50 p-2 font-mono text-xs text-gray-700 dark:border-gray-700/50 dark:bg-gray-800/50 dark:text-gray-300 ${className}`}>
         {content}
       </pre>
     );
