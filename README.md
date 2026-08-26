@@ -30,6 +30,19 @@ version claim.
 
 Because of that shape, this fork **intentionally diverges** from upstream. Feature removals are kept as atomic, well-labeled commits so future upstream syncs resolve to a simple "re-delete."
 
+## Sibling forks
+
+Upstream merges slowly — 20 commits in the six weeks after our fork point,
+against ~80 open PRs — so it is not a useful source of fixes. A handful of *other*
+forks are, though: people running this app on a phone every day, hitting the same
+mobile, PWA, and chat bugs, and fixing them.
+
+Finding them takes a specific search — upstream has thousands of forks and almost
+all are untouched mirrors, so sorting by stars surfaces none of the live ones.
+The discovery commands, the current roster, the acceptance filter for a
+single-user fork, and the process for deciding what is worth porting all live in
+[`docs/fork-harvesting.md`](docs/fork-harvesting.md).
+
 ## Development
 
 Requires Node.js v22+.
