@@ -1,7 +1,7 @@
 /**
  * Pure helpers for the in-app bug reporter.
  *
- * The route layer owns the side effects (running `gh issue create`); everything
+ * The route layer owns the side effects (inserting into `issue-queue`); everything
  * that shapes an issue out of a user's description plus the session metadata the
  * client collects lives here so it can be unit tested without a GitHub round trip.
  */
@@ -176,21 +176,9 @@ export const DEFAULT_BUG_REPORT_REPO = 'Josephkready/cloudcli';
  * Resolves which repository issues are filed against.
  *
  * `BUG_REPORT_REPO` lets a deployment retarget the reporter; a malformed value
- * falls back to the default rather than being handed to `gh` as-is.
+ * falls back to the default rather than being handed to the queue CLI as-is.
  */
 export function resolveBugReportRepo(env: Record<string, string | undefined> = process.env): string {
   const configured = (env.BUG_REPORT_REPO ?? '').trim();
   return REPO_PATTERN.test(configured) ? configured : DEFAULT_BUG_REPORT_REPO;
-}
-
-/**
- * Extracts the created issue URL from `gh issue create` output.
- *
- * `gh` prints the URL on its own line, but it can be preceded by notices
- * (branch hints, upgrade nags), so scan for the first issue URL rather than
- * assuming the whole of stdout is the link.
- */
-export function parseIssueUrl(stdout: string): string | null {
-  const match = /https:\/\/[^\s]*github\.com\/[^\s]+\/issues\/\d+/.exec(stdout);
-  return match ? match[0] : null;
 }

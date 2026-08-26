@@ -243,12 +243,14 @@ export const api = {
       }),
   },
 
-  // Files a GitHub issue from the in-app bug reporter (top-panel bug button).
+  // Durably queues a GitHub issue from the in-app bug reporter (top-panel bug button).
   createBugReport: ({ description, metadata }) =>
     authenticatedFetch('/api/bug-report', {
       method: 'POST',
       body: JSON.stringify({ description, metadata }),
     }),
+  getBugReportStatus: (jobId) =>
+    authenticatedFetch(`/api/bug-report/${encodeURIComponent(jobId)}`),
 
   // Generic GET method for any endpoint
   get: (endpoint) => authenticatedFetch(`/api${endpoint}`),

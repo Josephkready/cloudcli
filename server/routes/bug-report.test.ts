@@ -11,29 +11,23 @@ import { AppError } from '../shared/utils.js';
 
 import {
   createBugReportRouter,
-  describeGhFailure,
-  runGh,
-  type GhResult,
+  runIssueQueue,
+  validJobId,
+  type QueueResult,
+  type QueueRunner,
 } from './bug-report.js';
 
-/*
- * The pure issue-shaping helpers are covered in server/shared/bug-report.test.ts.
- * This file covers the layer that actually talks to the world: the spawn wrapper
- * and the route's own branches, both of which are reachable without a real `gh`
- * or a GitHub round trip.
- */
+const JOB_ID = 'abcdef12-abcd-4abc-8def-abcdef123456';
+const OTHER_JOB_ID = 'bcdefa23-bcde-4bcd-9efa-bcdefa234567';
 
-const OK_RESULT: GhResult = {
-  code: 0,
-  stdout: 'https://github.com/owner/repo/issues/12\n',
-  stderr: '',
-};
+function result(payload: unknown, code = 0): QueueResult {
+  return { code, stdout: JSON.stringify(payload), stderr: '' };
+}
 
-/** Mounts the router behind the same error envelope server/index.js uses. */
-function startServer(runner: (args: string[]) => Promise<GhResult>) {
+function startServer(runner: QueueRunner) {
   const app = express();
   app.use(express.json());
-  app.use('/api/bug-report', createBugReportRouter({ runGh: runner }));
+  app.use('/api/bug-report', createBugReportRouter({ runQueue: runner }));
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (err instanceof AppError) {
       res.status(err.statusCode).json({ success: false, error: { code: err.code, message: err.message } });
@@ -55,206 +49,252 @@ function startServer(runner: (args: string[]) => Promise<GhResult>) {
   });
 }
 
-function postReport(port: number, body: unknown): Promise<{ status: number; json: any }> {
+function request(
+  port: number,
+  method: 'GET' | 'POST',
+  route: string,
+  body?: unknown,
+): Promise<{ status: number; json: any }> {
   return new Promise((resolve, reject) => {
-    const payload = JSON.stringify(body);
-    const request = http.request(
-      {
-        host: '127.0.0.1',
-        port,
-        path: '/api/bug-report',
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
-      },
-      (response) => {
-        const chunks: Buffer[] = [];
-        response.on('data', (chunk) => chunks.push(chunk as Buffer));
-        response.on('end', () => {
-          const text = Buffer.concat(chunks).toString('utf8');
-          resolve({ status: response.statusCode ?? 0, json: text ? JSON.parse(text) : null });
-        });
-      },
-    );
-    request.on('error', reject);
-    request.end(payload);
+    const payload = body === undefined ? '' : JSON.stringify(body);
+    const req = http.request({
+      host: '127.0.0.1', port, path: route, method,
+      headers: payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {},
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk) => chunks.push(chunk as Buffer));
+      response.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        resolve({ status: response.statusCode ?? 0, json: text ? JSON.parse(text) : null });
+      });
+    });
+    req.on('error', reject);
+    req.end(payload);
   });
 }
 
-test('POST / files the issue and returns its URL', async () => {
-  const calls: string[][] = [];
-  const server = await startServer(async (args) => {
-    calls.push(args);
-    return OK_RESULT;
+test('POST / durably queues the issue body over stdin and returns 202', async () => {
+  const calls: Array<{ args: string[]; input?: string }> = [];
+  const server = await startServer(async (args, input) => {
+    calls.push({ args, input });
+    return result({ status: 'queued', id: JOB_ID });
   });
 
   try {
-    const response = await postReport(server.port, {
+    const response = await request(server.port, 'POST', '/api/bug-report', {
       description: 'the tab bar scrolls itself',
       metadata: { sessionId: 's1', provider: 'claude' },
     });
 
-    assert.equal(response.status, 200);
-    assert.equal(response.json.data.issueUrl, 'https://github.com/owner/repo/issues/12');
-    assert.equal(response.json.data.repo, 'Josephkready/cloudcli');
-
-    const [args] = calls;
-    assert.deepEqual(args.slice(0, 4), ['issue', 'create', '--repo', 'Josephkready/cloudcli']);
-    assert.equal(args[5], 'Bug: the tab bar scrolls itself');
-    // Metadata the client sent must survive into the body.
-    assert.match(args[7], /\| Session ID \| `s1` \|/);
+    assert.equal(response.status, 202);
+    assert.deepEqual(response.json.data, {
+      status: 'queued', id: JOB_ID, repo: 'Josephkready/cloudcli',
+    });
+    const [{ args, input }] = calls;
+    assert.deepEqual(args.slice(0, 4), ['enqueue', '--repo', 'Josephkready/cloudcli', '--title']);
+    assert.equal(args[4], 'Bug: the tab bar scrolls itself');
+    assert.deepEqual(args.slice(-4), ['--label', 'bug', '--body-file', '-']);
+    assert.match(input ?? '', /\| Session ID \| `s1` \|/);
+    assert.ok(!args.includes(input ?? ''), 'the report body must never be placed in argv');
   } finally {
     await server.close();
   }
 });
 
 test('POST / stamps host facts the client cannot forge', async () => {
-  const calls: string[][] = [];
-  const server = await startServer(async (args) => {
-    calls.push(args);
-    return OK_RESULT;
+  const inputs: string[] = [];
+  const server = await startServer(async (_args, input) => {
+    inputs.push(input ?? '');
+    return result({ status: 'queued', id: JOB_ID });
   });
 
   try {
-    await postReport(server.port, {
+    await request(server.port, 'POST', '/api/bug-report', {
       description: 'a genuine report',
-      metadata: { platform: 'commodore 64', nodeVersion: 'v0.0.1', reportedAt: '1999-01-01T00:00:00.000Z' },
+      metadata: { platform: 'commodore 64', nodeVersion: 'v0.0.1', reportedAt: '1999-01-01' },
     });
-
-    const body = calls[0][7];
-    assert.ok(!body.includes('commodore 64'), 'client-claimed platform must be overwritten');
-    assert.ok(!body.includes('v0.0.1'), 'client-claimed node version must be overwritten');
-    assert.ok(!body.includes('1999-01-01'), 'client-claimed timestamp must be overwritten');
-    assert.match(body, new RegExp(`\\| Node version \\| \`${process.version}\` \\|`));
+    assert.ok(!inputs[0].includes('commodore 64'));
+    assert.ok(!inputs[0].includes('v0.0.1'));
+    assert.ok(!inputs[0].includes('1999-01-01'));
+    assert.ok(inputs[0].includes('| Node version | `' + process.version + '` |'));
   } finally {
     await server.close();
   }
 });
 
-test('POST / rejects an empty description without calling gh', async () => {
-  let called = false;
+test('POST / rejects empty and oversized descriptions before queueing', async () => {
+  let calls = 0;
   const server = await startServer(async () => {
-    called = true;
-    return OK_RESULT;
+    calls += 1;
+    return result({ status: 'queued', id: JOB_ID });
   });
 
   try {
-    const response = await postReport(server.port, { description: '   ' });
+    const empty = await request(server.port, 'POST', '/api/bug-report', { description: '   ' });
+    const long = await request(server.port, 'POST', '/api/bug-report', { description: 'x'.repeat(20001) });
+    assert.equal(empty.status, 400);
+    assert.equal(empty.json.error.code, 'BUG_REPORT_DESCRIPTION_REQUIRED');
+    assert.equal(long.status, 400);
+    assert.match(long.json.error.message, /too long/);
+    assert.equal(calls, 0);
+  } finally {
+    await server.close();
+  }
+});
 
+test('POST / rejects an unconfirmed or malformed enqueue response', async () => {
+  const logged: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { logged.push(args); };
+  try {
+    for (const output of [
+      result({ status: 'pending', id: JOB_ID }),
+      result({ status: 'queued', id: 'bad' }),
+      { code: 0, stdout: 'not json', stderr: '' },
+    ]) {
+      const server = await startServer(async () => output);
+      try {
+        const response = await request(server.port, 'POST', '/api/bug-report', { description: 'a genuine report' });
+        assert.equal(response.status, 502);
+        assert.equal(response.json.error.code, 'BUG_REPORT_QUEUE_PROTOCOL');
+      } finally {
+        await server.close();
+      }
+    }
+    assert.ok(logged.some((entry) => JSON.stringify(entry).includes('protocol-error')));
+    assert.ok(logged.every((entry) => JSON.stringify(entry).includes('enqueue')));
+  } finally {
+    console.error = original;
+  }
+});
+
+test('POST / maps a queue command failure without exposing raw output', async () => {
+  const logged: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { logged.push(args); };
+  const server = await startServer(async () => result({
+    status: 'error', detail: 'database path /private/queue.db is unavailable',
+  }, 2));
+
+  try {
+    const response = await request(server.port, 'POST', '/api/bug-report', { description: 'a genuine report' });
+    assert.equal(response.status, 503);
+    assert.equal(response.json.error.code, 'BUG_REPORT_QUEUE_UNAVAILABLE');
+    assert.ok(!response.json.error.message.includes('/private/queue.db'));
+    assert.ok(!JSON.stringify(logged).includes('/private/queue.db'));
+    assert.match(JSON.stringify(logged), /enqueue.*command-error.*2/);
+  } finally {
+    console.error = original;
+    await server.close();
+  }
+});
+
+test('GET /:jobId returns each content-free public queue state', async () => {
+  for (const status of ['pending', 'retry', 'filing', 'filed', 'uncertain', 'failed']) {
+    const calls: string[][] = [];
+    const payload = { status, id: JOB_ID, ...(status === 'filed' ? {
+      url: 'https://github.com/owner/repo/issues/12', number: 12,
+    } : {}) };
+    const server = await startServer(async (args) => {
+      calls.push(args);
+      return result(payload);
+    });
+    try {
+      const response = await request(server.port, 'GET', `/api/bug-report/${JOB_ID}`);
+      assert.equal(response.status, 200, status);
+      assert.equal(response.json.data.status, status);
+      assert.deepEqual(calls, [['status', JOB_ID]]);
+    } finally {
+      await server.close();
+    }
+  }
+});
+
+test('GET /:jobId rejects invalid input before invoking the queue', async () => {
+  let called = false;
+  const server = await startServer(async () => {
+    called = true;
+    return result({ status: 'pending', id: JOB_ID });
+  });
+  try {
+    const response = await request(server.port, 'GET', '/api/bug-report/--help');
     assert.equal(response.status, 400);
-    assert.equal(response.json.error.code, 'BUG_REPORT_DESCRIPTION_REQUIRED');
-    assert.match(response.json.error.message, /describe the bug/);
+    assert.equal(response.json.error.code, 'BUG_REPORT_JOB_ID_INVALID');
     assert.equal(called, false);
   } finally {
     await server.close();
   }
 });
 
-test('POST / tells an oversized report apart from an empty one', async () => {
-  const server = await startServer(async () => OK_RESULT);
-
-  try {
-    const response = await postReport(server.port, { description: 'x'.repeat(20001) });
-
-    assert.equal(response.status, 400);
-    assert.match(response.json.error.message, /too long/);
-  } finally {
-    await server.close();
+test('GET /:jobId rejects mismatched IDs and unknown states', async () => {
+  for (const payload of [
+    { status: 'pending', id: OTHER_JOB_ID },
+    { status: 'invented', id: JOB_ID },
+  ]) {
+    const server = await startServer(async () => result(payload));
+    try {
+      const response = await request(server.port, 'GET', `/api/bug-report/${JOB_ID}`);
+      assert.equal(response.status, 502);
+      assert.equal(response.json.error.code, 'BUG_REPORT_QUEUE_PROTOCOL');
+    } finally {
+      await server.close();
+    }
   }
 });
 
-test('POST / maps a non-zero gh exit to its user-facing message', async () => {
-  const server = await startServer(async () => ({
-    code: 1,
-    stdout: '',
-    stderr: 'gh: To get started with GitHub CLI, please run: gh auth login',
-  }));
-
-  try {
-    const response = await postReport(server.port, { description: 'a genuine report' });
-
-    assert.equal(response.status, 503);
-    assert.equal(response.json.error.code, 'BUG_REPORT_GH_UNAUTHENTICATED');
-    // Raw gh stderr must never reach the client.
-    assert.ok(!response.json.error.message.includes('gh: To get started'));
-  } finally {
-    await server.close();
-  }
+test('validJobId accepts only canonical UUIDs', () => {
+  assert.equal(validJobId(JOB_ID), true);
+  assert.equal(validJobId(OTHER_JOB_ID), true);
+  assert.equal(validJobId('--help'), false);
+  assert.equal(validJobId(JOB_ID.toUpperCase()), false);
+  assert.equal(validJobId(null), false);
 });
 
-test('POST / reports a successful exit that yielded no issue URL', async () => {
-  const server = await startServer(async () => ({ code: 0, stdout: 'nothing useful\n', stderr: '' }));
-
-  try {
-    const response = await postReport(server.port, { description: 'a genuine report' });
-
-    assert.equal(response.status, 502);
-    assert.equal(response.json.error.code, 'BUG_REPORT_NO_URL');
-  } finally {
-    await server.close();
-  }
-});
-
-test('describeGhFailure maps each known gh stderr shape', () => {
-  const cases: Array<[string, string, number]> = [
-    ['gh: not logged into any GitHub hosts', 'BUG_REPORT_GH_UNAUTHENTICATED', 503],
-    ['GraphQL: Could not resolve to a Repository with the name', 'BUG_REPORT_REPO_NOT_FOUND', 502],
-    ['the repository has disabled issues', 'BUG_REPORT_ISSUES_DISABLED', 502],
-    ['some entirely novel failure', 'BUG_REPORT_GH_FAILED', 502],
-  ];
-
-  for (const [stderr, code, statusCode] of cases) {
-    const error = describeGhFailure(stderr);
-    assert.equal(error.code, code, `stderr: ${stderr}`);
-    assert.equal(error.statusCode, statusCode);
-    assert.ok(!error.message.includes(stderr), 'raw stderr must not be echoed to the client');
-  }
-});
-
-test('runGh maps a missing binary to an actionable 503', async () => {
-  await assert.rejects(
-    () => runGh(['issue', 'create'], 5000, 'gh-that-does-not-exist-cloudcli'),
-    (error: unknown) => {
-      assert.ok(error instanceof AppError);
-      assert.equal(error.code, 'BUG_REPORT_GH_MISSING');
-      assert.equal(error.statusCode, 503);
-      return true;
-    },
-  );
-});
-
-test('runGh kills a hung command and reports a timeout', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'bug-report-gh-'));
-  const script = path.join(dir, 'slow.sh');
-  await writeFile(script, '#!/bin/sh\nsleep 30\n');
-  await chmod(script, 0o755);
-
+test('runIssueQueue maps a missing binary without logging argv/title', async () => {
+  const logged: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { logged.push(args); };
   try {
     await assert.rejects(
-      () => runGh([], 150, script),
-      (error: unknown) => {
-        assert.ok(error instanceof AppError);
-        assert.equal(error.code, 'BUG_REPORT_GH_TIMEOUT');
-        assert.equal(error.statusCode, 504);
-        return true;
-      },
+      () => runIssueQueue(['enqueue', '--title', 'private opening line'], '', 5000, 'missing-issue-queue-binary'),
+      (error: unknown) => error instanceof AppError && error.code === 'BUG_REPORT_QUEUE_MISSING',
     );
+    assert.ok(!JSON.stringify(logged).includes('private opening line'));
   } finally {
+    console.error = original;
+  }
+});
+
+test('runIssueQueue kills a hung command without logging argv/title', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'bug-report-queue-'));
+  const script = path.join(dir, 'slow.sh');
+  await writeFile(script, '#!/bin/sh\nwhile :; do :; done\n');
+  await chmod(script, 0o755);
+  const logged: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { logged.push(args); };
+  try {
+    await assert.rejects(
+      () => runIssueQueue(['enqueue', '--title', 'private opening line'], '', 150, script),
+      (error: unknown) => error instanceof AppError && error.code === 'BUG_REPORT_QUEUE_TIMEOUT',
+    );
+    assert.ok(!JSON.stringify(logged).includes('private opening line'));
+  } finally {
+    console.error = original;
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('runGh returns the captured streams and exit code of a real process', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'bug-report-gh-'));
-  const script = path.join(dir, 'noisy.sh');
-  await writeFile(script, '#!/bin/sh\necho "on stdout"\necho "on stderr" >&2\nexit 3\n');
+test('runIssueQueue pipes stdin and captures a real process result', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'bug-report-queue-'));
+  const script = path.join(dir, 'queue.sh');
+  await writeFile(script, '#!/bin/sh\nbody=$(cat)\nprintf \'{"status":"queued","id":"abcdef12-abcd-4abc-8def-abcdef123456"}\\n\'\nprintf \'received:%s\' "$body" >&2\n');
   await chmod(script, 0o755);
-
   try {
-    const result = await runGh([], 5000, script);
-
-    assert.equal(result.code, 3);
-    assert.match(result.stdout, /on stdout/);
-    assert.match(result.stderr, /on stderr/);
+    const output = await runIssueQueue(['enqueue'], 'sensitive body', 5000, script);
+    assert.equal(output.code, 0);
+    assert.equal(JSON.parse(output.stdout).id, JOB_ID);
+    assert.equal(output.stderr, 'received:sensitive body');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

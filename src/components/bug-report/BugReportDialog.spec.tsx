@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,15 +10,17 @@ import type { Project, ProjectSession } from '@/types/app';
 /*
  * In-app bug reporter. The dialog's job is to keep a report from being lost:
  * it blocks empty/too-short submissions, shows exactly what metadata rides
- * along, surfaces the server's own error text when filing fails, and hands
- * back a link when it succeeds.
+ * along, preserves the draft when durable enqueueing fails, and hands back the
+ * final link when background filing succeeds.
  */
 
 const createBugReport = vi.fn();
+const getBugReportStatus = vi.fn();
 
 vi.mock('@/utils/api', () => ({
   api: {
     createBugReport: (...args: unknown[]) => createBugReport(...args),
+    getBugReportStatus: (...args: unknown[]) => getBugReportStatus(...args),
   },
 }));
 
@@ -59,6 +61,13 @@ function jsonResponse(ok: boolean, payload: unknown) {
 describe('BugReportDialog', () => {
   beforeEach(() => {
     createBugReport.mockReset();
+    getBugReportStatus.mockReset();
+    getBugReportStatus.mockResolvedValue(
+      jsonResponse(true, {
+        success: true,
+        data: { status: 'filed', url: 'https://github.com/o/r/issues/9', number: 9 },
+      }),
+    );
   });
 
   it('keeps the submit action disabled until the report says something', async () => {
@@ -76,7 +85,7 @@ describe('BugReportDialog', () => {
 
   it('sends the description with the collected session metadata', async () => {
     createBugReport.mockResolvedValue(
-      jsonResponse(true, { success: true, data: { issueUrl: 'https://github.com/o/r/issues/9' } }),
+      jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
     );
     renderDialog();
 
@@ -97,7 +106,7 @@ describe('BugReportDialog', () => {
 
   it('shows the filed issue link on success', async () => {
     createBugReport.mockResolvedValue(
-      jsonResponse(true, { success: true, data: { issueUrl: 'https://github.com/o/r/issues/9' } }),
+      jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
     );
     renderDialog();
 
@@ -110,11 +119,90 @@ describe('BugReportDialog', () => {
     expect(screen.queryByRole('button', { name: 'File issue' })).toBeNull();
   });
 
-  it("surfaces the server's error message and keeps the typed report", async () => {
+  it('shows durable ownership while GitHub filing is still pending', async () => {
     createBugReport.mockResolvedValue(
-      jsonResponse(false, {
-        success: false,
-        error: { code: 'BUG_REPORT_GH_UNAUTHENTICATED', message: 'gh is not authenticated' },
+      jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
+    );
+    getBugReportStatus.mockReturnValue(new Promise(() => {}));
+    renderDialog();
+
+    await userEvent.type(screen.getByLabelText('What happened?'), 'a real and detailed report');
+    await userEvent.click(screen.getByRole('button', { name: 'File issue' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Bug report saved');
+    expect(screen.getByRole('status')).toHaveTextContent('background');
+    expect(screen.queryByLabelText('What happened?')).toBeNull();
+    expect(getBugReportStatus).toHaveBeenCalledWith('job-1');
+  });
+
+  it('stops presentation polling after a minute while the worker continues', async () => {
+    vi.useFakeTimers();
+    createBugReport.mockResolvedValue(
+      jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
+    );
+    getBugReportStatus.mockResolvedValue(
+      jsonResponse(true, { success: true, data: { status: 'pending', id: 'job-1' } }),
+    );
+
+    try {
+      renderDialog();
+      fireEvent.change(screen.getByLabelText('What happened?'), {
+        target: { value: 'a real and detailed report' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'File issue' }));
+      await act(async () => { await Promise.resolve(); });
+      for (let attempt = 1; attempt < 30; attempt += 1) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      }
+
+      expect(screen.getByRole('status')).toHaveTextContent('GitHub confirmation is delayed');
+      expect(getBugReportStatus).toHaveBeenCalledTimes(30);
+      expect(screen.queryByLabelText('What happened?')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries a transient status-network failure and still shows the filed link', async () => {
+    vi.useFakeTimers();
+    createBugReport.mockResolvedValue(
+      jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
+    );
+    getBugReportStatus
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(
+        jsonResponse(true, {
+          success: true,
+          data: { status: 'filed', url: 'https://github.com/o/r/issues/10', number: 10 },
+        }),
+      );
+
+    try {
+      renderDialog();
+      fireEvent.change(screen.getByLabelText('What happened?'), {
+        target: { value: 'a real and detailed report' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'File issue' }));
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+
+      expect(screen.getByRole('link', { name: /View issue/ })).toHaveAttribute(
+        'href', 'https://github.com/o/r/issues/10',
+      );
+      expect(getBugReportStatus).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('distinguishes a terminal worker failure from an enqueue failure', async () => {
+    createBugReport.mockResolvedValue(
+      jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
+    );
+    getBugReportStatus.mockResolvedValue(
+      jsonResponse(true, {
+        success: true,
+        data: { status: 'failed', id: 'job-1', detail: 'unknown bug label' },
       }),
     );
     renderDialog();
@@ -122,7 +210,43 @@ describe('BugReportDialog', () => {
     await userEvent.type(screen.getByLabelText('What happened?'), 'a real and detailed report');
     await userEvent.click(screen.getByRole('button', { name: 'File issue' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('gh is not authenticated');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Bug report saved');
+    expect(screen.getByRole('alert')).toHaveTextContent('unknown bug label');
+    expect(screen.queryByLabelText('What happened?')).toBeNull();
+  });
+
+  it('stops after an explicit local status error', async () => {
+    createBugReport.mockResolvedValue(
+      jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
+    );
+    getBugReportStatus.mockResolvedValue(
+      jsonResponse(false, {
+        success: false,
+        error: { code: 'BUG_REPORT_QUEUE_UNAVAILABLE', message: 'Queue status is unavailable' },
+      }),
+    );
+    renderDialog();
+
+    await userEvent.type(screen.getByLabelText('What happened?'), 'a real and detailed report');
+    await userEvent.click(screen.getByRole('button', { name: 'File issue' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Queue status is unavailable');
+    expect(getBugReportStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces the server's error message and keeps the typed report", async () => {
+    createBugReport.mockResolvedValue(
+      jsonResponse(false, {
+        success: false,
+        error: { code: 'BUG_REPORT_QUEUE_UNAVAILABLE', message: 'queue is unavailable' },
+      }),
+    );
+    renderDialog();
+
+    await userEvent.type(screen.getByLabelText('What happened?'), 'a real and detailed report');
+    await userEvent.click(screen.getByRole('button', { name: 'File issue' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('queue is unavailable');
     expect(screen.getByLabelText('What happened?')).toHaveValue('a real and detailed report');
   });
 
