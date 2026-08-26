@@ -16,6 +16,18 @@ const findEnvKey = (name) =>
   Object.keys(process.env).find((key) => key.toLowerCase() === name.toLowerCase()) || name;
 
 async function createFakeAgy(binDir) {
+  // The stub below is CommonJS, and a bare `.js` file's module system is decided
+  // by the nearest package.json — which lives OUTSIDE this temp dir, wherever
+  // `os.tmpdir()` happens to point. Under `/tmp` there is none, so it loaded as
+  // CommonJS and this was invisible. Run with TMPDIR inside the checkout (which
+  // is what the local-ci lanes do) and the repo's own `"type": "module"` wins,
+  // every spawn dies on `require is not defined`, and all six spawn tests fail
+  // for a reason that has nothing to do with the code under test.
+  //
+  // Pinning the module system next to the script makes the stub mean the same
+  // thing wherever the temp dir lands.
+  await writeFile(path.join(binDir, 'package.json'), '{"type":"commonjs"}\n', 'utf8');
+
   const scriptPath = path.join(binDir, 'agy.js');
   await writeFile(scriptPath, `
 const fs = require('node:fs');
