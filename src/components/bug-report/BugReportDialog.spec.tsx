@@ -163,6 +163,38 @@ describe('BugReportDialog', () => {
     }
   });
 
+  it('retries a transient status-network failure and still shows the filed link', async () => {
+    vi.useFakeTimers();
+    createBugReport.mockResolvedValue(
+      jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
+    );
+    getBugReportStatus
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(
+        jsonResponse(true, {
+          success: true,
+          data: { status: 'filed', url: 'https://github.com/o/r/issues/10', number: 10 },
+        }),
+      );
+
+    try {
+      renderDialog();
+      fireEvent.change(screen.getByLabelText('What happened?'), {
+        target: { value: 'a real and detailed report' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'File issue' }));
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+
+      expect(screen.getByRole('link', { name: /View issue/ })).toHaveAttribute(
+        'href', 'https://github.com/o/r/issues/10',
+      );
+      expect(getBugReportStatus).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('distinguishes a terminal worker failure from an enqueue failure', async () => {
     createBugReport.mockResolvedValue(
       jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),

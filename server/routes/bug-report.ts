@@ -4,6 +4,10 @@
  * The authenticated web process inserts the prepared issue into the host-local
  * durable queue and returns as soon as SQLite owns it. A separate worker owns
  * GitHub credentials, rate limits, retries, and ambiguous-create reconciliation.
+ *
+ * Config: `BUG_REPORT_QUEUE_BIN` (default `issue-queue`),
+ * `BUG_REPORT_QUEUE_TIMEOUT_MS` (positive milliseconds, default `5000`), and
+ * `ISSUE_QUEUE_DB` (the SQLite path shared by this producer and the worker).
  */
 
 import { spawn } from 'node:child_process';
@@ -106,23 +110,36 @@ function parseQueuePayload(stdout: string): Record<string, unknown> {
   throw queueProtocolError();
 }
 
+type QueueOperation = 'enqueue' | 'status';
+
+function logQueueFailure(
+  operation: QueueOperation,
+  category: 'command-error' | 'protocol-error',
+  exitCode: number | null,
+): void {
+  // This allowlisted shape must stay free of argv, stdout/stderr, paths, titles, and bodies.
+  console.error('Bug report issue-queue failure:', { operation, category, exitCode });
+}
+
 async function queueCommand(
   run: QueueRunner,
   args: string[],
   input = '',
 ): Promise<Record<string, unknown>> {
+  const operation: QueueOperation = args[0] === 'status' ? 'status' : 'enqueue';
   const result = await run(args, input);
   let payload: Record<string, unknown> | null = null;
   try {
     payload = parseQueuePayload(result.stdout);
   } catch (error) {
-    if (result.code === 0) throw error;
+    if (result.code === 0) {
+      logQueueFailure(operation, 'protocol-error', result.code);
+      throw error;
+    }
   }
 
   if (result.code !== 0 || payload?.status === 'error') {
-    // The queue's public error detail is body/title-free by contract. Do not log stderr or argv.
-    const detail = typeof payload?.detail === 'string' ? payload.detail.slice(0, 400) : '';
-    console.error('Bug report issue-queue command failed:', result.code, detail);
+    logQueueFailure(operation, 'command-error', result.code);
     throw new AppError('The durable bug-report queue is unavailable. Please try again.', {
       code: 'BUG_REPORT_QUEUE_UNAVAILABLE',
       statusCode: 503,
@@ -171,6 +188,7 @@ export function createBugReportRouter(dependencies: { runQueue?: QueueRunner } =
       const id = payload.id;
 
       if (payload.status !== 'queued' || !validJobId(id)) {
+        logQueueFailure('enqueue', 'protocol-error', 0);
         throw queueProtocolError();
       }
 
@@ -191,6 +209,7 @@ export function createBugReportRouter(dependencies: { runQueue?: QueueRunner } =
 
       const payload = await queueCommand(run, ['status', req.params.jobId]);
       if (payload.id !== req.params.jobId || !PUBLIC_QUEUE_STATUSES.has(String(payload.status))) {
+        logQueueFailure('status', 'protocol-error', 0);
         throw queueProtocolError();
       }
       res.json(createApiSuccessResponse(payload));

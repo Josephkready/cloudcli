@@ -143,23 +143,35 @@ test('POST / rejects empty and oversized descriptions before queueing', async ()
 });
 
 test('POST / rejects an unconfirmed or malformed enqueue response', async () => {
-  for (const output of [
-    result({ status: 'pending', id: JOB_ID }),
-    result({ status: 'queued', id: 'bad' }),
-    { code: 0, stdout: 'not json', stderr: '' },
-  ]) {
-    const server = await startServer(async () => output);
-    try {
-      const response = await request(server.port, 'POST', '/api/bug-report', { description: 'a genuine report' });
-      assert.equal(response.status, 502);
-      assert.equal(response.json.error.code, 'BUG_REPORT_QUEUE_PROTOCOL');
-    } finally {
-      await server.close();
+  const logged: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { logged.push(args); };
+  try {
+    for (const output of [
+      result({ status: 'pending', id: JOB_ID }),
+      result({ status: 'queued', id: 'bad' }),
+      { code: 0, stdout: 'not json', stderr: '' },
+    ]) {
+      const server = await startServer(async () => output);
+      try {
+        const response = await request(server.port, 'POST', '/api/bug-report', { description: 'a genuine report' });
+        assert.equal(response.status, 502);
+        assert.equal(response.json.error.code, 'BUG_REPORT_QUEUE_PROTOCOL');
+      } finally {
+        await server.close();
+      }
     }
+    assert.ok(logged.some((entry) => JSON.stringify(entry).includes('protocol-error')));
+    assert.ok(logged.every((entry) => JSON.stringify(entry).includes('enqueue')));
+  } finally {
+    console.error = original;
   }
 });
 
 test('POST / maps a queue command failure without exposing raw output', async () => {
+  const logged: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { logged.push(args); };
   const server = await startServer(async () => result({
     status: 'error', detail: 'database path /private/queue.db is unavailable',
   }, 2));
@@ -169,7 +181,10 @@ test('POST / maps a queue command failure without exposing raw output', async ()
     assert.equal(response.status, 503);
     assert.equal(response.json.error.code, 'BUG_REPORT_QUEUE_UNAVAILABLE');
     assert.ok(!response.json.error.message.includes('/private/queue.db'));
+    assert.ok(!JSON.stringify(logged).includes('/private/queue.db'));
+    assert.match(JSON.stringify(logged), /enqueue.*command-error.*2/);
   } finally {
+    console.error = original;
     await server.close();
   }
 });
