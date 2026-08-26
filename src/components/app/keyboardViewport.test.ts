@@ -187,15 +187,53 @@ test('reviseRestingViewportGap only ever shrinks', () => {
   );
 });
 
-test('reviseRestingViewportGap never calibrates to a negative gap', () => {
+test('reviseRestingViewportGap discards a negative difference rather than flooring it', () => {
+  // The visual viewport is never genuinely taller than the layout viewport, so
+  // this reading is proof of a mid-transition sample and says nothing about the
+  // resting state. Flooring it to 0 would promote the least trustworthy sample
+  // there is into the most confident claim the baseline can hold.
   assert.equal(
     reviseRestingViewportGap(null, {
       innerHeight: 800,
       viewportHeight: 812,
       textEntryFocused: false,
     }),
-    0,
+    null,
   );
+  assert.equal(
+    reviseRestingViewportGap(34, {
+      innerHeight: 800,
+      viewportHeight: 812,
+      textEntryFocused: false,
+    }),
+    34,
+  );
+});
+
+test('a mid-transition sample cannot collapse the baseline permanently', () => {
+  // Found in review. The keyboard retracts, focus has already left the field so
+  // the focus rule does not apply, and `interactive-widget=resizes-content` means
+  // both numbers have to grow back — but not necessarily in the same tick. Read
+  // between those two updates and `innerHeight` is still short while the visual
+  // viewport has already sprung back.
+  let baseline = reviseRestingViewportGap(null, {
+    innerHeight: 852,
+    viewportHeight: 818,
+    textEntryFocused: false,
+  });
+  assert.equal(baseline, 34);
+
+  baseline = reviseRestingViewportGap(baseline, {
+    innerHeight: 518,
+    viewportHeight: 818,
+    textEntryFocused: false,
+  });
+
+  // Flooring that to 0 would stick: the baseline only ever shrinks, so no later
+  // sample could raise it and the phantom gap would be back for the rest of the
+  // session.
+  assert.equal(baseline, 34);
+  assert.equal(computeKeyboardHeight(852, 818, baseline ?? 0), 0);
 });
 
 test('isTextEntryElement recognises the focus that summons a keyboard', () => {

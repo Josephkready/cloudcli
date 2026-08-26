@@ -137,15 +137,19 @@ test('the app shell states its inset inline rather than taking inset-0', () => {
   // Structural, because the failure has no local symptom: nothing else in the
   // repo would notice the class coming back.
   const source = fs.readFileSync(path.join(SRC, 'components/app/AppContent.tsx'), 'utf8');
-  const shell = source.match(/<div className="[^"]*\bfixed\b[^"]*" style=\{viewportShellStyle/);
+  // The whole opening tag, so an attribute added between `className` and `style`
+  // fails this on its merits rather than on attribute order.
+  const shell = source
+    .match(/<div[^>]*\bstyle=\{viewportShellStyle[^>]*>/)
+    ?.[0];
 
   assert.ok(
     shell,
-    'the app shell must be a `fixed` element styled by `viewportShellStyle()`; if it '
-      + 'was refactored, move this check with it rather than deleting it',
+    'the app shell must be a `div` styled by `viewportShellStyle()`; if it was '
+      + 'refactored, move this check with it rather than deleting it',
   );
   assert.doesNotMatch(
-    shell[0],
+    shell,
     /\binset-0\b/,
     'the app shell must not carry `inset-0`: `body.pwa-mode .fixed.inset-0` would then '
       + 'shift its origin by the header safe area inside the installed PWA only',

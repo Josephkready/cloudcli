@@ -114,8 +114,8 @@ export function viewportShellStyle(
  * Height the keyboard is covering.
  *
  * `restingGap` is what the two viewports disagree by with *no* keyboard up; see
- * {@link reviseRestingViewportGap}. Clamped at both ends: the two can also
- * disagree by a rounding error in the other direction.
+ * {@link reviseRestingViewportGap}. Floored at zero, because the raw difference
+ * and the resting-gap subtraction can each go slightly negative from rounding.
  */
 export function computeKeyboardHeight(
   innerHeight: number,
@@ -130,12 +130,14 @@ export function computeKeyboardHeight(
  *
  * The keyboard height is read as the gap between the layout and visual
  * viewports, which assumes the gap is zero when no keyboard is up. On standalone
- * iOS PWAs it is not: the two disagree by a constant amount (they do not agree
- * on whether the home-indicator area counts), so the resting state reads as a
- * permanent phantom keyboard and leaves a gap under the composer at rest.
+ * iOS PWAs it is not: the two disagree by a constant amount — the suspected
+ * cause is disagreement over whether the home-indicator area counts, though the
+ * fix needs only the disagreement to be constant, not its cause — so the resting
+ * state reads as a permanent phantom keyboard and leaves a gap under the
+ * composer at rest.
  *
- * Calibrated rather than guessed, under two rules that between them make a wrong
- * value self-correcting:
+ * Calibrated rather than guessed, under three rules that between them make a
+ * wrong value self-correcting:
  *
  * - **Only samples with no text field focused count.** With the keyboard up the
  *   gap is the keyboard, and adopting it would make the keyboard measure zero —
@@ -146,18 +148,32 @@ export function computeKeyboardHeight(
  *   retracting the keyboard, so a sample can arrive unfocused while the viewport
  *   is still short. Taking the minimum means such a sample cannot inflate the
  *   baseline; the settled sample that follows is the one that lands.
+ * - **A negative difference is discarded, not floored to zero.** The visual
+ *   viewport is never genuinely taller than the layout viewport, so a negative
+ *   reading is proof the two numbers were sampled mid-transition and carries no
+ *   information about the resting state. Flooring it to zero would instead turn
+ *   the least trustworthy sample there is into the most confident claim the
+ *   baseline can hold — and because the baseline only shrinks, that zero would
+ *   then be permanent. This is reachable: `interactive-widget=resizes-content`
+ *   means both numbers move when the keyboard retracts, they need not move in
+ *   the same tick, and focus is already gone by then, so the rule above does not
+ *   cover it. The symptom would be the phantom gap coming back for good.
  *
  * The residual: a rotation whose true resting gap is *larger* keeps the smaller
  * calibration and leaves a proportionally small phantom, since nothing raises the
  * baseline. That is strictly better than the fixed zero it replaces, and the
- * safe direction to be wrong in.
+ * safe direction to be wrong in. Deliberately no "reject a large downward jump"
+ * heuristic on top: the skew that motivates one shows up as a negative or an
+ * oversized reading, both already handled, and a fractional threshold would be a
+ * tuning knob no test on this hardware could calibrate.
  */
 export function reviseRestingViewportGap(
   current: number | null,
   sample: { innerHeight: number; viewportHeight: number; textEntryFocused: boolean },
 ): number | null {
   if (sample.textEntryFocused) return current;
-  const gap = Math.max(0, sample.innerHeight - sample.viewportHeight);
+  const gap = sample.innerHeight - sample.viewportHeight;
+  if (gap < 0) return current;
   return current === null ? gap : Math.min(current, gap);
 }
 
@@ -254,8 +270,15 @@ export function installKeyboardViewportSync(win: WindowLike, doc: DocumentLike):
     // catch `innerHeight` still at its full value against a visual viewport that
     // has already shrunk, which reads as a whole keyboard's worth of gap and
     // stacks a second shift on top of the browser's own. Two frames is enough
-    // for both numbers to settle; the generation makes a later resize replace an
-    // in-flight read rather than queue behind it.
+    // for both numbers to settle.
+    //
+    // The generation makes a later resize replace an in-flight read rather than
+    // queue behind it, which keeps a keyboard animation's burst of resizes from
+    // piling up two frames of work each. It is deliberately untested: the read
+    // samples live state rather than anything captured at dispatch, so a stale
+    // callback would compute the identical number and the dedupe below would
+    // swallow it. There is no observable difference to assert, and a test that
+    // passes either way is worse than none.
     const generation = ++resizeSamplingGeneration;
     win.requestAnimationFrame(() => {
       win.requestAnimationFrame(() => {
