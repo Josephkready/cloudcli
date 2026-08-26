@@ -172,8 +172,15 @@ export function createMermaidFenceGate(markdown: string): (code: string) => bool
 
   return (code: string) => {
     const key = fenceKey(code);
-    // A body that appears closed somewhere is renderable even if an identical
-    // one is still streaming further down — the closed copy proves it parses.
+    // A body that appears closed somewhere is renderable, even if an identical
+    // one is still streaming further down: the closed copy proves it parses.
+    //
+    // The cost of that shortcut, for honesty: if a message repeats the SAME
+    // diagram twice and the second copy is mid-stream, the second one is
+    // rendered on each token until it closes — the flicker this gate exists to
+    // prevent, for the one case where the text is byte-identical. Bounded (it
+    // still falls back to source on a failed parse) and rare enough to be worth
+    // keeping the shortcut, which is what lets a repeated diagram render at all.
     if (closed.has(key)) {
       return true;
     }

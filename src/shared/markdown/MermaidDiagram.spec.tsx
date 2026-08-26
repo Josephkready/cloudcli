@@ -145,6 +145,43 @@ describe('MermaidDiagram', () => {
     expect(screen.queryByTestId('code-fallback')).toBeNull();
   });
 
+  // There is deliberately no "sets state after unmount" case here. React 18
+  // removed that warning and a post-unmount `setState` is simply a no-op, so
+  // such a test passes whether or not the effect's `cancelled` guard exists —
+  // it would assert nothing. This one exercises the same guard on the path
+  // where it IS observable.
+  it('ignores a superseded render when the source changes mid-flight', async () => {
+    let releaseStale: (value: string) => void = () => {};
+    renderMermaid.mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        releaseStale = resolve;
+      }),
+    );
+
+    const { rerender } = render(
+      <ThemeProvider>
+        <MermaidDiagram code="graph TD\n  A --> B" fallback={<Fallback />} />
+      </ThemeProvider>,
+    );
+    await waitFor(() => expect(renderMermaid).toHaveBeenCalledTimes(1));
+
+    renderMermaid.mockResolvedValue('<svg data-palette="current"></svg>');
+    rerender(
+      <ThemeProvider>
+        <MermaidDiagram code="graph LR\n  C --> D" fallback={<Fallback />} />
+      </ThemeProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('mermaid-diagram')).toBeInTheDocument());
+
+    // The first render finally lands, for source that is no longer on screen.
+    releaseStale('<svg data-palette="stale"></svg>');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const diagram = screen.getByTestId('mermaid-diagram');
+    expect(diagram.querySelector('svg[data-palette="current"]')).not.toBeNull();
+    expect(diagram.querySelector('svg[data-palette="stale"]')).toBeNull();
+  });
+
   it('hands mermaid a CSS-safe render id and the trimmed source', async () => {
     renderMermaid.mockResolvedValue(SVG);
 

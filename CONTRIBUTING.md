@@ -47,8 +47,8 @@ npm test           # server tests, front-end unit tests, then component tests
 The `tests` lane also runs an **entry-chunk gate** after the suites. It builds the client and
 inspects the emitted bundle, because the three test runners only see runtime
 behaviour — which stays perfectly correct while a single stray static import
-puts all ~290 Prism grammars or KaTeX's stylesheet back on the render-blocking
-critical path (issues #268/#269):
+puts all ~290 Prism grammars, KaTeX's stylesheet, or the ~650 KB mermaid
+diagram engine back on the render-blocking critical path (issues #268/#269):
 
 ```bash
 npm run build:client && npm run check:bundle

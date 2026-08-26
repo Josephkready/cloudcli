@@ -65,7 +65,23 @@ describe('mermaidInitConfig', () => {
     // down to the chat column and becomes unreadable. Natural width + a
     // scrolling container is the trade this app makes instead.
     const config = mermaidInitConfig(false) as Record<string, { useMaxWidth?: boolean }>;
-    const sized = ['flowchart', 'sequence', 'class', 'state', 'er', 'gantt', 'journey', 'pie'];
+    // Every key the config sets, not a sample of them: they all point at one
+    // shared constant, so a typo in a key name is the failure this can catch,
+    // and only an exhaustive list catches it.
+    const sized = [
+      'flowchart',
+      'sequence',
+      'class',
+      'state',
+      'er',
+      'gantt',
+      'journey',
+      'pie',
+      'gitGraph',
+      'mindmap',
+      'timeline',
+      'requirement',
+    ];
 
     for (const key of sized) {
       assert.equal(config[key]?.useMaxWidth, false, `${key} should keep its natural width`);
