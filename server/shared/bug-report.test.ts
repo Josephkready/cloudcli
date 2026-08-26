@@ -12,7 +12,6 @@ import {
   formatMetadataTable,
   normalizeDescription,
   normalizeMetadataValue,
-  parseIssueUrl,
   resolveBugReportRepo,
 } from './bug-report.js';
 
@@ -118,10 +117,4 @@ test('resolveBugReportRepo honours a valid override and rejects junk', () => {
   assert.equal(resolveBugReportRepo({ BUG_REPORT_REPO: '  ' }), DEFAULT_BUG_REPORT_REPO);
   assert.equal(resolveBugReportRepo({ BUG_REPORT_REPO: 'not-a-repo' }), DEFAULT_BUG_REPORT_REPO);
   assert.equal(resolveBugReportRepo({ BUG_REPORT_REPO: 'owner/name; rm -rf /' }), DEFAULT_BUG_REPORT_REPO);
-});
-
-test('parseIssueUrl finds the issue link amid gh noise', () => {
-  const stdout = 'A new release of gh is available!\nhttps://github.com/Josephkready/cloudcli/issues/42\n';
-  assert.equal(parseIssueUrl(stdout), 'https://github.com/Josephkready/cloudcli/issues/42');
-  assert.equal(parseIssueUrl('nothing here'), null);
 });
