@@ -30,6 +30,28 @@ version claim.
 
 Because of that shape, this fork **intentionally diverges** from upstream. Feature removals are kept as atomic, well-labeled commits so future upstream syncs resolve to a simple "re-delete."
 
+## Sibling forks
+
+Upstream merges slowly — 20 commits in the six weeks after our fork point,
+against ~80 open PRs — so it is not a useful source of fixes. A handful of *other*
+forks are, though: people running this app on a phone every day, hitting the same
+mobile, PWA, and chat bugs, and fixing them.
+
+Finding them takes a specific search. Upstream has ~1900 forks and almost all are
+untouched mirrors; sorting by stars surfaces none of the live ones. Filter by
+recent pushes, then measure real divergence:
+
+```bash
+gh api --paginate "repos/siteboon/claudecodeui/forks?per_page=100" \
+  --jq '.[] | [.full_name, .pushed_at] | @tsv' | sort -t$'\t' -k2,2r
+gh api "repos/siteboon/claudecodeui/compare/main...OWNER:BRANCH" \
+  --jq '"ahead=\(.ahead_by) behind=\(.behind_by)"'
+```
+
+The current roster, the acceptance filter for a single-user fork, and the process
+for reading a fork and deciding what is worth porting:
+[`docs/fork-harvesting.md`](docs/fork-harvesting.md).
+
 ## Development
 
 Requires Node.js v22+.
