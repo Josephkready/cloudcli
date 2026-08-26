@@ -161,10 +161,16 @@ const ANSI_PATTERN = new RegExp(
  * `<unknown>` tomorrow would be the same bug, and a shape check absorbs it. The
  * inverse risk — swallowing a legitimate angle-bracketed model id — is not a
  * real one, because no such id exists or can exist for a CLI flag.
+ *
+ * A leading `<` plus any later `>` is enough: requiring the value to *end* in
+ * `>` would let a garbled placeholder that picked up trailing text through as a
+ * real model, which is the very failure this guard exists to stop. Values that
+ * merely contain angle brackets (`a<b>`) or never close them (`<opus`) are left
+ * alone, so the check only fires on something leading with a bracketed token.
  */
 export const isPlaceholderModelValue = (value: string): boolean => {
   const trimmed = value.trim();
-  return trimmed.startsWith('<') && trimmed.endsWith('>') && trimmed.length >= 2;
+  return trimmed.startsWith('<') && trimmed.includes('>');
 };
 
 /** Returns the value only when it is a usable model id, else null. */

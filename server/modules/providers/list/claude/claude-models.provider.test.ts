@@ -98,7 +98,17 @@ const syntheticTurn = (text = 'API Error: 529 overloaded_error'): string =>
 const transcript = (...lines: string[]): string => `${lines.join('\n')}\n`;
 
 test('isPlaceholderModelValue rejects angle-bracketed sentinels, not real model ids', () => {
-  for (const placeholder of ['<synthetic>', '<none>', '<unknown>', '<>', '  <synthetic>  ']) {
+  for (const placeholder of [
+    '<synthetic>',
+    '<none>',
+    '<unknown>',
+    '<>',
+    '  <synthetic>  ',
+    // A placeholder that picked up trailing text is still a placeholder: an
+    // end-anchored check would wave this through as a real model id.
+    '<synthetic>\nfoo',
+    '<synthetic> (api error)',
+  ]) {
     assert.equal(isPlaceholderModelValue(placeholder), true, `${placeholder} should be a placeholder`);
   }
 
@@ -165,12 +175,55 @@ test('an empty transcript resolves to nothing', () => {
 });
 
 test('the top-level event model is guarded too, and falls through to an older real turn', () => {
+  // Row shape from the live SDK `query()` stream (SDKSystemMessage, subtype
+  // `init`), which carries a top-level `model` and snake_case `session_id`.
   const jsonl = transcript(
     assistantTurn('haiku'),
-    JSON.stringify({ type: 'system', subtype: 'init', sessionId: SESSION_ID, model: '<synthetic>' }),
+    JSON.stringify({ type: 'system', subtype: 'init', session_id: SESSION_ID, model: '<synthetic>' }),
   );
 
   assert.equal(resolveClaudeSessionModelFromTranscript(SESSION_ID, jsonl), 'haiku');
+});
+
+test('the snake_case session_id alias is honoured for matching and mismatching rows', () => {
+  // Real on-disk transcript rows carry `session_id`, and the live SDK system
+  // row carries *only* `session_id` — so the alias has to work on its own.
+  const matching = transcript(
+    JSON.stringify({
+      type: 'assistant',
+      session_id: SESSION_ID,
+      message: { role: 'assistant', model: 'opus[1m]', content: [{ type: 'text', text: 'ok' }] },
+    }),
+  );
+  assert.equal(resolveClaudeSessionModelFromTranscript(SESSION_ID, matching), 'opus[1m]');
+
+  // A row belonging to another session is skipped even though it names a model.
+  const mismatched = transcript(
+    assistantTurn('sonnet'),
+    JSON.stringify({
+      type: 'assistant',
+      session_id: 'some-other-session',
+      message: { role: 'assistant', model: 'haiku', content: [{ type: 'text', text: 'ok' }] },
+    }),
+  );
+  assert.equal(resolveClaudeSessionModelFromTranscript(SESSION_ID, mismatched), 'sonnet');
+});
+
+test('the placeholder guard still applies on the snake_case branch', () => {
+  const jsonl = transcript(
+    JSON.stringify({
+      type: 'assistant',
+      session_id: SESSION_ID,
+      message: { role: 'assistant', model: 'fable', content: [{ type: 'text', text: 'ok' }] },
+    }),
+    JSON.stringify({
+      type: 'assistant',
+      session_id: SESSION_ID,
+      message: { role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: 'API Error' }] },
+    }),
+  );
+
+  assert.equal(resolveClaudeSessionModelFromTranscript(SESSION_ID, jsonl), 'fable');
 });
 
 test('a <model> tag holding a placeholder is skipped, but a real one is honoured', () => {
@@ -204,7 +257,14 @@ test('a /model stdout announcing a placeholder does not shadow the real <model> 
   assert.equal(resolveClaudeSessionModelFromTranscript(SESSION_ID, jsonl), 'sonnet');
 });
 
-test('a real /model stdout switch is still read', () => {
+test('a non-placeholder /model stdout switch is still read', () => {
+  // NOTE: this is a *simplified* stdout string. Real `/model` rows look like
+  // `Set model to [1mOpus 5 (1M context)[22m and saved as your
+  // default for new sessions`, and the end-anchored capture in
+  // extractClaudeModelFromTextContent swallows the trailing clause, yielding a
+  // non-model string. That is a pre-existing bug independent of the placeholder
+  // guard (see the PR description) — deliberately not fixed or pinned here, so
+  // this test covers only the guard's behaviour on this path.
   const content = '<local-command-stdout>Set model to opus.</local-command-stdout>';
   const jsonl = transcript(
     assistantTurn('haiku'),
