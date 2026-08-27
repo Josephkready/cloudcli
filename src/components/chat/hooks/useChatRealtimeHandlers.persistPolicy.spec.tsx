@@ -154,6 +154,21 @@ describe('gateway frames never reach the transcript (#450)', () => {
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(kind));
   });
 
+  it('warns once per kind, not once per frame', () => {
+    const { deliver } = setup();
+    const kind = `unheard_of_${Math.random().toString(36).slice(2)}`;
+
+    deliver({ kind, sessionId: SESSION });
+    deliver({ kind, sessionId: SESSION });
+    deliver({ kind, sessionId: SESSION });
+
+    // A frame the client does not understand can arrive at streaming rates. One
+    // line per frame would bury the console it is meant to help.
+    const forThisKind = (console.warn as ReturnType<typeof vi.fn>).mock.calls
+      .filter(([message]) => typeof message === 'string' && message.includes(kind));
+    expect(forThisKind).toHaveLength(1);
+  });
+
   it('stays quiet about control frames it drops on purpose', () => {
     const { deliver } = setup();
     deliver({ kind: 'chat_resumed', sessionId: SESSION, resumed: 1 });

@@ -190,6 +190,28 @@ describe('appendRealtime with an id-less row (#450)', () => {
     expect(mergedIds(rendered)).toEqual(['m1', 'm2', 'm3']);
   });
 
+  it('survives a null or undefined row without throwing', async () => {
+    const rendered = await setupLoadedStore();
+
+    // The guard uses optional chaining, but the hook-level wiring deserves its
+    // own case: a `JSON.parse` result is not guaranteed to be an object.
+    expect(() => {
+      act(() => {
+        rendered.result.current.appendRealtime(SESSION, null as unknown as NormalizedMessage);
+        rendered.result.current.appendRealtime(SESSION, undefined as unknown as NormalizedMessage);
+      });
+    }).not.toThrow();
+
+    expect(rendered.result.current.getSlot(SESSION).realtimeMessages).toHaveLength(0);
+    expect(mergedIds(rendered)).toEqual(['m1', 'm2']);
+
+    // And the session is still usable.
+    act(() => {
+      rendered.result.current.appendRealtime(SESSION, liveAssistant('live1', 'after null', 2000));
+    });
+    expect(mergedIds(rendered)).toEqual(['m1', 'm2', 'live1']);
+  });
+
   it('survives several bad frames in a row', async () => {
     const rendered = await setupLoadedStore();
     act(() => {
@@ -219,6 +241,22 @@ describe('appendRealtimeBatch with an id-less row (#450)', () => {
 
     // A single bad row must not cost the batch its real messages — that would
     // be a worse bug than the crash it replaces.
+    expect(mergedIds(rendered)).toEqual(['m1', 'm2', 'live1', 'live2']);
+  });
+
+  it('survives a null entry inside a batch', async () => {
+    const rendered = await setupLoadedStore();
+
+    expect(() => {
+      act(() => {
+        rendered.result.current.appendRealtimeBatch(SESSION, [
+          liveAssistant('live1', 'one', 2000),
+          null as unknown as NormalizedMessage,
+          liveAssistant('live2', 'two', 3000),
+        ]);
+      });
+    }).not.toThrow();
+
     expect(mergedIds(rendered)).toEqual(['m1', 'm2', 'live1', 'live2']);
   });
 

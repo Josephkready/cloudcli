@@ -202,6 +202,9 @@ describe('handleSubmit bookkeeping survives a failing optimistic bubble (#450)',
     // easy to miss in the console.
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('the message was still sent'),
+      // Correlation context, so the line can be tied to a specific send in a
+      // busy console.
+      expect.objectContaining({ sessionId: SESSION_ID }),
       expect.any(TypeError),
     );
   });

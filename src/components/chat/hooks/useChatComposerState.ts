@@ -950,6 +950,7 @@ export function useChatComposerState({
       } catch (error) {
         console.error(
           '[Chat] Post-send UI update failed; the message was still sent:',
+          { sessionId: targetSessionId, clientMessageId: pendingSendId },
           error,
         );
       } finally {

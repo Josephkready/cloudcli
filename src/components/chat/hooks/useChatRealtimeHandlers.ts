@@ -35,7 +35,7 @@ import type { SessionStore, NormalizedMessage, MessageKind } from '../../../stor
  * `KNOWN_CONTROL_KINDS` below exists so that omission is loud rather than
  * silent.
  */
-const PERSISTED_MESSAGE_KINDS: ReadonlySet<string> = new Set<MessageKind>([
+const PERSISTED_KIND_LIST = [
   'text',
   'tool_use',
   'tool_result',
@@ -50,11 +50,46 @@ const PERSISTED_MESSAGE_KINDS: ReadonlySet<string> = new Set<MessageKind>([
   'stream_end',
   'error',
   'session_created',
-  // Client-only kinds: no server emits them, but they reach the store through
-  // the same optimistic-echo path and must survive the filter.
+  // Client-only kinds. No server emits these, and they do not pass through this
+  // switch either — `chatMessageToNormalized` (useChatSessionState) hands them
+  // straight to `appendRealtime`. Listed for completeness, so this stays a
+  // statement about what counts as transcript content rather than a description
+  // of one code path.
   'interactive_prompt',
   'task_notification',
-]);
+] as const satisfies readonly MessageKind[];
+
+/**
+ * Provider kinds this hook consumes as events rather than storing as rows.
+ * Split out from `KNOWN_CONTROL_KINDS` so the exhaustiveness check below can
+ * see that every `MessageKind` is accounted for one way or the other.
+ */
+const PROVIDER_CONTROL_KIND_LIST = [
+  'complete',
+  'status',
+  'permission_request',
+  'permission_cancelled',
+] as const satisfies readonly MessageKind[];
+
+/**
+ * Compile-time exhaustiveness guard.
+ *
+ * Every `MessageKind` must be classified as either transcript content or a
+ * provider control frame. Add a kind to the union and forget this file, and the
+ * build breaks right here — instead of the kind silently never reaching a
+ * transcript in production, which is the exact failure mode an allow-list
+ * risks and the runtime `console.warn` below only reports after the fact.
+ */
+type UnclassifiedMessageKind = Exclude<
+  MessageKind,
+  (typeof PERSISTED_KIND_LIST)[number] | (typeof PROVIDER_CONTROL_KIND_LIST)[number]
+>;
+type AssertTrue<T extends true> = T;
+export type AssertEveryMessageKindIsClassified = AssertTrue<
+  [UnclassifiedMessageKind] extends [never] ? true : false
+>;
+
+const PERSISTED_MESSAGE_KINDS: ReadonlySet<string> = new Set<string>(PERSISTED_KIND_LIST);
 
 /**
  * Frames that are legitimately not transcript rows.
@@ -63,12 +98,9 @@ const PERSISTED_MESSAGE_KINDS: ReadonlySet<string> = new Set<MessageKind>([
  * one and warned about. Without this, a new provider kind would be dropped in
  * silence — the failure mode an allow-list has to guard against.
  */
-const KNOWN_CONTROL_KINDS: ReadonlySet<string> = new Set([
+const KNOWN_CONTROL_KINDS: ReadonlySet<string> = new Set<string>([
   // Provider lifecycle, handled as events by the switch below.
-  'complete',
-  'status',
-  'permission_request',
-  'permission_cancelled',
+  ...PROVIDER_CONTROL_KIND_LIST,
   // Gateway frames, consumed above or by other hooks (`useInterruptedResume`
   // taps `chat_resumed` off its own subscription; `pong` is swallowed by
   // `WebSocketContext` before dispatch).
@@ -86,6 +118,14 @@ const KNOWN_CONTROL_KINDS: ReadonlySet<string> = new Set([
 /** Kinds already warned about, so one unknown frame per run does not spam. */
 const warnedUnknownKinds = new Set<string>();
 
+/**
+ * Cap on distinct unknown kinds remembered. `kind` is unvalidated JSON off the
+ * socket, so a buggy backend emitting a counter or id inside the kind string
+ * would otherwise grow this set — and the console output — without bound for
+ * the lifetime of the tab.
+ */
+const MAX_WARNED_UNKNOWN_KINDS = 50;
+
 function shouldPersistKind(kind: unknown): boolean {
   if (typeof kind !== 'string') {
     return false;
@@ -93,12 +133,16 @@ function shouldPersistKind(kind: unknown): boolean {
   if (PERSISTED_MESSAGE_KINDS.has(kind)) {
     return true;
   }
-  if (!KNOWN_CONTROL_KINDS.has(kind) && !warnedUnknownKinds.has(kind)) {
+  if (
+    !KNOWN_CONTROL_KINDS.has(kind)
+    && !warnedUnknownKinds.has(kind)
+    && warnedUnknownKinds.size < MAX_WARNED_UNKNOWN_KINDS
+  ) {
     warnedUnknownKinds.add(kind);
     console.warn(
       `[Chat] Unrecognised websocket frame kind "${kind}" — not shown in the `
       + 'transcript. If this is a new provider message, add it to '
-      + 'PERSISTED_MESSAGE_KINDS.',
+      + 'PERSISTED_KIND_LIST.',
     );
   }
   return false;

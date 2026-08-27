@@ -106,13 +106,24 @@ describe('computeMerged with an id-less realtime row (#450)', () => {
   });
 
   it('does not treat an id-less row as one the server already has', () => {
-    // `new Set([...].map(m => m.id))` puts `undefined` in the set when a server
-    // row lacks an id, and `serverIds.has(undefined)` is then true — which would
-    // silently discard every id-less realtime row as a duplicate.
+    // `new Set([...].map(m => m.id))` puts `undefined` in the set when a SERVER
+    // row lacks an id, and `serverIds.has(undefined)` is then true — so every
+    // id-less realtime row was silently discarded as a duplicate of it.
+    //
+    // Both sides must lack an id for this to bite. An earlier version of this
+    // test put a well-formed row on the realtime side, which made it pass with
+    // the fix reverted: `serverIds.has('a1')` is false either way.
     const serverWithBadRow = [chatResumedFrame(), user('u1', 'hello', 0)];
-    assert.doesNotThrow(() => computeMerged(serverWithBadRow, [assistant('a1', 'reply', 3)]));
-    const merged = computeMerged(serverWithBadRow, [assistant('a1', 'reply', 3)]);
-    assert.ok(ids(merged).includes('a1'));
+    const merged = computeMerged(serverWithBadRow, [chatResumedFrame()]);
+
+    // Two distinct id-less rows are two rows, not one row seen twice. The point
+    // is that an id is not evidence of identity when there is no id.
+    assert.equal(
+      merged.filter((m) => m.kind === ('chat_resumed' as unknown)).length,
+      2,
+      'an id-less realtime row must not be swallowed by an id-less server row',
+    );
+    assert.ok(ids(merged).includes('u1'), 'the real transcript row must survive');
   });
 });
 
