@@ -82,9 +82,23 @@ export default {
         slow: '220ms',   // overlays, drawers, sheets, panel collapse
       },
       keyframes: {
+        // The travel has to be a whole number of gradient tiles, or the loop
+        // snaps. `background-position` percentages resolve against
+        // (element width − background width), not element width — and
+        // Shimmer.tsx sizes the tile at 250%, so that factor is −1.5W. A span
+        // of N percentage points therefore slides the gradient 1.5 × N/100 × W,
+        // against a tile that repeats every 2.5W.
+        //
+        // The old 200% → -200% pair spanned 400 points = 6W = 2.4 tiles, so
+        // every iteration ended 0.4 of a tile (a full element width) out of
+        // phase and jumped — a visible hitch every 2s. 250% → -250% spans 500
+        // points = 7.5W = exactly 3 tiles, which is phase-continuous.
+        //
+        // Coupled to the 250% in Shimmer.tsx: change one and this breaks.
+        // Retune the feel with the `animation` duration below, never here.
         shimmer: {
-          '0%': { backgroundPosition: '200% 0' },
-          '100%': { backgroundPosition: '-200% 0' },
+          '0%': { backgroundPosition: '250% 0' },
+          '100%': { backgroundPosition: '-250% 0' },
         },
         'dialog-overlay-show': {
           from: { opacity: '0' },
@@ -96,7 +110,10 @@ export default {
         },
       },
       animation: {
-        shimmer: 'shimmer 2s linear infinite',
+        // 2.5s, not 2s: the keyframes above now cover 7.5W instead of 6W, so
+        // the extra 25% of duration keeps the sweep at the same 3W/s it has
+        // always moved at. Perceived speed is unchanged — only the loop point.
+        shimmer: 'shimmer 2.5s linear infinite',
         'dialog-overlay-show': 'dialog-overlay-show 150ms ease-out',
         'dialog-content-show': 'dialog-content-show 150ms ease-out',
       },
