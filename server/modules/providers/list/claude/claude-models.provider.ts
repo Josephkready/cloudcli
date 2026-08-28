@@ -148,6 +148,41 @@ const ANSI_PATTERN = new RegExp(
   'g',
 );
 
+/**
+ * Claude Code stamps turns it fabricates locally — API-error notices, aborted
+ * turns, session-limit messages — with the placeholder model `<synthetic>`
+ * rather than a model id. It is a sentinel, not a name: no real Claude model id
+ * is wrapped in angle brackets (the catalog uses bare slugs and square-bracket
+ * context suffixes like `opus[1m]`), and `<`/`>` are shell metacharacters that
+ * would never appear in a value destined for `--model`.
+ *
+ * So the guard rejects the *shape* rather than the one literal we have seen.
+ * `<synthetic>` is simply the placeholder Claude ships today; `<none>` or
+ * `<unknown>` tomorrow would be the same bug, and a shape check absorbs it. The
+ * inverse risk — swallowing a legitimate angle-bracketed model id — is not a
+ * real one, because no such id exists or can exist for a CLI flag.
+ *
+ * A leading `<` plus any later `>` is enough: requiring the value to *end* in
+ * `>` would let a garbled placeholder that picked up trailing text through as a
+ * real model, which is the very failure this guard exists to stop. Values that
+ * merely contain angle brackets (`a<b>`) or never close them (`<opus`) are left
+ * alone, so the check only fires on something leading with a bracketed token.
+ */
+export const isPlaceholderModelValue = (value: string): boolean => {
+  const trimmed = value.trim();
+  return trimmed.startsWith('<') && trimmed.includes('>');
+};
+
+/** Returns the value only when it is a usable model id, else null. */
+const acceptModelValue = (value: string | null | undefined): string | null => {
+  const trimmed = value?.trim();
+  if (!trimmed || isPlaceholderModelValue(trimmed)) {
+    return null;
+  }
+
+  return trimmed;
+};
+
 const extractClaudeEventModel = (event: ClaudeInitEvent, sessionId: string): string | null => {
   const eventSessionId = event.sessionId ?? event.session_id;
   if (eventSessionId && eventSessionId !== sessionId) {
@@ -159,13 +194,7 @@ const extractClaudeEventModel = (event: ClaudeInitEvent, sessionId: string): str
     return contentModel;
   }
 
-  const directModel = event.model?.trim();
-  if (directModel) {
-    return directModel;
-  }
-
-  const messageModel = event.message?.model?.trim();
-  return messageModel || null;
+  return acceptModelValue(event.model) ?? acceptModelValue(event.message?.model);
 };
 
 const stripAnsi = (value: string): string => value.replace(ANSI_PATTERN, '');
@@ -181,13 +210,14 @@ const extractClaudeModelFromTextContent = (content: string): string | null => {
   if (localCommandStdout !== null) {
     const cleanedStdout = stripAnsi(localCommandStdout).replace(/\s+/g, ' ').trim();
     const changedModel = /(?:set|changed|switched)\s+model\s+to\s+(.+?)\.?$/i.exec(cleanedStdout);
-    if (changedModel?.[1]?.trim()) {
-      return changedModel[1].trim();
+    // A placeholder capture must not shadow a real <model> tag further down.
+    const stdoutModel = acceptModelValue(changedModel?.[1]);
+    if (stdoutModel) {
+      return stdoutModel;
     }
   }
 
-  const modelTag = extractTaggedContent(content, 'model')?.trim();
-  return modelTag || null;
+  return acceptModelValue(extractTaggedContent(content, 'model'));
 };
 
 const extractClaudeModelFromMessageContent = (content: unknown): string | null => {
@@ -213,12 +243,22 @@ const extractClaudeModelFromMessageContent = (content: unknown): string | null =
   return null;
 };
 
-const readClaudeSessionModelFromJsonl = async (
+/**
+ * Resolves the model a Claude session is running on from its raw JSONL
+ * transcript. Scans newest-first, so the answer is the most recent turn that
+ * names a usable model — placeholder-stamped turns (see isPlaceholderModelValue)
+ * are skipped and the scan keeps walking back to the last real one. Returns null
+ * when the transcript names no usable model at all, which the caller turns into
+ * the provider default.
+ *
+ * Exported for tests: this is the whole of the resolution logic, with no fs or
+ * database in the way.
+ */
+export const resolveClaudeSessionModelFromTranscript = (
   sessionId: string,
-  jsonlPath: string,
-): Promise<ProviderCurrentActiveModel | null> => {
-  const content = await readFile(jsonlPath, 'utf8');
-  const lines = content
+  transcript: string,
+): string | null => {
+  const lines = transcript
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
@@ -228,7 +268,7 @@ const readClaudeSessionModelFromJsonl = async (
       const event = JSON.parse(lines[index]) as ClaudeInitEvent;
       const model = extractClaudeEventModel(event, sessionId);
       if (model) {
-        return { model };
+        return model;
       }
     } catch {
       // Skip malformed JSONL lines that can happen during concurrent writes.
@@ -236,6 +276,15 @@ const readClaudeSessionModelFromJsonl = async (
   }
 
   return null;
+};
+
+const readClaudeSessionModelFromJsonl = async (
+  sessionId: string,
+  jsonlPath: string,
+): Promise<ProviderCurrentActiveModel | null> => {
+  const content = await readFile(jsonlPath, 'utf8');
+  const model = resolveClaudeSessionModelFromTranscript(sessionId, content);
+  return model ? { model } : null;
 };
 
 export class ClaudeProviderModels implements IProviderModels {
