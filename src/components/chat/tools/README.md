@@ -16,8 +16,8 @@ tools/
 │   ├── OneLineDisplay.tsx          # Compact one-line tool display
 │   ├── CollapsibleDisplay.tsx      # Expandable tool display (uses children pattern)
 │   ├── CollapsibleSection.tsx      # <details>/<summary> wrapper
+│   ├── ToolDiffViewer.tsx          # File diff viewer (memoized)
 │   ├── ContentRenderers/
-│   │   ├── ToolDiffViewer.tsx          # File diff viewer (memoized)
 │   │   ├── MarkdownContent.tsx     # Markdown renderer
 │   │   ├── FileListContent.tsx     # Comma-separated clickable file list
 │   │   ├── TodoListContent.tsx     # Todo items with status badges
@@ -105,13 +105,65 @@ Specialized components for different content types, rendered as children of `Col
 
 | contentType | Component | Used by |
 |---|---|---|
-| `diff` | `DiffViewer` | Edit, Write, ApplyPatch |
+| `diff` | `ToolDiffViewer` | Edit, Write, ApplyPatch |
 | `markdown` | `MarkdownContent` | ExitPlanMode |
 | `file-list` | `FileListContent` | Grep/Glob results |
 | `todo-list` | `TodoListContent` | TodoWrite, TodoRead |
 | `task` | `TaskListContent` | TaskList, TaskGet results |
 | `text` | `TextContent` | Default fallback |
 | `success-message` | inline SVG | TodoWrite result |
+
+---
+
+## Wide content: scroll, don't wrap
+
+Code surfaces here keep their line structure and scroll sideways. Tool output is
+code, not prose — wrapping a Bash line, a stack trace or a diff row destroys the
+column alignment that makes it readable, and `word-break: break-all` chops paths
+and identifiers mid-token.
+
+So a block-level surface uses `whitespace-pre` plus its own `overflow-x-auto`
+(or `overflow-auto` when it also caps height with `max-h-*`). Only **inline** code
+inside prose wraps — `src/index.css` scopes that to
+`.chat-message :where(:not(pre) > code)`.
+
+**Trap 1 — the max-width clamp.** `src/index.css` also clamps
+`.chat-message * { max-width: 100% }` so a message can never widen the chat
+column. That clamp will pin the contents of your scroller to the visible width,
+leaving it nothing to scroll. Two exemptions exist:
+
+```css
+.chat-message pre *,
+.chat-message [data-scrolls-x] * { max-width: none; }
+```
+
+A `<pre>` is covered automatically. **Anything else that scrolls horizontally must
+mark its scroll container with `data-scrolls-x`** — `ToolDiffViewer` does, because
+it builds its rows out of `div`s rather than a `<pre>`:
+
+```tsx
+<div data-scrolls-x className="overflow-x-auto ...">
+  {rows.map(...)}  {/* each row: `flex w-max min-w-full` */}
+</div>
+```
+
+Nothing fails locally if you forget it — the surface just quietly starts wrapping
+again. `ToolDiffViewer.test.tsx` pins both ends of that contract, and
+`e2e/code-block-scroll.spec.ts` measures the real thing in a browser
+(`scrollWidth > clientWidth`), which jsdom cannot do because it has no layout.
+
+**Trap 2 — specificity.** The inline-code rule is wrapped in `:where()` so it
+scores (0,1,0) and *loses* to your Tailwind classes. Keep it that way. Written
+bare it scores (0,1,2) and silently overrides any `truncate` / `whitespace-*` you
+put on a `<code>`, which is how the old `!important` version broke the collapsed
+Bash row.
+
+Two more footnotes:
+
+- `overflow-x` has no effect on an **inline** box. A `<code>`/`<span>` scroller
+  needs `block` too, or it silently won't scroll (see `OneLineDisplay`).
+- Keep a one-line header row (`truncate`) as a summary rather than a scroller — a
+  ~16px-tall drag target is unusable. Put the full text in the expanded body.
 
 ---
 

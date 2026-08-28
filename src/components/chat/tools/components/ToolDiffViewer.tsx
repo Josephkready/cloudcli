@@ -63,10 +63,13 @@ export const ToolDiffViewer: React.FC<ToolDiffViewerProps> = ({
         </span>
       </div>
 
-      {/* Diff lines */}
-      <div className="font-mono text-[11px] leading-[18px]">
+      {/* Diff lines. The block scrolls as one surface so the +/- gutter and the
+          code stay on the same line while reading a wide diff; `w-max min-w-full`
+          lets a row grow past the viewport (so there is something to scroll)
+          while still painting its background the full width of a short one. */}
+      <div data-scrolls-x className="overflow-x-auto font-mono text-[11px] leading-[18px]">
         {diffLines.map((diffLine, i) => (
-          <div key={i} className="flex">
+          <div key={i} className="flex w-max min-w-full">
             <span
               className={`w-6 flex-shrink-0 select-none text-center ${
                 diffLine.type === 'removed'
@@ -77,7 +80,7 @@ export const ToolDiffViewer: React.FC<ToolDiffViewerProps> = ({
               {diffLine.type === 'removed' ? '-' : '+'}
             </span>
             <span
-              className={`flex-1 whitespace-pre-wrap px-2 ${
+              className={`flex-1 whitespace-pre px-2 ${
                 diffLine.type === 'removed'
                   ? 'bg-red-50/50 text-red-800 dark:bg-red-950/20 dark:text-red-200'
                   : 'bg-green-50/50 text-green-800 dark:bg-green-950/20 dark:text-green-200'

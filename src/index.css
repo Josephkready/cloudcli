@@ -869,18 +869,46 @@
     hyphens: auto;
   }
 
-  /* Force wrap long URLs and code */
-  .chat-message pre,
-  .chat-message code {
-    white-space: pre-wrap !important;
-    word-break: break-all;
+  /* Only code sitting inside prose wraps, so a long URL or path in a sentence
+     still folds into the column. A fenced block is not prose: it keeps its line
+     structure and scrolls sideways, as every code surface here does.
+     `word-break: break-all` is gone with the `pre` half of the old selector —
+     it chopped identifiers at an arbitrary character rather than at a word
+     boundary, which `overflow-wrap` already handles.
+
+     `:where()` is load-bearing, not decoration. It contributes no specificity,
+     so this selector scores (0,1,0) — a tie with any Tailwind utility, which
+     `@tailwind utilities` then wins by being emitted after `@layer components`.
+     Written bare, `.chat-message :not(pre) > code` scores (0,1,2) and silently
+     beats a component's own class: the collapsed Bash command row asks to
+     `truncate` to one line and would wrap instead, which is exactly what the
+     old `!important` rule did to it. This is a DEFAULT for otherwise-unstyled
+     inline code, so it has to lose to an explicit intent, not override it. */
+  .chat-message :where(:not(pre) > code) {
+    white-space: pre-wrap;
     overflow-wrap: break-word;
   }
 
-  /* Prevent horizontal scroll in chat area */
+  /* Keep chat content inside the column so the pane itself never scrolls
+     sideways... */
   .chat-message * {
     max-width: 100%;
     box-sizing: border-box;
+  }
+
+  /* ...but never clamp what lives INSIDE a horizontal scroll container:
+     overflowing its box is precisely what gives it something to scroll.
+
+     This bites on BLOCK-level scroller contents. The diff viewer's rows are
+     divs, and clamping one to 100% of the scroller pins it to the visible
+     width, so its `w-max` is ignored and the +/- row background stops at the
+     fold instead of painting the full scrolled width. (A highlighted block's
+     inner <code> is an inline box, which `max-width` does not apply to, so a
+     <pre> survives the clamp on its own — `pre *` is belt-and-braces for any
+     block content a highlighter theme puts in there.) */
+  .chat-message pre *,
+  .chat-message [data-scrolls-x] * {
+    max-width: none;
   }
 
   /* Hide scrollbar utility for horizontal scroll */
