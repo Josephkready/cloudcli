@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import express from 'express';
@@ -11,7 +14,8 @@ async function loadRouter(env) {
   const saved = {};
   const keys = [
     'VOICE_API_BASE_URL', 'VOICE_API_KEY', 'VOICE_STT_BASE_URL',
-    'VOICE_STT_API_KEY', 'VOICE_STT_MODEL', 'VOICE_TTS_MODEL', 'VOICE_TTS_VOICE',
+    'VOICE_STT_API_KEY', 'VOICE_STT_API_KEY_FILE', 'VOICE_STT_MODEL',
+    'VOICE_TTS_MODEL', 'VOICE_TTS_VOICE',
   ];
   for (const k of keys) {
     saved[k] = process.env[k];
@@ -141,6 +145,69 @@ test('a client-supplied key still applies when STT is not split out', async () =
     assert.equal(calls[0].auth, 'Bearer from-client');
   } finally {
     restore(); await close();
+  }
+});
+
+test('the STT key can come from a file, so it never enters the environment', async () => {
+  // dante-config forbids EnvironmentFile= on cloudcli.service: cloudcli hands its
+  // environment to every agent it spawns, so the secret must stay on disk and be
+  // read by the app. This is the path that makes that possible.
+  const dir = mkdtempSync(join(tmpdir(), 'voice-key-'));
+  const file = join(dir, '.env');
+  writeFileSync(file, 'UNRELATED=leak-me-not\nVOICE_STT_API_KEY=gsk_from_file\n');
+
+  const router = await loadRouter({
+    VOICE_STT_BASE_URL: 'https://hosted.example/v1',
+    VOICE_STT_API_KEY_FILE: file,
+  });
+  const { url, close } = await serve(router);
+  const calls = [];
+  const restore = stubFetch(calls, url);
+  try {
+    await fetch(`${url}/transcribe`, { method: 'POST', body: audioForm() });
+    assert.equal(calls[0].auth, 'Bearer gsk_from_file');
+  } finally {
+    restore(); await close();
+  }
+});
+
+test('an inline STT key still wins over the file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'voice-key-'));
+  const file = join(dir, '.env');
+  writeFileSync(file, 'VOICE_STT_API_KEY=from-file\n');
+
+  const router = await loadRouter({
+    VOICE_STT_BASE_URL: 'https://hosted.example/v1',
+    VOICE_STT_API_KEY: 'inline-wins',
+    VOICE_STT_API_KEY_FILE: file,
+  });
+  const { url, close } = await serve(router);
+  const calls = [];
+  const restore = stubFetch(calls, url);
+  try {
+    await fetch(`${url}/transcribe`, { method: 'POST', body: audioForm() });
+    assert.equal(calls[0].auth, 'Bearer inline-wins');
+  } finally {
+    restore(); await close();
+  }
+});
+
+test('a missing key file leaves the request unauthenticated rather than failing', async () => {
+  const router = await loadRouter({
+    VOICE_STT_BASE_URL: 'https://hosted.example/v1',
+    VOICE_STT_API_KEY_FILE: join(tmpdir(), 'no-such-dir-4a91', '.env'),
+  });
+  const { url, close } = await serve(router);
+  const calls = [];
+  const restore = stubFetch(calls, url);
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const res = await fetch(`${url}/transcribe`, { method: 'POST', body: audioForm() });
+    assert.equal(res.status, 200);
+    assert.equal(calls[0].auth, null);
+  } finally {
+    console.warn = warn; restore(); await close();
   }
 });
 
