@@ -242,14 +242,61 @@
     overflow: hidden;
   }
 
-  /* Adjust fixed inset positioning in PWA mode */
+  /*
+   * Adjust fixed inset positioning in PWA mode.
+   *
+   * Read this before adding a full-screen overlay — it is a trap, and it is
+   * armed in exactly one place. The selector matches *any* element carrying both
+   * `fixed` and `inset-0`, and `Sidebar.tsx` only adds `pwa-mode` in standalone
+   * display mode, so the origin shift below exists in the installed home-screen
+   * PWA and in no browser, emulator or automated test. Playwright cannot emulate
+   * standalone mode, so nothing in the e2e suite can even reach the state this
+   * rule creates.
+   *
+   * The consequence is that anything measured against the viewport —
+   * `getBoundingClientRect`, `clientY`, or `--keyboard-height`, which is derived
+   * from `window.innerHeight` and so counts from y=0 — is off by the header safe
+   * area for an element positioned by this rule. MetalZealot/CLIde hit it as a
+   * context menu that mispositioned only from the home-screen icon (their ADR
+   * 0010) and reached the same conclusion recorded here.
+   *
+   * A surface that must span the layout viewport therefore does not take
+   * `inset-0` at all: it states its inset inline via `viewportShellStyle`, which
+   * wins against this rule and leaves nothing to remember. The rule stays for the
+   * centred modals it was written for, whose top offset can only be judged by
+   * hand on a phone — narrowing it blind is the change with the unknown blast
+   * radius, not keeping it.
+   *
+   * `bottom` is deliberately absent. `.inset-0` already declares `bottom: 0`, so
+   * repeating it here never changed a pixel — its only effect was to outrank a
+   * `bottom-*` utility from a higher-specificity selector, which would silently
+   * flatten an overlay's keyboard avoidance in the one place it matters. No
+   * element in the tree pairs `inset-0` with a `bottom-*` utility today, so
+   * dropping it is a no-op now and disarms that half for good.
+   */
   body.pwa-mode .fixed.inset-0 {
     top: var(--header-total-padding);
     left: var(--safe-area-inset-left);
     right: var(--safe-area-inset-right);
-    bottom: 0;
   }
-  
+
+  /*
+   * The safe-area treatment the rule above hands an overlay, for a surface that
+   * has opted out of it.
+   *
+   * Padding, not offsets: it insets the *content* by the same amount while the
+   * box still starts at the viewport origin, so the shell keeps the coordinate
+   * space `--keyboard-height` is computed in. `MainContentHeader`'s
+   * `.pwa-header-safe` zeroes its own top padding in PWA mode on the assumption
+   * that something above it has already cleared the status bar; this is that
+   * something.
+   */
+  body.pwa-mode .pwa-shell-safe {
+    padding-top: var(--header-total-padding);
+    padding-left: var(--safe-area-inset-left);
+    padding-right: var(--safe-area-inset-right);
+  }
+
   /*
    * Global transition defaults.
    *
