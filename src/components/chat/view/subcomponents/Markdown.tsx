@@ -1,11 +1,13 @@
-import React, { Suspense, lazy, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useContext, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 
+import MermaidDiagram from '../../../../shared/markdown/MermaidDiagram';
 import PlainCodeBlock from '../../../../shared/markdown/PlainCodeBlock';
 // Demand-loaded: this is the only edge that kept Prism in the entry chunk.
 const PrismCodeBlock = lazy(() => import('../../../../shared/markdown/PrismCodeBlock'));
+import { ALWAYS_COMPLETE, createMermaidFenceGate, isMermaidClassName } from '../../../../shared/markdown/mermaidFences';
 import { useMathPlugins } from '../../../../shared/markdown/useMathPlugins';
 import { normalizeInlineCodeFences } from '../../utils/chatFormatting';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
@@ -16,6 +18,21 @@ type MarkdownProps = {
   children: React.ReactNode;
   className?: string;
 };
+
+/**
+ * Answers "has this fence finished streaming?" for the message being rendered.
+ *
+ * A context rather than a prop because `components.code` has to keep a stable
+ * identity: react-markdown treats the components map as a set of component
+ * types, so rebuilding the `code` entry whenever the message text changes — i.e.
+ * on every streamed token — would unmount and remount every code block in the
+ * message, resetting the copy button and re-suspending the highlighter. Reading
+ * the gate from context re-renders the consumer instead of replacing it.
+ *
+ * The default renders everything, so any other consumer of `CodeBlock` behaves
+ * exactly as it did before mermaid existed.
+ */
+const MermaidFenceGateContext = React.createContext<(code: string) => boolean>(ALWAYS_COMPLETE);
 
 // Links to the wider web (or in-page anchors) keep normal browser navigation;
 // everything else is treated as a workspace file reference.
@@ -62,11 +79,15 @@ type CodeBlockProps = {
 const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockProps) => {
   const { t } = useTranslation('chat');
   const { isDarkMode } = useTheme();
+  const isFenceComplete = useContext(MermaidFenceGateContext);
   const [copied, setCopied] = useState(false);
   const raw = Array.isArray(children) ? children.join('') : String(children ?? '');
   const looksMultiline = /[\r\n]/.test(raw);
   const inlineDetected = inline || (node && node.type === 'inlineCode');
-  const shouldInline = inlineDetected || !looksMultiline;
+  // Read the class list rather than the `language` parsed below: that regex is
+  // `\w`-only, so it reports `mermaid` for a ```mermaid-something fence too.
+  const isMermaid = !inlineDetected && isMermaidClassName(className);
+  const shouldInline = inlineDetected || (!looksMultiline && !isMermaid);
 
   if (shouldInline) {
     return (
@@ -83,7 +104,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
   const match = /language-(\w+)/.exec(className || '');
   const language = match ? match[1] : 'text';
 
-  return (
+  const codeBlock = (
     <div className="group relative my-2">
       {language && language !== 'text' && (
         <div className="absolute left-3 top-2 z-10 text-xs font-medium uppercase text-gray-400">{language}</div>
@@ -143,6 +164,16 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
       </Suspense>
     </div>
   );
+
+  // A half-streamed fence is a prefix of a diagram, not a broken one: some
+  // prefixes fail to parse and some parse into a different diagram entirely, so
+  // rendering before the closing fence arrives means the picture rearranges on
+  // every token. Wait, and show the source in the meantime.
+  if (isMermaid && isFenceComplete(raw)) {
+    return <MermaidDiagram code={raw} fallback={codeBlock} />;
+  }
+
+  return codeBlock;
 };
 
 const markdownComponents = {
@@ -187,6 +218,10 @@ export function Markdown({ children, className }: MarkdownProps) {
   const { remarkMathPlugins, rehypeMathPlugins } = useMathPlugins(content);
   const remarkPlugins = useMemo(() => [remarkGfm, ...remarkMathPlugins], [remarkMathPlugins]);
   const { openFileInEditor } = usePaletteOps();
+  // Scanned from the source, because the parsed `code` node cannot tell a closed
+  // fence from one still arriving — CommonMark closes an unterminated fence at
+  // end of document, so both look identical by the time react-markdown sees them.
+  const isMermaidFenceComplete = useMemo(() => createMermaidFenceGate(content), [content]);
 
   const components = useMemo(
     () => ({
@@ -229,9 +264,11 @@ export function Markdown({ children, className }: MarkdownProps) {
 
   return (
     <div className={className}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypeMathPlugins} components={components as any}>
-        {content}
-      </ReactMarkdown>
+      <MermaidFenceGateContext.Provider value={isMermaidFenceComplete}>
+        <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypeMathPlugins} components={components as any}>
+          {content}
+        </ReactMarkdown>
+      </MermaidFenceGateContext.Provider>
     </div>
   );
 }
