@@ -4,6 +4,9 @@
     "copied": "Copied",
     "copyCode": "Copy code"
   },
+  "mermaid": {
+    "diagramLabel": "Mermaid diagram"
+  },
   "copyMessage": {
     "copy": "Copy message",
     "copied": "Message copied",
