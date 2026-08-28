@@ -166,6 +166,7 @@ export default tseslint.config(
             "server/shared/file-tree-excludes.ts",
             "server/shared/image-attachments.ts",
             "server/shared/session-id-guards.ts",
+            "server/shared/api-key-file.ts",
           ], // classify shared utility files so modules can depend on them explicitly
           mode: "file",
         },

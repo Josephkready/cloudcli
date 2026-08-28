@@ -15,6 +15,7 @@ import type { LLMProvider } from '../types/app';
 import {
   createEmptySlot,
   findRefreshTailJoin,
+  hasUsableMessageId,
   isSameServerTranscript,
   mergeRefreshedTail,
   pruneRealtimeSupersededByServer,
@@ -193,6 +194,22 @@ export function useSessionStore() {
    * This works regardless of which session is actively viewed.
    */
   const appendRealtime = useCallback((sessionId: string, msg: NormalizedMessage) => {
+    // Reject malformed rows at the door rather than deep inside the merge.
+    //
+    // `slot.realtimeMessages` is assigned before `recomputeMergedIfNeeded`
+    // runs, so a row that makes the merge throw is already in the slot when it
+    // does — and it stays there. `slot.merged` then freezes, `notify` never
+    // fires, and every subsequent append or refresh for that session throws on
+    // the same row (`refreshFromServer` swallows it), leaving the chat dead
+    // until the app is reopened. One `chat_resumed` frame, which carries no
+    // `id`, was enough to do that (#450/#389).
+    if (!hasUsableMessageId(msg)) {
+      console.warn(
+        '[SessionStore] dropped a realtime row with no id',
+        { sessionId, kind: (msg as { kind?: unknown } | null | undefined)?.kind },
+      );
+      return;
+    }
     const slot = getSlot(sessionId);
     const normalizedMessage =
       msg.sessionId === sessionId
@@ -212,8 +229,19 @@ export function useSessionStore() {
    */
   const appendRealtimeBatch = useCallback((sessionId: string, msgs: NormalizedMessage[]) => {
     if (msgs.length === 0) return;
+    // Same door, same rule as `appendRealtime`: one id-less row anywhere in the
+    // batch would poison the slot for every message after it (#450).
+    const usableMessages = msgs.filter((msg) => {
+      if (hasUsableMessageId(msg)) return true;
+      console.warn(
+        '[SessionStore] dropped a realtime row with no id',
+        { sessionId, kind: (msg as { kind?: unknown } | null | undefined)?.kind },
+      );
+      return false;
+    });
+    if (usableMessages.length === 0) return;
     const slot = getSlot(sessionId);
-    const normalizedMessages = msgs.map((msg) =>
+    const normalizedMessages = usableMessages.map((msg) =>
       msg.sessionId === sessionId
         ? msg
         : { ...msg, sessionId },

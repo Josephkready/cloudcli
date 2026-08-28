@@ -12,9 +12,26 @@ import { Readable } from 'node:stream';
 
 import express from 'express';
 
+import { readKeyFromFile } from './shared/api-key-file.js';
+
 const ENV = {
   baseUrl: (process.env.VOICE_API_BASE_URL || '').replace(/\/$/, ''),
   apiKey: process.env.VOICE_API_KEY || '',
+  // STT may live on a different backend than TTS. One base URL cannot serve
+  // both when the fast transcription model is hosted and the voice you want to
+  // hear is a local one: pointing VOICE_API_BASE_URL at a hosted STT provider
+  // silently breaks TTS, because the same base is where /audio/speech is sought
+  // and that provider does not serve the local TTS model. These two optional
+  // overrides let the mic and the speaker resolve independently; unset, they
+  // fall back to VOICE_API_BASE_URL / VOICE_API_KEY and nothing changes.
+  sttBaseUrl: (process.env.VOICE_STT_BASE_URL || '').replace(/\/$/, ''),
+  // The PATH is frozen at import like every other setting here; only the file
+  // READ is deferred (see readVoiceKeyFile).
+  sttApiKeyDirect: process.env.VOICE_STT_API_KEY || '',
+  sttApiKeyFile: (process.env.VOICE_STT_API_KEY_FILE || '').trim(),
+  get sttApiKey() {
+    return this.sttApiKeyDirect || readVoiceKeyFile(this.sttApiKeyFile);
+  },
   sttModel: process.env.VOICE_STT_MODEL || 'whisper-1',
   ttsModel: process.env.VOICE_TTS_MODEL || 'tts-1',
   ttsVoice: process.env.VOICE_TTS_VOICE || 'alloy',
@@ -23,21 +40,53 @@ const ENV = {
 /**
  * Resolve the voice backend config for a request. Client headers (set from the
  * user's in-app voice settings) take precedence over the server env defaults.
+ *
+ * STT and TTS each resolve their own base URL and key so they can sit on
+ * different backends; both default to the shared VOICE_API_* pair.
  * @param {import('express').Request} req
- * @returns {{baseUrl: string, apiKey: string, sttModel: string, ttsModel: string, ttsVoice: string, ttsFormat: string}}
+ * @returns {{baseUrl: string, apiKey: string, sttBaseUrl: string, sttApiKey: string, sttModel: string, ttsModel: string, ttsVoice: string, ttsFormat: string}}
  */
 function resolveConfig(req) {
   const h = req.headers;
+  const apiKey = String(h['x-voice-api-key'] || '') || ENV.apiKey;
   return {
     // Security: do not allow clients to control the outbound backend host.
     // Always use the server-side configured base URL.
     baseUrl: ENV.baseUrl,
-    apiKey: String(h['x-voice-api-key'] || '') || ENV.apiKey,
+    apiKey,
+    sttBaseUrl: ENV.sttBaseUrl || ENV.baseUrl,
+    // A client-supplied key is for the backend the user configured in the app,
+    // which is the shared one; it must not be sent to a separately configured
+    // STT host. So the header only applies when STT is not split out.
+    sttApiKey: ENV.sttBaseUrl ? ENV.sttApiKey : (apiKey || ENV.sttApiKey),
     sttModel: String(h['x-voice-stt-model'] || '') || ENV.sttModel,
     ttsModel: String(h['x-voice-tts-model'] || '') || ENV.ttsModel,
     ttsVoice: String(h['x-voice-tts-voice'] || '') || ENV.ttsVoice,
     ttsFormat: String(h['x-voice-tts-format'] || '').trim(),
   };
+}
+
+// The STT key may be given as a path instead of a value, so the secret itself
+// never enters this process's environment — cloudcli hands its environment to
+// every agent it spawns, and dante-config tests cloudcli.service for exactly
+// this (no EnvironmentFile=, only *_API_KEY_FILE paths).
+//
+// Read lazily and cached: the file is read on the first dictation rather than at
+// import, so a deploy that never uses voice never touches it, and one sync read
+// is amortised over the process. A rotated key is picked up by the unit restart
+// that deploying a new key already performs.
+let _sttKeyFromFile = null;
+/**
+ * @param {string} file path from VOICE_STT_API_KEY_FILE ('' when unset)
+ * @returns {string} the key, or '' when unset or unreadable
+ */
+function readVoiceKeyFile(file) {
+  if (_sttKeyFromFile === null) {
+    _sttKeyFromFile = file
+      ? readKeyFromFile(file, ['VOICE_STT_API_KEY', 'GROQ_API_KEY'], 'voice')
+      : '';
+  }
+  return _sttKeyFromFile;
 }
 
 const router = express.Router();
@@ -145,10 +194,17 @@ function authHeader(apiKey) {
 }
 
 /**
- * GET /api/voice/health -> { configured } (true when a backend base URL is set).
+ * GET /api/voice/health -> { configured, stt, tts }.
+ *
+ * `configured` stays the single boolean the client gates the voice UI on, and
+ * is true when EITHER half has a backend — an STT-only deploy still wants the
+ * mic. `stt`/`tts` report the halves individually.
  */
 router.get('/health', (req, res) => {
-  res.json({ configured: Boolean(resolveConfig(req).baseUrl) });
+  const cfg = resolveConfig(req);
+  const stt = Boolean(cfg.sttBaseUrl);
+  const tts = Boolean(cfg.baseUrl);
+  res.json({ configured: stt || tts, stt, tts });
 });
 
 /**
@@ -157,8 +213,8 @@ router.get('/health', (req, res) => {
  */
 router.post('/transcribe', async (req, res) => {
   const cfg = resolveConfig(req);
-  if (!cfg.baseUrl) return res.status(503).json({ error: 'No voice backend configured' });
-  if (!isAllowedBackendUrl(cfg.baseUrl)) return res.status(400).json({ error: 'Invalid voice backend URL.' });
+  if (!cfg.sttBaseUrl) return res.status(503).json({ error: 'No voice backend configured' });
+  if (!isAllowedBackendUrl(cfg.sttBaseUrl)) return res.status(400).json({ error: 'Invalid voice backend URL.' });
   const upload = await getUpload();
   upload.single('audio')(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
@@ -171,9 +227,9 @@ router.post('/transcribe', async (req, res) => {
         req.file.originalname || 'recording.webm',
       );
       fd.append('model', cfg.sttModel);
-      const r = await fetchWithTimeout(`${cfg.baseUrl}/audio/transcriptions`, {
+      const r = await fetchWithTimeout(`${cfg.sttBaseUrl}/audio/transcriptions`, {
         method: 'POST',
-        headers: authHeader(cfg.apiKey),
+        headers: authHeader(cfg.sttApiKey),
         body: fd,
       });
       const text = await r.text();

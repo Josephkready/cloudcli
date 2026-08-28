@@ -15,6 +15,7 @@
 
 import { readFileSync } from 'node:fs';
 
+import { readKeyFromContents } from '@/shared/api-key-file.js';
 import { sessionsDb } from '@/modules/database/index.js';
 import { generateShortTitle } from '@/modules/providers/services/ai-title-generator.service.js';
 import { broadcastSessionUpserted } from '@/modules/providers/services/sessions-watcher.service.js';
@@ -91,24 +92,7 @@ function positiveIntFromEnv(value: string | undefined, fallback: number): number
  * other services without importing every unrelated secret in it.
  */
 export function parseApiKeyFile(contents: string): string {
-  for (const name of API_KEY_FILE_NAMES) {
-    for (const line of contents.split(/\r?\n/)) {
-      // Tolerate `export KEY=...`, which a file meant to be shell-sourced uses
-      // and a systemd EnvironmentFile does not. Silently finding no key because
-      // of that prefix would surface only as "no API key configured".
-      const trimmed = line.trim().replace(/^export\s+/, '');
-      if (!trimmed.startsWith(`${name}=`)) {
-        continue;
-      }
-      const value = trimmed.slice(name.length + 1).trim();
-      // Tolerate `KEY="value"` / `KEY='value'`, which shells and systemd both allow.
-      const unquoted = value.replace(/^(["'])(.*)\1$/, '$2').trim();
-      if (unquoted) {
-        return unquoted;
-      }
-    }
-  }
-  return '';
+  return readKeyFromContents(contents, API_KEY_FILE_NAMES);
 }
 
 function readApiKey(): string {

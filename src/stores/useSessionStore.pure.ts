@@ -155,6 +155,44 @@ export function readMessageTime(m: NormalizedMessage): number | null {
 }
 
 /**
+ * Does this row carry an id we can dedupe and render by?
+ *
+ * Every genuine transcript row is minted by `createNormalizedMessage` on the
+ * server or `chatMessageToNormalized` on the client, and both guarantee an id.
+ * Frames hand-rolled by the websocket gateway (`chat_resumed`,
+ * `projects_snapshot_stale`, …) do not, and one of those reaching the merge
+ * path threw on an unguarded `id.startsWith('local_')` — which froze the
+ * session's merged view for the rest of the app's life (#450/#389).
+ */
+export function hasUsableMessageId(m: NormalizedMessage | null | undefined): boolean {
+  return typeof m?.id === 'string' && m.id.length > 0;
+}
+
+/**
+ * Read an id defensively. Merge is a pure read over data that came off a
+ * socket: a single malformed row must degrade that row, never the transcript.
+ */
+function readMessageId(m: NormalizedMessage): string {
+  return typeof m?.id === 'string' ? m.id : '';
+}
+
+/**
+ * Ids present in `messages`, skipping rows that have none.
+ *
+ * Built with a skip rather than a raw `.map()` because `new Set([undefined])`
+ * makes `serverIds.has(undefined)` true, which would silently drop every
+ * id-less realtime row as "already on the server".
+ */
+function collectMessageIds(messages: NormalizedMessage[]): Set<string> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    const id = readMessageId(message);
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/**
  * Is this local user message already present in the server transcript?
  *
  * The accepted window runs from the message's *earliest* send attempt to
@@ -224,7 +262,7 @@ export function getUserTurnOrdinalBefore(
   realtimeMessages: NormalizedMessage[],
 ): number {
   const messageTime = readMessageTime(message);
-  const serverIds = new Set(serverMessages.map((serverMessage) => serverMessage.id));
+  const serverIds = collectMessageIds(serverMessages);
   // A realtime row the transcript already carries — same id, or an optimistic
   // `local_*` prompt whose text has since been persisted — is one turn seen
   // twice. Counting both copies pushed the ordinal past the end of the server
@@ -234,8 +272,9 @@ export function getUserTurnOrdinalBefore(
   // and `pruneRealtimeSupersededByServer`: only optimistic rows are collapsed
   // against their server echo, so a non-optimistic user row is never dropped.
   const alreadyOnServer = (realtimeMessage: NormalizedMessage): boolean =>
-    serverIds.has(realtimeMessage.id)
-    || (realtimeMessage.id.startsWith('local_') && hasServerEchoForLocalUser(realtimeMessage, serverMessages));
+    serverIds.has(readMessageId(realtimeMessage))
+    || (readMessageId(realtimeMessage).startsWith('local_')
+      && hasServerEchoForLocalUser(realtimeMessage, serverMessages));
   const candidates = [
     ...serverMessages,
     ...realtimeMessages.filter((realtimeMessage) => !alreadyOnServer(realtimeMessage)),
@@ -374,18 +413,19 @@ export function pruneRealtimeSupersededByServer(
     return realtimeMessages;
   }
 
-  const serverIds = new Set(serverMessages.map((message) => message.id));
+  const serverIds = collectMessageIds(serverMessages);
 
   return realtimeMessages.filter((message) => {
-    if (serverIds.has(message.id)) {
+    const messageId = readMessageId(message);
+    if (messageId && serverIds.has(messageId)) {
       return false;
     }
 
-    if (message.id.startsWith('local_') && hasServerEchoForLocalUser(message, serverMessages)) {
+    if (messageId.startsWith('local_') && hasServerEchoForLocalUser(message, serverMessages)) {
       return false;
     }
 
-    if (message.kind === 'stream_delta' || message.id === `__streaming_${message.sessionId}`) {
+    if (message.kind === 'stream_delta' || messageId === `__streaming_${message.sessionId}`) {
       if (isAssistantTextEchoedInSameTurnOnServer(message, serverMessages, realtimeMessages)) {
         return false;
       }
@@ -421,15 +461,16 @@ export function computeMerged(server: NormalizedMessage[], realtime: NormalizedM
     return dedupeAdjacentAssistantEchoes(realtime);
   }
 
-  const serverIds = new Set(server.map((message) => message.id));
+  const serverIds = collectMessageIds(server);
   const extra = realtime.filter((message) => {
-    if (serverIds.has(message.id)) {
+    const messageId = readMessageId(message);
+    if (messageId && serverIds.has(messageId)) {
       return false;
     }
     // Optimistic user rows use `local_*` ids; once the same text exists on the
     // server-backed copy from the same send window, drop the realtime echo to
     // avoid duplicate bubbles without hiding repeated prompts from history.
-    if (message.id.startsWith('local_')) {
+    if (messageId.startsWith('local_')) {
       if (hasServerEchoForLocalUser(message, server)) {
         return false;
       }
@@ -565,8 +606,15 @@ export function recomputeMergedIfNeeded(slot: SessionSlot): boolean {
   if (slot.serverMessages === slot._lastServerRef && slot.realtimeMessages === slot._lastRealtimeRef) {
     return false;
   }
-  slot._lastServerRef = slot.serverMessages;
-  slot._lastRealtimeRef = slot.realtimeMessages;
-  slot.merged = computeMerged(slot.serverMessages, slot.realtimeMessages);
+  const server = slot.serverMessages;
+  const realtime = slot.realtimeMessages;
+  slot.merged = computeMerged(server, realtime);
+  // Claim these inputs as merged only once the merge has actually succeeded.
+  // Assigning first meant a throw inside `computeMerged` left the refs asserting
+  // work that never happened: every later recompute short-circuited on the
+  // reference check and the slot served a frozen `merged` for the rest of the
+  // session, which is the "chat stuck until I reopen the app" half of #389.
+  slot._lastServerRef = server;
+  slot._lastRealtimeRef = realtime;
   return true;
 }

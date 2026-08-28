@@ -912,31 +912,62 @@ export function useChatComposerState({
 
       markPendingSendDispatched(targetSessionId, pendingSendId);
 
-      addMessage(userMessage);
-      // Mark this request as processing in the per-session activity map (the
-      // single source of truth the indicator derives from). The id is always
-      // concrete at this point — no pending placeholder exists anymore.
-      onSessionProcessing?.(targetSessionId, {
-        statusText: null,
-        canInterrupt: true,
-      });
+      // ── Post-dispatch bookkeeping: none of this is optional (#450) ────────
+      //
+      // The socket has accepted the frame, so the message is the server's now —
+      // running or queued, and the client cannot recall it. Anything skipped
+      // below therefore leaves the UI describing a send that did not happen.
+      //
+      // That is exactly what used to go wrong. `addMessage` routes through the
+      // session store, and a single malformed realtime row (an id-less
+      // `chat_resumed` frame) made it throw. `handleSubmit` is `async`, so the
+      // throw surfaced only as an unhandled rejection: no bubble, no spinner,
+      // and the user's text still sitting in the composer — while the run was
+      // already going on the server. The natural response is to press send
+      // again, and every press mints a fresh `clientMessageId`, which is the one
+      // key the server dedupes on, so each duplicate ran for real (#450/#448).
+      //
+      // Ordering note: the optimistic bubble stays ahead of the composer reset,
+      // so the happy path renders exactly as before and there is no window
+      // where the input is empty and no message has appeared. Unfailability
+      // comes from the `finally` instead of from reordering.
+      try {
+        // The activity indicator goes first: it is a plain flag with no store
+        // involvement, and it is the feedback that stops a second press even if
+        // the optimistic bubble below cannot be rendered.
+        onSessionProcessing?.(targetSessionId, {
+          statusText: null,
+          canInterrupt: true,
+        });
 
-      setIsUserScrolledUp(false);
-      setTimeout(() => scrollToBottom(), 100);
+        // The fallible step. Losing the optimistic bubble is cosmetic — the
+        // server echoes the message back — so it must not be able to take the
+        // composer reset down with it.
+        addMessage(userMessage);
 
-      setInput('');
-      inputValueRef.current = '';
-      resetCommandMenuState();
-      setAttachedImages([]);
-      setUploadingImages(new Map());
-      setImageErrors(new Map());
-      setIsTextareaExpanded(false);
+        setIsUserScrolledUp(false);
+        setTimeout(() => scrollToBottom(), 100);
+      } catch (error) {
+        console.error(
+          '[Chat] Post-send UI update failed; the message was still sent:',
+          { sessionId: targetSessionId, clientMessageId: pendingSendId },
+          error,
+        );
+      } finally {
+        setInput('');
+        inputValueRef.current = '';
+        resetCommandMenuState();
+        setAttachedImages([]);
+        setUploadingImages(new Map());
+        setImageErrors(new Map());
+        setIsTextareaExpanded(false);
 
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+
+        safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
       }
-
-      safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
       // A chat.send was dispatched: a run has started.
       return true;
       } finally {

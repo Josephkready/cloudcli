@@ -98,7 +98,9 @@ export const OneLineDisplay: React.FC<OneLineDisplayProps> = ({
           </div>
           <div className="flex min-w-0 flex-1 items-start gap-2">
             <div className="min-w-0 flex-1 rounded bg-gray-900 px-2.5 py-1 dark:bg-black">
-              <code className={`font-mono text-xs text-green-400 ${wrapText ? 'whitespace-pre-wrap break-all' : 'block truncate'}`}>
+              {/* `block` is load-bearing: `overflow-x` has no effect on an
+                  inline box, so a bare <code> would silently not scroll. */}
+              <code className={`block font-mono text-xs text-green-400 ${wrapText ? 'overflow-x-auto whitespace-pre' : 'truncate'}`}>
                 <span className="select-none text-green-600 dark:text-green-500">$ </span>{value}
               </code>
             </div>
@@ -177,7 +179,7 @@ export const OneLineDisplay: React.FC<OneLineDisplayProps> = ({
       {(icon || label || toolName) && (
         <span className="text-[10px] text-muted-foreground/40">/</span>
       )}
-      <span className={`font-mono text-xs ${wrapText ? 'whitespace-pre-wrap break-all' : 'truncate'} min-w-0 flex-1 ${colorScheme.primary}`}>
+      <span className={`font-mono text-xs ${wrapText ? 'block overflow-x-auto whitespace-pre' : 'truncate'} min-w-0 flex-1 ${colorScheme.primary}`}>
         {value}
       </span>
       {secondary && (
