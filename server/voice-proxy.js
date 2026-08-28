@@ -12,6 +12,8 @@ import { Readable } from 'node:stream';
 
 import express from 'express';
 
+import { readKeyFromFile } from './shared/api-key-file.js';
+
 const ENV = {
   baseUrl: (process.env.VOICE_API_BASE_URL || '').replace(/\/$/, ''),
   apiKey: process.env.VOICE_API_KEY || '',
@@ -23,7 +25,13 @@ const ENV = {
   // overrides let the mic and the speaker resolve independently; unset, they
   // fall back to VOICE_API_BASE_URL / VOICE_API_KEY and nothing changes.
   sttBaseUrl: (process.env.VOICE_STT_BASE_URL || '').replace(/\/$/, ''),
-  sttApiKey: process.env.VOICE_STT_API_KEY || '',
+  // The PATH is frozen at import like every other setting here; only the file
+  // READ is deferred (see readVoiceKeyFile).
+  sttApiKeyDirect: process.env.VOICE_STT_API_KEY || '',
+  sttApiKeyFile: (process.env.VOICE_STT_API_KEY_FILE || '').trim(),
+  get sttApiKey() {
+    return this.sttApiKeyDirect || readVoiceKeyFile(this.sttApiKeyFile);
+  },
   sttModel: process.env.VOICE_STT_MODEL || 'whisper-1',
   ttsModel: process.env.VOICE_TTS_MODEL || 'tts-1',
   ttsVoice: process.env.VOICE_TTS_VOICE || 'alloy',
@@ -56,6 +64,29 @@ function resolveConfig(req) {
     ttsVoice: String(h['x-voice-tts-voice'] || '') || ENV.ttsVoice,
     ttsFormat: String(h['x-voice-tts-format'] || '').trim(),
   };
+}
+
+// The STT key may be given as a path instead of a value, so the secret itself
+// never enters this process's environment — cloudcli hands its environment to
+// every agent it spawns, and dante-config tests cloudcli.service for exactly
+// this (no EnvironmentFile=, only *_API_KEY_FILE paths).
+//
+// Read lazily and cached: the file is read on the first dictation rather than at
+// import, so a deploy that never uses voice never touches it, and one sync read
+// is amortised over the process. A rotated key is picked up by the unit restart
+// that deploying a new key already performs.
+let _sttKeyFromFile = null;
+/**
+ * @param {string} file path from VOICE_STT_API_KEY_FILE ('' when unset)
+ * @returns {string} the key, or '' when unset or unreadable
+ */
+function readVoiceKeyFile(file) {
+  if (_sttKeyFromFile === null) {
+    _sttKeyFromFile = file
+      ? readKeyFromFile(file, ['VOICE_STT_API_KEY', 'GROQ_API_KEY'], 'voice')
+      : '';
+  }
+  return _sttKeyFromFile;
 }
 
 const router = express.Router();
