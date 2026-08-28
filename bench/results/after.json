@@ -1,0 +1,1231 @@
+{
+  "startedAt": "2026-08-28T04:45:08.361Z",
+  "label": "after-r2",
+  "commit": "eaa5e446",
+  "environment": {
+    "node": "v22.23.2",
+    "platform": "linux 7.0.0-28-generic",
+    "cpus": 16,
+    "browser": "chromium 131.0.6778.33",
+    "loadAverage": {
+      "atStart": 5.06,
+      "atEnd": 5.64
+    }
+  },
+  "fixture": {
+    "home": "/var/tmp/cloudcli-bench-1W1xqh",
+    "seed": 20260815,
+    "profile": "standard",
+    "projects": [
+      {
+        "name": "bench-primary",
+        "path": "/var/tmp/cloudcli-bench-1W1xqh/bench-primary",
+        "isGitRepo": true,
+        "sessions": [
+          {
+            "id": "f0a2104f-ecd7-40cb-82c7-87c3d98d60e4",
+            "title": "Threshold migration index sidebar (900 turns)",
+            "rows": 2511,
+            "bytes": 1583346
+          },
+          {
+            "id": "5a07617c-127e-496d-8bdc-d410fe4a3b9f",
+            "title": "Index boundary budget handler (300 turns)",
+            "rows": 851,
+            "bytes": 539423
+          },
+          {
+            "id": "7bf8d193-80cc-4032-b7b0-3622003b4a8d",
+            "title": "Sidebar migration threshold commit (31 turns)",
+            "rows": 85,
+            "bytes": 51254
+          },
+          {
+            "id": "c6a7fe0e-e0ab-44d4-a7bf-1132aae8b6c7",
+            "title": "Budget reducer cache composer (28 turns)",
+            "rows": 83,
+            "bytes": 50274
+          },
+          {
+            "id": "7ac8d2c5-af75-4532-bbd5-b046e16fbd68",
+            "title": "Schema fixture sidebar payload (27 turns)",
+            "rows": 81,
+            "bytes": 48122
+          },
+          {
+            "id": "c401ef27-d89e-4dd5-94e1-e730e6a0223b",
+            "title": "Selector index composer fixture (26 turns)",
+            "rows": 77,
+            "bytes": 47599
+          },
+          {
+            "id": "00e9b6db-4960-4969-bfe7-e3b21b8eed1d",
+            "title": "Listener payload query listener (31 turns)",
+            "rows": 85,
+            "bytes": 51466
+          },
+          {
+            "id": "03a6f243-678a-4906-8b87-ee542698cceb",
+            "title": "Listener stream fixture reducer (29 turns)",
+            "rows": 91,
+            "bytes": 57592
+          },
+          {
+            "id": "3378e7e2-5f60-44c6-9da8-a7442fe198ff",
+            "title": "Transcript composer composer commit (25 turns)",
+            "rows": 69,
+            "bytes": 41987
+          },
+          {
+            "id": "a555032a-98a3-480e-bd58-da654cbcf997",
+            "title": "Budget query worker sidebar (24 turns)",
+            "rows": 63,
+            "bytes": 38428
+          },
+          {
+            "id": "b457f1e0-c3fc-49cb-9fc4-70f3ae96fb48",
+            "title": "Threshold selector fixture query (28 turns)",
+            "rows": 81,
+            "bytes": 49288
+          },
+          {
+            "id": "e25b9236-8b99-4892-9d7a-4bdcc1a34445",
+            "title": "Provider fixture cache websocket (30 turns)",
+            "rows": 83,
+            "bytes": 53347
+          },
+          {
+            "id": "665282e2-2007-437b-b651-9c5337c18a56",
+            "title": "Websocket stream schema boundary (27 turns)",
+            "rows": 79,
+            "bytes": 51235
+          },
+          {
+            "id": "86ed3b53-a4b8-4817-aeaa-f58bbf99c803",
+            "title": "Payload migration query reducer (25 turns)",
+            "rows": 71,
+            "bytes": 48927
+          },
+          {
+            "id": "70a9eae7-0f24-4162-a01a-5b31da8e9404",
+            "title": "Commit handler stream stream (28 turns)",
+            "rows": 81,
+            "bytes": 50233
+          },
+          {
+            "id": "7d2e54f9-c316-47a2-84f1-00af4ad54814",
+            "title": "Reducer cache fixture fixture (28 turns)",
+            "rows": 83,
+            "bytes": 51958
+          },
+          {
+            "id": "567b27a7-75eb-4466-91e3-a4f0caac81d2",
+            "title": "Sidebar schema render stream (24 turns)",
+            "rows": 67,
+            "bytes": 39456
+          },
+          {
+            "id": "bc140ad7-b129-449b-94ac-73d82dcbdb33",
+            "title": "Stream transcript budget payload (25 turns)",
+            "rows": 67,
+            "bytes": 44009
+          },
+          {
+            "id": "985c47ba-1bb6-4582-aeb2-3c72d9b606a2",
+            "title": "Budget payload index fixture (28 turns)",
+            "rows": 79,
+            "bytes": 49724
+          },
+          {
+            "id": "1fe0487c-ca9c-4e75-839f-ed4bf078bd7f",
+            "title": "Budget stream listener index (29 turns)",
+            "rows": 83,
+            "bytes": 51595
+          },
+          {
+            "id": "1c360702-ee02-40cf-9273-3b81461869fd",
+            "title": "Fixture threshold query stream (29 turns)",
+            "rows": 77,
+            "bytes": 50666
+          },
+          {
+            "id": "2a11527b-411c-4f3b-9625-b8eaebd5f178",
+            "title": "Reducer payload session provider (24 turns)",
+            "rows": 69,
+            "bytes": 44082
+          },
+          {
+            "id": "3f45a133-0442-4f83-9c93-147dbbb4b53e",
+            "title": "Transcript websocket sidebar sidebar (30 turns)",
+            "rows": 85,
+            "bytes": 54353
+          },
+          {
+            "id": "76bc512a-c0d1-43e6-9a42-5dc2b4c39676",
+            "title": "Stream boundary transcript payload (29 turns)",
+            "rows": 79,
+            "bytes": 47948
+          }
+        ]
+      },
+      {
+        "name": "bench-workspace-1",
+        "path": "/var/tmp/cloudcli-bench-1W1xqh/bench-workspace-1",
+        "isGitRepo": false,
+        "sessions": [
+          {
+            "id": "8297aa63-ac60-4d24-ae95-4616572d90b1",
+            "title": "Budget session sidebar websocket (26 turns)",
+            "rows": 79,
+            "bytes": 49952
+          },
+          {
+            "id": "1ca3a696-3b93-41c2-8a88-0f72c35086a4",
+            "title": "Provider fixture listener composer (24 turns)",
+            "rows": 65,
+            "bytes": 41315
+          },
+          {
+            "id": "9f09997c-5e47-444d-9a2f-fc8ca5fb61e1",
+            "title": "Selector composer commit cache (26 turns)",
+            "rows": 71,
+            "bytes": 42488
+          },
+          {
+            "id": "1b2ae0bf-ead4-48c8-9b7a-c3bb5b4e0fbf",
+            "title": "Stream provider worker reducer (30 turns)",
+            "rows": 81,
+            "bytes": 49907
+          },
+          {
+            "id": "ebc4168e-4998-4bbc-a43e-3d86e7304ae3",
+            "title": "Listener budget budget handler (28 turns)",
+            "rows": 87,
+            "bytes": 56163
+          },
+          {
+            "id": "c7043504-da0e-49ed-a8bd-a40ffd9bacd9",
+            "title": "Render listener boundary websocket (27 turns)",
+            "rows": 83,
+            "bytes": 52275
+          }
+        ]
+      },
+      {
+        "name": "bench-workspace-2",
+        "path": "/var/tmp/cloudcli-bench-1W1xqh/bench-workspace-2",
+        "isGitRepo": true,
+        "sessions": [
+          {
+            "id": "4b13a319-68b1-423f-a72e-0ea83a3179b9",
+            "title": "Cache stream composer index (25 turns)",
+            "rows": 69,
+            "bytes": 42680
+          },
+          {
+            "id": "a4aaa174-26fb-4800-82d1-d89fab05dc0d",
+            "title": "Worker stream sidebar listener (27 turns)",
+            "rows": 73,
+            "bytes": 45969
+          },
+          {
+            "id": "74c7180b-bb10-4693-9589-522ae2bdb99c",
+            "title": "Provider composer index listener (31 turns)",
+            "rows": 89,
+            "bytes": 55346
+          },
+          {
+            "id": "84a797f0-717a-4600-be42-3a1461edc601",
+            "title": "Migration worker composer fixture (26 turns)",
+            "rows": 75,
+            "bytes": 48105
+          },
+          {
+            "id": "9da2eaf1-23f9-4b78-bfab-021489be4b8f",
+            "title": "Websocket commit boundary query (30 turns)",
+            "rows": 89,
+            "bytes": 56468
+          },
+          {
+            "id": "37eee749-c513-4d18-ae14-07ac1d475541",
+            "title": "Worker cache cache handler (26 turns)",
+            "rows": 79,
+            "bytes": 51780
+          }
+        ]
+      },
+      {
+        "name": "bench-workspace-3",
+        "path": "/var/tmp/cloudcli-bench-1W1xqh/bench-workspace-3",
+        "isGitRepo": false,
+        "sessions": [
+          {
+            "id": "93c87d5f-c8a0-4fd1-964d-b9df5b0bc5b1",
+            "title": "Payload stream stream budget (30 turns)",
+            "rows": 87,
+            "bytes": 55282
+          },
+          {
+            "id": "018a327f-6af7-4fd2-88c6-3b386dcb9fb4",
+            "title": "Fixture transcript worker reducer (28 turns)",
+            "rows": 79,
+            "bytes": 49915
+          },
+          {
+            "id": "9952714b-4956-45da-85d8-db62745289df",
+            "title": "Worker sidebar listener stream (24 turns)",
+            "rows": 73,
+            "bytes": 47747
+          },
+          {
+            "id": "5bca6e55-875e-4e3a-a5fa-e805da992e89",
+            "title": "Session commit handler reducer (28 turns)",
+            "rows": 71,
+            "bytes": 43848
+          },
+          {
+            "id": "2d48ac39-46c4-4ad8-98f4-6672fa197a75",
+            "title": "Stream budget listener composer (30 turns)",
+            "rows": 85,
+            "bytes": 55572
+          },
+          {
+            "id": "14fffaa5-58d9-4d09-b9a9-080d4d991372",
+            "title": "Payload websocket query handler (24 turns)",
+            "rows": 75,
+            "bytes": 49523
+          }
+        ]
+      },
+      {
+        "name": "bench-workspace-4",
+        "path": "/var/tmp/cloudcli-bench-1W1xqh/bench-workspace-4",
+        "isGitRepo": true,
+        "sessions": [
+          {
+            "id": "a465d729-19d0-47e7-aef6-42abe506f687",
+            "title": "Composer render schema cache (26 turns)",
+            "rows": 73,
+            "bytes": 42720
+          },
+          {
+            "id": "4bc1fff9-4ebf-4734-84c6-74d9e52bfeba",
+            "title": "Selector commit provider boundary (24 turns)",
+            "rows": 65,
+            "bytes": 40627
+          },
+          {
+            "id": "07909e89-5405-42f3-a1a1-d13f9248bfd6",
+            "title": "Index index render worker (24 turns)",
+            "rows": 71,
+            "bytes": 44480
+          },
+          {
+            "id": "d21171db-69e3-4f77-97f2-4c2442a6dcce",
+            "title": "Boundary reducer index selector (25 turns)",
+            "rows": 77,
+            "bytes": 49485
+          },
+          {
+            "id": "edb559be-dd8b-4d7c-8020-8da756405c30",
+            "title": "Migration transcript schema migration (30 turns)",
+            "rows": 77,
+            "bytes": 48437
+          },
+          {
+            "id": "de172636-73c9-4901-98c3-477e29c1792e",
+            "title": "Composer budget fixture payload (24 turns)",
+            "rows": 71,
+            "bytes": 46521
+          }
+        ]
+      },
+      {
+        "name": "bench-workspace-5",
+        "path": "/var/tmp/cloudcli-bench-1W1xqh/bench-workspace-5",
+        "isGitRepo": false,
+        "sessions": [
+          {
+            "id": "d04ec77e-bf8b-4cae-835f-a6419f4842a8",
+            "title": "Boundary transcript payload sidebar (28 turns)",
+            "rows": 83,
+            "bytes": 55083
+          },
+          {
+            "id": "487a7fc8-9ca6-46de-af80-dc5c05a1caa7",
+            "title": "Migration listener migration index (30 turns)",
+            "rows": 81,
+            "bytes": 51441
+          },
+          {
+            "id": "15399733-83b1-4ddf-aedd-8744f9e59218",
+            "title": "Reducer index selector sidebar (30 turns)",
+            "rows": 73,
+            "bytes": 43991
+          },
+          {
+            "id": "b2105eca-2e1c-4a5b-90ac-c2819377593d",
+            "title": "Listener stream budget worker (28 turns)",
+            "rows": 87,
+            "bytes": 57948
+          },
+          {
+            "id": "c284fed0-d3ff-4660-9be7-2123082bc760",
+            "title": "Handler listener commit boundary (25 turns)",
+            "rows": 67,
+            "bytes": 39240
+          },
+          {
+            "id": "2c19fe24-d431-4922-8f4a-d16f2077f687",
+            "title": "Composer websocket handler commit (31 turns)",
+            "rows": 87,
+            "bytes": 58537
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "projects": 6,
+      "sessions": 54,
+      "rows": 7402,
+      "bytes": 4669157
+    },
+    "targets": {
+      "largeSessionId": "f0a2104f-ecd7-40cb-82c7-87c3d98d60e4",
+      "typicalSessionId": "00e9b6db-4960-4969-bfe7-e3b21b8eed1d",
+      "primaryProjectPath": "/var/tmp/cloudcli-bench-1W1xqh/bench-primary"
+    }
+  },
+  "config": {
+    "iterations": 11,
+    "warmup": 2
+  },
+  "flows": [
+    {
+      "flow": "app_boot",
+      "description": "Cold load of the app until the composer and conversation list are usable",
+      "total": {
+        "n": 11,
+        "min": 335.7999999523163,
+        "median": 376.40000009536743,
+        "p95": 505.90000009536743,
+        "max": 505.90000009536743,
+        "mean": 387.5909091125835
+      },
+      "steps": [
+        {
+          "step": "navigation_to_interactive",
+          "description": "Navigation start → composer and conversation list on screen",
+          "duration": {
+            "n": 11,
+            "min": 316.7000000476837,
+            "median": 340.40000009536743,
+            "p95": 462.5,
+            "max": 462.5,
+            "mean": 353.3818182295019
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "api": [
+            {
+              "url": "/api/user/onboarding-status",
+              "calls": 22,
+              "medianMs": 14.8,
+              "totalMs": 798.4
+            },
+            {
+              "url": "/api/projects",
+              "calls": 11,
+              "medianMs": 31.9,
+              "totalMs": 380.6
+            },
+            {
+              "url": "/api/plugins",
+              "calls": 11,
+              "medianMs": 13.9,
+              "totalMs": 154.1
+            },
+            {
+              "url": "/health",
+              "calls": 11,
+              "medianMs": 11.7,
+              "totalMs": 145.5
+            },
+            {
+              "url": "/api/providers/sessions/running",
+              "calls": 11,
+              "medianMs": 12.5,
+              "totalMs": 143.5
+            },
+            {
+              "url": "/api/providers/sessions/archived",
+              "calls": 11,
+              "medianMs": 10.2,
+              "totalMs": 128.5
+            }
+          ]
+        },
+        {
+          "step": "interactive_to_idle",
+          "description": "Interactive → the app stops fetching",
+          "duration": {
+            "n": 11,
+            "min": 9.799999952316284,
+            "median": 35.200000047683716,
+            "p95": 43.40000009536743,
+            "max": 43.40000009536743,
+            "mean": 34.20909088308161
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "api": []
+        }
+      ]
+    },
+    {
+      "flow": "new_conversation",
+      "description": "Start a new conversation from the sidebar picker",
+      "total": {
+        "n": 11,
+        "min": 113.29999995231628,
+        "median": 118.70000004768372,
+        "p95": 138.70000004768372,
+        "max": 138.70000004768372,
+        "mean": 120.7363636710427
+      },
+      "steps": [
+        {
+          "step": "open_picker",
+          "description": "Click \"New conversation\" → the folder picker lists projects",
+          "duration": {
+            "n": 11,
+            "min": 13.700000047683716,
+            "median": 15.099999904632568,
+            "p95": 18.700000047683716,
+            "max": 18.700000047683716,
+            "mean": 15.26363637230613
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "api": []
+        },
+        {
+          "step": "pick_project",
+          "description": "Choose a project → an empty composer is ready to type in",
+          "duration": {
+            "n": 11,
+            "min": 98.20000004768372,
+            "median": 105,
+            "p95": 120,
+            "max": 120,
+            "mean": 105.47272729873657
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "api": []
+        }
+      ]
+    },
+    {
+      "flow": "typing",
+      "description": "Type an 86-character message into the composer",
+      "total": {
+        "n": 11,
+        "min": 312.10000014305115,
+        "median": 319.900000333786,
+        "p95": 417.1000003814697,
+        "max": 417.1000003814697,
+        "mean": 333.60000012137675
+      },
+      "steps": [
+        {
+          "step": "input_handling",
+          "description": "Total main-thread work across every keystroke (÷ characters = per-key cost)",
+          "duration": {
+            "n": 11,
+            "min": 312.10000014305115,
+            "median": 319.900000333786,
+            "p95": 417.1000003814697,
+            "max": 417.1000003814697,
+            "mean": 333.60000012137675
+          },
+          "blocking": {
+            "n": 11,
+            "min": 11,
+            "median": 11.900000095367432,
+            "p95": 18.299999952316284,
+            "max": 18.299999952316284,
+            "mean": 12.690909103913741
+          },
+          "api": []
+        }
+      ]
+    },
+    {
+      "flow": "switch_to_large_conversation",
+      "description": "Open a 2,511-row / 1546 KB conversation from the sidebar",
+      "total": {
+        "n": 11,
+        "min": 327.60000014305115,
+        "median": 352.09999990463257,
+        "p95": 388.59999990463257,
+        "max": 388.59999990463257,
+        "mean": 358.39090912992305
+      },
+      "steps": [
+        {
+          "step": "click_to_transcript",
+          "description": "Click the conversation → its messages are on screen",
+          "duration": {
+            "n": 11,
+            "min": 261.7000000476837,
+            "median": 287.2000000476837,
+            "p95": 321.5,
+            "max": 321.5,
+            "mean": 289.50909094377
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 61.89999985694885,
+            "max": 61.89999985694885,
+            "mean": 16.118181813846935
+          },
+          "api": [
+            {
+              "url": "/api/providers/sessions/f0a2104f-ecd7-40cb-82c7-87c3d98d60e4/messages?limit=20&offset=0",
+              "calls": 11,
+              "medianMs": 98.2,
+              "totalMs": 1053.4
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/f0a2104f-ecd7-40cb-82c7-87c3d98d60e4/token-usage",
+              "calls": 7,
+              "medianMs": 91.9,
+              "totalMs": 651.9
+            }
+          ]
+        },
+        {
+          "step": "transcript_to_settled",
+          "description": "Messages shown → the app stops fetching",
+          "duration": {
+            "n": 11,
+            "min": 63.09999990463257,
+            "median": 65.90000009536743,
+            "p95": 84.69999980926514,
+            "max": 84.69999980926514,
+            "mean": 68.88181818615307
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "api": []
+        }
+      ]
+    },
+    {
+      "flow": "switch_to_typical_conversation",
+      "description": "Open a 85-row / 50 KB conversation from the sidebar",
+      "total": {
+        "n": 11,
+        "min": 202,
+        "median": 213.90000009536743,
+        "p95": 311.39999985694885,
+        "max": 311.39999985694885,
+        "mean": 225.245454528115
+      },
+      "steps": [
+        {
+          "step": "click_to_transcript",
+          "description": "Click the conversation → its messages are on screen",
+          "duration": {
+            "n": 11,
+            "min": 202,
+            "median": 213.90000009536743,
+            "p95": 259.7000000476837,
+            "max": 259.7000000476837,
+            "mean": 219.4636363549666
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 82.5,
+            "max": 82.5,
+            "mean": 7.5
+          },
+          "api": [
+            {
+              "url": "/api/providers/sessions/00e9b6db-4960-4969-bfe7-e3b21b8eed1d/messages?limit=20&offset=0",
+              "calls": 21,
+              "medianMs": 89.6,
+              "totalMs": 2068.6
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/00e9b6db-4960-4969-bfe7-e3b21b8eed1d/token-usage",
+              "calls": 20,
+              "medianMs": 86.4,
+              "totalMs": 1935.5
+            }
+          ]
+        },
+        {
+          "step": "transcript_to_settled",
+          "description": "Messages shown → the app stops fetching",
+          "duration": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 51.69999980926514,
+            "max": 51.69999980926514,
+            "mean": 5.781818173148415
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "api": []
+        }
+      ]
+    },
+    {
+      "flow": "switch_back_warm",
+      "description": "Return to a conversation already visited in this session",
+      "total": {
+        "n": 11,
+        "min": 423,
+        "median": 472,
+        "p95": 631.3000001907349,
+        "max": 631.3000001907349,
+        "mean": 479.74545454978943
+      },
+      "steps": [
+        {
+          "step": "click_to_transcript",
+          "description": "Click back → the cached transcript is on screen",
+          "duration": {
+            "n": 11,
+            "min": 174.90000009536743,
+            "median": 191.19999980926514,
+            "p95": 250.70000004768372,
+            "max": 250.70000004768372,
+            "mean": 195.85454546321523
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "api": []
+        },
+        {
+          "step": "transcript_to_settled",
+          "description": "Messages shown → the app stops re-fetching",
+          "duration": {
+            "n": 11,
+            "min": 244,
+            "median": 280.2000000476837,
+            "p95": 380.60000014305115,
+            "max": 380.60000014305115,
+            "mean": 283.8909090865742
+          },
+          "blocking": {
+            "n": 11,
+            "min": 148,
+            "median": 160,
+            "p95": 203,
+            "max": 203,
+            "mean": 166.72727272727272
+          },
+          "api": [
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/f0a2104f-ecd7-40cb-82c7-87c3d98d60e4/token-usage",
+              "calls": 11,
+              "medianMs": 55.2,
+              "totalMs": 723.3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "flow": "bug_report",
+      "description": "Open the bug reporter and expand the context it captured",
+      "total": {
+        "n": 11,
+        "min": 144.59999990463257,
+        "median": 153.29999995231628,
+        "p95": 215.20000004768372,
+        "max": 215.20000004768372,
+        "mean": 164.04545456712896
+      },
+      "steps": [
+        {
+          "step": "open_dialog",
+          "description": "Click \"Report a bug\" → the description field is ready",
+          "duration": {
+            "n": 11,
+            "min": 137,
+            "median": 146.70000004768372,
+            "p95": 205,
+            "max": 205,
+            "mean": 156.22727272727272
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "api": []
+        },
+        {
+          "step": "expand_context",
+          "description": "Expand \"Session details attached\" → the captured metadata renders",
+          "duration": {
+            "n": 11,
+            "min": 6.599999904632568,
+            "median": 7.599999904632568,
+            "p95": 10.200000047683716,
+            "max": 10.200000047683716,
+            "mean": 7.818181839856234
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "api": []
+        }
+      ]
+    },
+    {
+      "flow": "chat_turn_in_large_conversation",
+      "description": "Send a message inside a 2,511-row / 1546 KB conversation and watch the turn finish",
+      "total": {
+        "n": 11,
+        "min": 913.5,
+        "median": 946.7000000476837,
+        "p95": 1063,
+        "max": 1063,
+        "mean": 962.1909090822393
+      },
+      "steps": [
+        {
+          "step": "send_to_echo",
+          "description": "Click Send → the user's own message appears",
+          "duration": {
+            "n": 11,
+            "min": 257.89999985694885,
+            "median": 274.7000000476837,
+            "p95": 290.7000000476837,
+            "max": 290.7000000476837,
+            "mean": 274.95454543287104
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "api": []
+        },
+        {
+          "step": "echo_to_first_token",
+          "description": "User message → the first assistant text is painted",
+          "duration": {
+            "n": 11,
+            "min": 24.40000009536743,
+            "median": 27.700000047683716,
+            "p95": 30.40000009536743,
+            "max": 30.40000009536743,
+            "mean": 27.69090910391374
+          },
+          "blocking": {
+            "n": 11,
+            "min": 15,
+            "median": 16.90000009536743,
+            "p95": 19.90000009536743,
+            "max": 19.90000009536743,
+            "mean": 17.200000047683716
+          },
+          "api": []
+        },
+        {
+          "step": "first_token_to_complete",
+          "description": "First token → the run finishes and the composer frees up",
+          "duration": {
+            "n": 11,
+            "min": 619.1000001430511,
+            "median": 660.2000000476837,
+            "p95": 758.3999998569489,
+            "max": 758.3999998569489,
+            "mean": 659.5454545454545
+          },
+          "blocking": {
+            "n": 11,
+            "min": 505,
+            "median": 533,
+            "p95": 671,
+            "max": 671,
+            "mean": 549.8181818181819
+          },
+          "api": [
+            {
+              "url": "/api/providers/sessions/f0a2104f-ecd7-40cb-82c7-87c3d98d60e4/messages?limit=42&offset=0",
+              "calls": 11,
+              "medianMs": 372.2,
+              "totalMs": 4206.3
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/f0a2104f-ecd7-40cb-82c7-87c3d98d60e4/token-usage",
+              "calls": 11,
+              "medianMs": 306.4,
+              "totalMs": 3380.1
+            }
+          ]
+        },
+        {
+          "step": "complete_to_settled",
+          "description": "Run complete → the app stops fetching (transcript reconciled)",
+          "duration": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "api": []
+        }
+      ]
+    },
+    {
+      "flow": "chat_turn",
+      "description": "Send a message in a new conversation and watch the reply stream in and the run finish",
+      "total": {
+        "n": 11,
+        "min": 760.2000000476837,
+        "median": 812.6999998092651,
+        "p95": 1021.8999998569489,
+        "max": 1021.8999998569489,
+        "mean": 837.0181817574935
+      },
+      "steps": [
+        {
+          "step": "send_to_echo",
+          "description": "Click Send → the user's own message appears",
+          "duration": {
+            "n": 11,
+            "min": 273.59999990463257,
+            "median": 298.7000000476837,
+            "p95": 376.2999999523163,
+            "max": 376.2999999523163,
+            "mean": 318.07272722504354
+          },
+          "blocking": {
+            "n": 11,
+            "min": 104,
+            "median": 110,
+            "p95": 224.29999995231628,
+            "max": 224.29999995231628,
+            "mean": 145.16363631595266
+          },
+          "api": [
+            {
+              "url": "/api/providers/sessions",
+              "calls": 11,
+              "medianMs": 158.1,
+              "totalMs": 1930.8
+            }
+          ]
+        },
+        {
+          "step": "echo_to_first_token",
+          "description": "User message → the first assistant text is painted",
+          "duration": {
+            "n": 11,
+            "min": 132.20000004768372,
+            "median": 207.59999990463257,
+            "p95": 239.90000009536743,
+            "max": 239.90000009536743,
+            "mean": 195.43636363202876
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 50,
+            "max": 50,
+            "mean": 4.545454545454546
+          },
+          "api": []
+        },
+        {
+          "step": "first_token_to_complete",
+          "description": "First token → the run finishes and the composer frees up",
+          "duration": {
+            "n": 11,
+            "min": 249,
+            "median": 262.7999999523163,
+            "p95": 475.2999999523163,
+            "max": 475.2999999523163,
+            "mean": 323.50909090042114
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 132,
+            "max": 132,
+            "mean": 44.72727272727273
+          },
+          "api": [
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/82e24473-6513-4bf9-8777-a44023086f53/token-usage",
+              "calls": 3,
+              "medianMs": 190.7,
+              "totalMs": 511.3
+            },
+            {
+              "url": "/api/providers/sessions/82e24473-6513-4bf9-8777-a44023086f53/messages?limit=20&offset=0",
+              "calls": 2,
+              "medianMs": 191.1,
+              "totalMs": 436.4
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/23328e71-05fc-4d05-b9b9-84dbc93b6a0e/token-usage",
+              "calls": 3,
+              "medianMs": 99.7,
+              "totalMs": 372.6
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/8536c625-65d9-490b-ad7a-52ac86274e1c/token-usage",
+              "calls": 3,
+              "medianMs": 99.1,
+              "totalMs": 372
+            },
+            {
+              "url": "/api/providers/sessions/23328e71-05fc-4d05-b9b9-84dbc93b6a0e/messages?limit=20&offset=0",
+              "calls": 2,
+              "medianMs": 100.1,
+              "totalMs": 296.6
+            },
+            {
+              "url": "/api/providers/sessions/8536c625-65d9-490b-ad7a-52ac86274e1c/messages?limit=20&offset=0",
+              "calls": 2,
+              "medianMs": 99.5,
+              "totalMs": 288.7
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/fcbf6b22-37cb-49ad-a653-74b8046defbb/token-usage",
+              "calls": 2,
+              "medianMs": 78.2,
+              "totalMs": 273.5
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/c1ee2fe3-9e99-495b-8989-a68ebc777165/token-usage",
+              "calls": 2,
+              "medianMs": 78.9,
+              "totalMs": 252.5
+            },
+            {
+              "url": "/api/providers/sessions/23328e71-05fc-4d05-b9b9-84dbc93b6a0e/messages?limit=42&offset=0",
+              "calls": 1,
+              "medianMs": 200.4,
+              "totalMs": 200.4
+            },
+            {
+              "url": "/api/providers/sessions/82e24473-6513-4bf9-8777-a44023086f53/messages?limit=42&offset=0",
+              "calls": 1,
+              "medianMs": 196.4,
+              "totalMs": 196.4
+            },
+            {
+              "url": "/api/providers/sessions/fcbf6b22-37cb-49ad-a653-74b8046defbb/messages?limit=20&offset=0",
+              "calls": 1,
+              "medianMs": 195.7,
+              "totalMs": 195.7
+            },
+            {
+              "url": "/api/providers/sessions/8536c625-65d9-490b-ad7a-52ac86274e1c/messages?limit=42&offset=0",
+              "calls": 1,
+              "medianMs": 193.8,
+              "totalMs": 193.8
+            },
+            {
+              "url": "/api/providers/sessions/c1ee2fe3-9e99-495b-8989-a68ebc777165/messages?limit=42&offset=0",
+              "calls": 1,
+              "medianMs": 181,
+              "totalMs": 181
+            },
+            {
+              "url": "/api/providers/sessions/c1ee2fe3-9e99-495b-8989-a68ebc777165/messages?limit=20&offset=0",
+              "calls": 1,
+              "medianMs": 173.8,
+              "totalMs": 173.8
+            },
+            {
+              "url": "/api/providers/sessions/a413afb5-b3ed-447a-9685-b5ba42d4e56d/messages?limit=20&offset=0",
+              "calls": 1,
+              "medianMs": 125.7,
+              "totalMs": 125.7
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/a413afb5-b3ed-447a-9685-b5ba42d4e56d/token-usage",
+              "calls": 1,
+              "medianMs": 125.2,
+              "totalMs": 125.2
+            },
+            {
+              "url": "/api/providers/sessions/150c9954-d9da-40c2-9036-b534e7202107/messages?limit=20&offset=0",
+              "calls": 1,
+              "medianMs": 106.1,
+              "totalMs": 106.1
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/150c9954-d9da-40c2-9036-b534e7202107/token-usage",
+              "calls": 1,
+              "medianMs": 105.7,
+              "totalMs": 105.7
+            },
+            {
+              "url": "/api/providers/sessions/17bda6af-a8f7-4bee-bd68-7b67c2e4b78a/messages?limit=20&offset=0",
+              "calls": 1,
+              "medianMs": 101,
+              "totalMs": 101
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/17bda6af-a8f7-4bee-bd68-7b67c2e4b78a/token-usage",
+              "calls": 1,
+              "medianMs": 100.7,
+              "totalMs": 100.7
+            },
+            {
+              "url": "/api/providers/sessions/8536c625-65d9-490b-ad7a-52ac86274e1c/messages",
+              "calls": 1,
+              "medianMs": 84.6,
+              "totalMs": 84.6
+            },
+            {
+              "url": "/api/providers/sessions/23328e71-05fc-4d05-b9b9-84dbc93b6a0e/messages",
+              "calls": 1,
+              "medianMs": 77.2,
+              "totalMs": 77.2
+            },
+            {
+              "url": "/api/providers/sessions/0c9f8350-8aa9-4c08-a874-c9d2f8390ad9/messages?limit=20&offset=0",
+              "calls": 1,
+              "medianMs": 75,
+              "totalMs": 75
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/0c9f8350-8aa9-4c08-a874-c9d2f8390ad9/token-usage",
+              "calls": 1,
+              "medianMs": 74.5,
+              "totalMs": 74.5
+            },
+            {
+              "url": "/api/providers/sessions/3dbe529c-2f8c-4943-aa39-ecd6ca4b17d5/messages?limit=20&offset=0",
+              "calls": 1,
+              "medianMs": 74,
+              "totalMs": 74
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/3dbe529c-2f8c-4943-aa39-ecd6ca4b17d5/token-usage",
+              "calls": 1,
+              "medianMs": 73.6,
+              "totalMs": 73.6
+            },
+            {
+              "url": "/api/providers/sessions/ccbf484d-bb99-4d73-a2d6-dd0690e056c9/messages?limit=20&offset=0",
+              "calls": 1,
+              "medianMs": 71.2,
+              "totalMs": 71.2
+            },
+            {
+              "url": "/api/projects/6bff4f7e-2493-4f0e-9dbf-766a168fdccd/sessions/ccbf484d-bb99-4d73-a2d6-dd0690e056c9/token-usage",
+              "calls": 1,
+              "medianMs": 70.8,
+              "totalMs": 70.8
+            }
+          ]
+        },
+        {
+          "step": "complete_to_settled",
+          "description": "Run complete → the app stops fetching (transcript reconciled)",
+          "duration": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "blocking": {
+            "n": 11,
+            "min": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 0,
+            "mean": 0
+          },
+          "api": []
+        }
+      ]
+    }
+  ]
+}

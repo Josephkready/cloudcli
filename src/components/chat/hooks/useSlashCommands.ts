@@ -89,41 +89,64 @@ export function useSlashCommands({
     clearCommandQueryTimer();
   }, [clearCommandQueryTimer]);
 
+  /**
+   * The identity this list actually depends on: which project, and where on
+   * disk it is.
+   *
+   * Keyed on those strings rather than on the `selectedProject` object because
+   * the object is replaced constantly — every `/api/projects` refresh, every
+   * session-list merge, every `last_viewed_at` bump mints a new one for the
+   * same project. Depending on the object re-ran the fetch below on each of
+   * those, so opening a conversation cost two extra round-trips
+   * (`/api/commands/list` + `/api/providers/:provider/skills`) for a list that
+   * had not changed, on the same single-threaded server that was busy reading
+   * the transcript. Switching between conversations in one project now refetches
+   * nothing.
+   */
+  const projectId = selectedProject?.projectId ?? null;
+  const workspacePath = selectedProject
+    ? selectedProject.fullPath || selectedProject.path || ''
+    : '';
+  const requestPath = workspacePath || selectedProject?.path || '';
+
   useEffect(() => {
     let cancelled = false;
 
     const fetchCommands = async () => {
-      if (!selectedProject) {
+      if (!projectId) {
         setSlashCommands([]);
         setFilteredCommands([]);
         return;
       }
 
       try {
-        const workspacePath = selectedProject.fullPath || selectedProject.path || '';
-        const response = await authenticatedFetch('/api/commands/list', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            projectPath: workspacePath || selectedProject.path,
+        const skillsParams = new URLSearchParams();
+        if (workspacePath) {
+          skillsParams.set('workspacePath', workspacePath);
+        }
+        const skillsUrl = `/api/providers/${encodeURIComponent(provider)}/skills${skillsParams.toString() ? `?${skillsParams.toString()}` : ''}`;
+
+        // Issued together rather than one-after-the-other: neither response
+        // feeds the other's request, so awaiting the first only added its
+        // latency to the second's.
+        const [response, skillsResponse] = await Promise.all([
+          authenticatedFetch('/api/commands/list', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              projectPath: requestPath,
+            }),
           }),
-        });
+          authenticatedFetch(skillsUrl),
+        ]);
 
         if (!response.ok) {
           throw new Error('Failed to fetch commands');
         }
 
         const data = await response.json();
-        const skillsParams = new URLSearchParams();
-        if (workspacePath) {
-          skillsParams.set('workspacePath', workspacePath);
-        }
-
-        const skillsResponse = await authenticatedFetch(
-          `/api/providers/${encodeURIComponent(provider)}/skills${skillsParams.toString() ? `?${skillsParams.toString()}` : ''}`,
-        );
         const skillsData = skillsResponse.ok
           ? ((await skillsResponse.json()) as ProviderSkillsResponse)
           : null;
@@ -141,7 +164,7 @@ export function useSlashCommands({
           })),
         ];
 
-        const parsedHistory = readCommandHistory(selectedProject.projectId);
+        const parsedHistory = readCommandHistory(projectId);
         const sortedCommands = [...allCommands].sort((commandA, commandB) => {
           const commandAUsage = parsedHistory[commandA.name] || 0;
           const commandBUsage = parsedHistory[commandB.name] || 0;
@@ -163,7 +186,7 @@ export function useSlashCommands({
     return () => {
       cancelled = true;
     };
-  }, [selectedProject, provider]);
+  }, [projectId, workspacePath, requestPath, provider]);
 
   useEffect(() => {
     if (!showCommandMenu) {

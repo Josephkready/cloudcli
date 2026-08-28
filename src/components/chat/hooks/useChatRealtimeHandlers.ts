@@ -10,6 +10,18 @@ import { removePendingSend } from '../utils/pendingSends';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
 import type { SessionStore, NormalizedMessage } from '../../../stores/useSessionStore';
 
+/**
+ * Extra server rows fetched beyond the live rows when reconciling a finished
+ * run.
+ *
+ * The window has to cover every realtime row the run produced, or the ones it
+ * misses stay unpruned and render twice. Live rows map roughly one-to-one onto
+ * persisted rows, so "as many as we hold, plus this" is the safe size; the
+ * headroom absorbs the imprecision (a turn whose persisted form splits into
+ * more rows than were streamed).
+ */
+const COMPLETION_REFRESH_HEADROOM = 40;
+
 const isActionablePermissionRequest = (request: { toolName?: unknown } | null | undefined): boolean => {
   return request?.toolName !== 'ExitPlanMode' && request?.toolName !== 'exit_plan_mode';
 };
@@ -309,8 +321,19 @@ export function useChatRealtimeHandlers({
           // The session id is stable for the whole conversation (allocated
           // before the first send), so the only follow-up is syncing the
           // viewed conversation with the now-persisted transcript.
+          //
+          // Windowed, not whole-transcript. All this refresh has to do is let
+          // `pruneRealtimeSupersededByServer` recognise the rows this run just
+          // streamed, and those are the newest rows in the file — so the window
+          // is sized from the live rows being reconciled, plus headroom. Asking
+          // for the entire conversation instead made every completed turn read
+          // and ship the whole transcript back (megabytes of JSON on a long
+          // one), for a reconciliation that only ever looks at its tail.
           if (sid && sid === activeViewSessionId) {
-            void sessionStore.refreshFromServer(sid);
+            const liveRows = sessionStore.getSessionSlot(sid)?.realtimeMessages.length ?? 0;
+            void sessionStore.refreshFromServer(sid, {
+              limit: liveRows + COMPLETION_REFRESH_HEADROOM,
+            });
           }
 
           break;

@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   compareHistoryTimestamps,
   HistoryPageCollector,
+  historyTimestampSortValue,
 } from '@/shared/utils.js';
 
 test('retains only limit + offset items while counting the full stream', () => {
@@ -112,4 +113,96 @@ test('invalid direct-call bounds cannot accidentally make retention unbounded', 
 
   assert.equal(collector.retainedItems, 0);
   assert.deepEqual(collector.page(), { items: [], hasMore: true });
+});
+
+/**
+ * `sortKey` exists to stop the collector re-deriving an ordering value on every
+ * comparison — it must therefore order *identically* to the comparator it
+ * replaces, including for the awkward cases (equal timestamps, malformed ones).
+ * These pin that equivalence, since a divergence would silently reorder
+ * transcripts rather than fail anything.
+ */
+test('sortKey orders a bounded page exactly as the equivalent comparator does', () => {
+  const rows = [
+    { id: 'newest', timestamp: '2026-01-03T00:00:00Z' },
+    { id: 'oldest', timestamp: '2026-01-01T00:00:00Z' },
+    { id: 'middle-a', timestamp: '2026-01-02T00:00:00Z' },
+    { id: 'middle-b', timestamp: '2026-01-02T00:00:00Z' },
+  ];
+
+  const viaCompare = new HistoryPageCollector<typeof rows[number]>({
+    limit: 3,
+    offset: 0,
+    compare: (left, right) => compareHistoryTimestamps(left.timestamp, right.timestamp),
+  });
+  const viaSortKey = new HistoryPageCollector<typeof rows[number]>({
+    limit: 3,
+    offset: 0,
+    sortKey: (row) => historyTimestampSortValue(row.timestamp),
+  });
+  for (const row of rows) {
+    viaCompare.add(row);
+    viaSortKey.add(row);
+  }
+
+  assert.deepEqual(
+    viaSortKey.page().items.map((item) => item.id),
+    viaCompare.page().items.map((item) => item.id),
+  );
+  // `page()` returns the newest `limit` items, so `oldest` is the one evicted —
+  // and the two equal timestamps keep their input order behind it.
+  assert.deepEqual(viaSortKey.page().items.map((item) => item.id), ['middle-a', 'middle-b', 'newest']);
+});
+
+test('sortKey keeps malformed timestamps ahead of dated history, in stream order', () => {
+  const collector = new HistoryPageCollector<{ id: string; timestamp: string }>({
+    limit: 4,
+    offset: 0,
+    sortKey: (row) => historyTimestampSortValue(row.timestamp),
+  });
+  for (const row of [
+    { id: 'newest', timestamp: '2026-01-03T00:00:00Z' },
+    { id: 'invalid-first', timestamp: 'not-a-date' },
+    { id: 'oldest-valid', timestamp: '2026-01-01T00:00:00Z' },
+    { id: 'invalid-second', timestamp: 'also-not-a-date' },
+  ]) {
+    collector.add(row);
+  }
+
+  // Two malformed rows both key to -Infinity, so they must not be reordered
+  // against each other — that is the case a naive `key - key` (NaN) would break.
+  assert.deepEqual(
+    collector.page().items.map((item) => item.id),
+    ['invalid-first', 'invalid-second', 'oldest-valid', 'newest'],
+  );
+});
+
+test('sortKey orders an unbounded request too, sorting once at the end', () => {
+  const collector = new HistoryPageCollector<{ id: string; timestamp: string }>({
+    limit: null,
+    offset: 0,
+    sortKey: (row) => historyTimestampSortValue(row.timestamp),
+  });
+  for (const row of [
+    { id: 'c', timestamp: '2026-01-03T00:00:00Z' },
+    { id: 'a', timestamp: '2026-01-01T00:00:00Z' },
+    { id: 'b', timestamp: '2026-01-02T00:00:00Z' },
+  ]) {
+    collector.add(row);
+  }
+
+  assert.deepEqual(collector.page().items.map((item) => item.id), ['a', 'b', 'c']);
+});
+
+test('historyTimestampSortValue matches compareHistoryTimestamps on the values it keys', () => {
+  const values = ['2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z', 'not-a-date', 0, null];
+  for (const left of values) {
+    for (const right of values) {
+      const viaCompare = Math.sign(compareHistoryTimestamps(left, right));
+      const leftKey = historyTimestampSortValue(left);
+      const rightKey = historyTimestampSortValue(right);
+      const viaKey = leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+      assert.equal(viaKey, viaCompare, `disagreed on ${String(left)} vs ${String(right)}`);
+    }
+  }
 });

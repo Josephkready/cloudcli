@@ -7,10 +7,10 @@ import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import {
   AppError,
-  compareHistoryTimestamps,
   createNormalizedMessage,
   generateMessageId,
   HistoryPageCollector,
+  historyTimestampSortValue,
   readObjectRecord,
   sliceTailPage,
 } from '@/shared/utils.js';
@@ -157,7 +157,7 @@ async function getCodexSessionMessages(
     const collector = new HistoryPageCollector<NormalizedMessage>({
       limit,
       offset,
-      compare: (left, right) => compareHistoryTimestamps(left.timestamp, right.timestamp),
+      sortKey: (message) => historyTimestampSortValue(message.timestamp),
     });
     let visibleTotal = 0;
     let tokenUsage: AnyRecord | null = null;

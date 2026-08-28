@@ -464,25 +464,57 @@ type HistoryPageCollectorOptions<T> = {
   limit: number | null;
   offset: number;
   compare?: (left: T, right: T) => number;
+  /**
+   * Ordering by a value computed **once per item**, instead of by a comparator
+   * re-derived on every comparison.
+   *
+   * Both express the same ordering; the difference is how many times the work
+   * happens. A comparator ordering by timestamp re-parses two date strings on
+   * every comparison, and the sorted insertion below does O(log n) comparisons
+   * per item — so reading a 2,500-row transcript parsed ~50,000 dates to place
+   * 2,500 rows, which measured as ~40% of the whole `limit: 20` request.
+   *
+   * Takes precedence over `compare` when both are given. Use
+   * {@link historyTimestampSortValue} to keep timestamp ordering identical to
+   * {@link compareHistoryTimestamps}, malformed values included.
+   */
+  sortKey?: (item: T) => number;
 };
 
 type SequencedHistoryItem<T> = {
   item: T;
   sequence: number;
+  /** Precomputed ordering value; `undefined` when ordering via `compare`. */
+  key?: number;
 };
 
 function normalizeHistoryPageNumber(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }
 
+function historyTimestampToTime(value: unknown): number {
+  if (value instanceof Date) return value.getTime();
+  return new Date(typeof value === 'string' || typeof value === 'number' ? value : 0).getTime();
+}
+
+/**
+ * The sortable form of a history timestamp: epoch milliseconds, or `-Infinity`
+ * when the value cannot be read as a date.
+ *
+ * `-Infinity` is what reproduces {@link compareHistoryTimestamps}' rule that
+ * malformed timestamps sort *before* dated history; two malformed values
+ * compare equal and fall through to the collector's stream-order tiebreak,
+ * exactly as they do through the comparator.
+ */
+export function historyTimestampSortValue(value: unknown): number {
+  const time = historyTimestampToTime(value);
+  return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
+}
+
 /** Sorts malformed timestamps before dated history while preserving their stream order. */
 export function compareHistoryTimestamps(left: unknown, right: unknown): number {
-  const toTime = (value: unknown): number => {
-    if (value instanceof Date) return value.getTime();
-    return new Date(typeof value === 'string' || typeof value === 'number' ? value : 0).getTime();
-  };
-  const leftTime = toTime(left);
-  const rightTime = toTime(right);
+  const leftTime = historyTimestampToTime(left);
+  const rightTime = historyTimestampToTime(right);
   const leftIsValid = Number.isFinite(leftTime);
   const rightIsValid = Number.isFinite(rightTime);
   if (!leftIsValid || !rightIsValid) {
@@ -508,6 +540,7 @@ export class HistoryPageCollector<T> {
 
   private readonly capacity: number | null;
   private readonly compare?: (left: T, right: T) => number;
+  private readonly sortKey?: (item: T) => number;
   private readonly retained: Array<SequencedHistoryItem<T>> = [];
   private nextSequence = 0;
 
@@ -518,6 +551,12 @@ export class HistoryPageCollector<T> {
     this.offset = normalizeHistoryPageNumber(options.offset);
     this.capacity = this.limit === null ? null : this.limit + this.offset;
     this.compare = options.compare;
+    this.sortKey = options.sortKey;
+  }
+
+  /** True when this collector orders its items at all. */
+  private get isOrdered(): boolean {
+    return Boolean(this.sortKey || this.compare);
   }
 
   get retainedItems(): number {
@@ -525,7 +564,11 @@ export class HistoryPageCollector<T> {
   }
 
   add(item: T): void {
-    const sequenced = { item, sequence: this.nextSequence };
+    const sequenced: SequencedHistoryItem<T> = {
+      item,
+      sequence: this.nextSequence,
+      key: this.sortKey?.(item),
+    };
     this.nextSequence += 1;
     this.totalItems += 1;
 
@@ -535,7 +578,7 @@ export class HistoryPageCollector<T> {
 
     // An unbounded request is sorted once at the end instead of paying an O(n)
     // insertion cost for every line in a large full-history request.
-    if (!this.compare || this.capacity === null) {
+    if (!this.isOrdered || this.capacity === null) {
       this.retained.push(sequenced);
     } else {
       const insertionIndex = this.findInsertionIndex(sequenced);
@@ -564,7 +607,7 @@ export class HistoryPageCollector<T> {
   }
 
   private sortedRetained(): T[] {
-    const sequenced = this.compare && this.capacity === null
+    const sequenced = this.isOrdered && this.capacity === null
       ? [...this.retained].sort((left, right) => this.compareSequenced(left, right))
       : this.retained;
     return sequenced.map((entry) => entry.item);
@@ -590,7 +633,12 @@ export class HistoryPageCollector<T> {
     left: SequencedHistoryItem<T>,
     right: SequencedHistoryItem<T>,
   ): number {
-    const compared = this.compare?.(left.item, right.item) ?? 0;
+    const compared = this.sortKey
+      // Compared, not subtracted: two malformed timestamps are both
+      // `-Infinity`, and `-Infinity - -Infinity` is NaN — which would make the
+      // ordering non-deterministic instead of falling through to stream order.
+      ? (left.key! < right.key! ? -1 : left.key! > right.key! ? 1 : 0)
+      : this.compare?.(left.item, right.item) ?? 0;
     return compared === 0 ? left.sequence - right.sequence : compared;
   }
 }
