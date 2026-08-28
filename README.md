@@ -53,12 +53,15 @@ npm run dev        # server + client with hot reload
 npm run build      # production build (vite + asset precompression + tsc)
 npm run typecheck  # tsc --noEmit (client + server)
 npm test           # server, front-end unit, and component test suites
-npm run lint       # eslint src/ server/
+npm run lint       # eslint src/ server/ e2e/ bench/
+npm run bench      # end-to-end performance benchmark (see bench/README.md)
 ```
 
 The server serves the built client and the API on port `3001` by default. See `.env.example` for configuration (ports, database path, `ROUTER_BASENAME` for subpath hosting, `CLOUDCLI_AI_TITLES_*` for optional AI-shortened session titles, `CLOUDCLI_EXCLUDED_PROJECT_PATHS` for sidebar filtering, and more).
 
 Plugins (custom web-UI tabs, drop-installed by writing files): see [`docs/plugins.md`](docs/plugins.md).
+
+Performance benchmark (measures the core chat journeys end to end, against a seeded fixture library): see [`bench/README.md`](bench/README.md).
 
 ### Streaming API authentication
 

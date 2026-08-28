@@ -14,7 +14,10 @@ import type { LLMProvider } from '../types/app';
 
 import {
   createEmptySlot,
+  findRefreshTailJoin,
   hasUsableMessageId,
+  isSameServerTranscript,
+  mergeRefreshedTail,
   pruneRealtimeSupersededByServer,
   recomputeMergedIfNeeded,
 } from './useSessionStore.pure';
@@ -108,7 +111,13 @@ export function useSessionStore() {
       }
       slot._appliedFetchSeq = fetchTicket;
 
-      slot.serverMessages = messages;
+      // Keep the existing array when the fetch says nothing new. `recomputeMerged`
+      // and every consumer downstream compare by reference, so assigning an
+      // equal-but-fresh array is a full transcript re-render for no change on
+      // screen — which is what re-opening an unchanged conversation used to cost.
+      slot.serverMessages = isSameServerTranscript(slot.serverMessages, messages)
+        ? slot.serverMessages
+        : messages;
       slot.total = data.total ?? messages.length;
       slot.hasMore = Boolean(data.hasMore);
       slot.offset = (opts.offset ?? 0) + messages.length;
@@ -248,19 +257,38 @@ export function useSessionStore() {
 
   /**
    * Re-fetch serverMessages from the provider sessions endpoint.
+   *
+   * `limit` bounds the refresh to the newest N server messages, which is spliced
+   * onto the loaded rows instead of replacing them. Pass it whenever the caller
+   * only needs the recent end of the transcript reconciled — the unbounded form
+   * asks the server to read, serialise and ship the *entire* conversation, which
+   * on a long one is multiple megabytes of JSON for the sake of the last few
+   * rows. Leave it out only when the caller genuinely needs the whole transcript
+   * (the reconnect path does: it decides whether a message was ever received by
+   * its absence, so an absence has to mean something).
    */
   const refreshFromServer = useCallback(async (
     sessionId: string,
+    opts: { limit?: number | null } = {},
   ) => {
     const slot = getSlot(sessionId);
     const fetchTicket = ++slot._fetchSeq;
-    try {
-      const url = `/api/providers/sessions/${encodeURIComponent(sessionId)}/messages`;
+    let limit = opts.limit ?? null;
+    const read = async (pageLimit: number | null) => {
+      const query = pageLimit === null ? '' : `?limit=${pageLimit}&offset=0`;
+      const url = `/api/providers/sessions/${encodeURIComponent(sessionId)}/messages${query}`;
       const response = await authenticatedFetch(url);
-
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const body = await response.json();
-      const data = body?.data ?? body;
+      return (body?.data ?? body) as {
+        messages?: NormalizedMessage[];
+        total?: number;
+        hasMore?: boolean;
+      };
+    };
+
+    try {
+      let data = await read(limit);
 
       // A later-started fetch already applied: applying this stale transcript
       // would erase rows the user has already seen (and re-prune realtime
@@ -269,7 +297,32 @@ export function useSessionStore() {
         return;
       }
 
-      const refreshed: NormalizedMessage[] = data.messages || [];
+      let refreshed: NormalizedMessage[] = data.messages || [];
+
+      // The window has to reach back far enough to overlap what is loaded, or
+      // the two cannot be spliced: with no shared row there is no way to know
+      // whether messages sit in the gap, and appending regardless leaves a hole
+      // that nothing repairs (`fetchMore` paginates older than the loaded rows,
+      // so it walks past the gap rather than into it). Rather than trust the
+      // caller's window to have been generous enough, notice when it was not
+      // and re-read the whole transcript — the cost the window exists to avoid,
+      // paid only in the rare case that actually needs it.
+      if (
+        limit !== null
+        && refreshed.length > 0
+        && slot.serverMessages.length > 0
+        && findRefreshTailJoin(slot.serverMessages, refreshed) < 0
+      ) {
+        console.warn(
+          `[SessionStore] windowed refresh of ${limit} message(s) did not reach the loaded transcript for ${sessionId}; re-reading it in full`,
+        );
+        limit = null;
+        data = await read(null);
+        if (fetchTicket <= slot._appliedFetchSeq) {
+          return;
+        }
+        refreshed = data.messages || [];
+      }
 
       // An empty refresh over a transcript we already have is never a
       // legitimate reason to clear the screen. The server is not fail-closed:
@@ -289,9 +342,25 @@ export function useSessionStore() {
 
       slot._appliedFetchSeq = fetchTicket;
 
-      slot.serverMessages = refreshed;
+      const nextServerMessages = limit === null
+        ? refreshed
+        : mergeRefreshedTail(slot.serverMessages, refreshed);
+      // Same reference-preserving rule as `fetchFromServer`: a refresh that
+      // changes nothing must not re-render the transcript.
+      slot.serverMessages = isSameServerTranscript(slot.serverMessages, nextServerMessages)
+        ? slot.serverMessages
+        : nextServerMessages;
       slot.total = data.total ?? slot.serverMessages.length;
-      slot.hasMore = Boolean(data.hasMore);
+      // A windowed refresh only speaks about the newest end of the transcript,
+      // so it cannot answer "are there older messages than the ones loaded?".
+      // The server's `hasMore` describes *its* page, not the merged slot —
+      // applying it would light up "load older" on a slot that already holds
+      // everything, or clear it on one that does not. The previous answer is
+      // still the right one, because a refresh never drops older rows.
+      slot.hasMore = limit === null ? Boolean(data.hasMore) : slot.hasMore;
+      // Keep the pagination cursor equal to the loaded row count, the invariant
+      // `fetchMore` walks backwards from.
+      slot.offset = slot.serverMessages.length;
       slot.fetchedAt = Date.now();
       // Only drop realtime rows the server transcript now owns. A blind clear
       // here caused the chat pane to flash "Continue your conversation" after

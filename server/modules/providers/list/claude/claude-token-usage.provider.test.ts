@@ -144,3 +144,143 @@ test('getClaudeSessionTokenUsage skips malformed JSONL lines and still returns t
     await cleanup();
   }
 });
+
+/**
+ * The tail-read fast path (and its fallback) are the whole reason this endpoint
+ * stopped being O(file). Both directions need covering: a usage record inside
+ * the tail window must be found without a full scan, and one that only exists
+ * *before* the window must still be found — otherwise a long transcript whose
+ * recent turns carry no usage would silently report a zeroed budget.
+ */
+const TAIL_WINDOW_BYTES = 256 * 1024;
+
+/** A filler row big enough that N of them push earlier rows out of the window. */
+function paddingLine(index: number): string {
+  return JSON.stringify({
+    type: 'user',
+    index,
+    message: { role: 'user', content: 'x'.repeat(4096) },
+  });
+}
+
+test('getClaudeSessionTokenUsage reads a usage record that sits inside the tail window', async () => {
+  const sessionId = '99999999-aaaa-bbbb-cccc-dddddddddddd';
+  const lines = [
+    // Older, and deliberately different: reading this one would mean the scan
+    // walked past the newest record.
+    JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 1, cache_creation_input_tokens: 1, cache_read_input_tokens: 1 } } }),
+    ...Array.from({ length: 80 }, (_unused, index) => paddingLine(index)),
+    JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 41, cache_creation_input_tokens: 43, cache_read_input_tokens: 47 } } }),
+  ];
+  const { filePath, cleanup } = await createSandboxJsonl(sessionId, lines);
+
+  try {
+    const result = await getClaudeSessionTokenUsage(sessionId, {
+      getSessionById: () => ({ jsonl_path: filePath, project_path: '/home/jkready' }),
+      resolveJsonlPath: async () => filePath,
+      readContextWindowOverride: () => null,
+    });
+
+    assert.deepEqual(result.breakdown, { input: 41, cacheCreation: 43, cacheRead: 47 });
+    assert.equal(result.used, 131);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('getClaudeSessionTokenUsage falls back to a full scan when the tail holds no usage record', async () => {
+  const sessionId = 'eeeeeeee-ffff-0000-1111-222222222222';
+  // Enough padding after the usage row to bury it beyond the tail window.
+  const paddingLines = Math.ceil((TAIL_WINDOW_BYTES / paddingLine(0).length) + 8);
+  const lines = [
+    JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 13, cache_creation_input_tokens: 17, cache_read_input_tokens: 19 } } }),
+    ...Array.from({ length: paddingLines }, (_unused, index) => paddingLine(index)),
+  ];
+  const { filePath, cleanup } = await createSandboxJsonl(sessionId, lines);
+
+  try {
+    const result = await getClaudeSessionTokenUsage(sessionId, {
+      getSessionById: () => ({ jsonl_path: filePath, project_path: '/home/jkready' }),
+      resolveJsonlPath: async () => filePath,
+      readContextWindowOverride: () => null,
+    });
+
+    assert.deepEqual(result.breakdown, { input: 13, cacheCreation: 17, cacheRead: 19 });
+    assert.equal(result.used, 49);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('getClaudeSessionTokenUsage is not fooled by a partial line at the tail boundary', async () => {
+  const sessionId = '33333333-4444-5555-6666-777777777777';
+  // Sized so the window almost certainly lands mid-row: the first (truncated)
+  // line of the tail must be discarded rather than parsed.
+  const paddingLines = Math.ceil(TAIL_WINDOW_BYTES / paddingLine(0).length);
+  const lines = [
+    ...Array.from({ length: paddingLines }, (_unused, index) => paddingLine(index)),
+    JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 2, cache_creation_input_tokens: 3, cache_read_input_tokens: 5 } } }),
+  ];
+  const { filePath, cleanup } = await createSandboxJsonl(sessionId, lines);
+
+  try {
+    const result = await getClaudeSessionTokenUsage(sessionId, {
+      getSessionById: () => ({ jsonl_path: filePath, project_path: '/home/jkready' }),
+      resolveJsonlPath: async () => filePath,
+      readContextWindowOverride: () => null,
+    });
+
+    assert.deepEqual(result.breakdown, { input: 2, cacheCreation: 3, cacheRead: 5 });
+    assert.equal(result.used, 10);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('getClaudeSessionTokenUsage reads a large multi-byte transcript correctly', async () => {
+  const sessionId = '55555555-6666-7777-8888-999999999999';
+  // Every other fixture in this file is ASCII, which left the byte-vs-character
+  // distinction in the tail read entirely uncovered: 256 KiB of Japanese and
+  // emoji decodes to roughly a third as many UTF-16 units, so any length check
+  // that confuses the two behaves differently here than on English text.
+  //
+  // Note what this asserts and what it does not. It pins the *answer* on a
+  // non-ASCII transcript. It does not discriminate the specific bug that
+  // prompted it (`tail.length` compared against a byte budget), because that bug
+  // is not reachable through this function's result: the scan runs backwards, so
+  // a first line truncated mid-character is only ever consulted after everything
+  // newer, and it then fails `JSON.parse` and is skipped — after which the
+  // full-scan fallback returns the right record anyway. The fix is still worth
+  // having (the check was measuring the wrong quantity, and cost one `stat` to
+  // make honest), but a test claiming to guard it would be claiming more than it
+  // can deliver.
+  const multiByteLine = (index: number): string =>
+    JSON.stringify({
+      type: 'user',
+      index,
+      message: { role: 'user', content: '日本語のテキスト🙂'.repeat(400) },
+    });
+
+  const paddingLines = Math.ceil(TAIL_WINDOW_BYTES / Buffer.byteLength(multiByteLine(0))) + 4;
+  const lines = [
+    ...Array.from({ length: paddingLines }, (_unused, index) => multiByteLine(index)),
+    JSON.stringify({
+      type: 'assistant',
+      message: { usage: { input_tokens: 61, cache_creation_input_tokens: 67, cache_read_input_tokens: 71 } },
+    }),
+  ];
+  const { filePath, cleanup } = await createSandboxJsonl(sessionId, lines);
+
+  try {
+    const result = await getClaudeSessionTokenUsage(sessionId, {
+      getSessionById: () => ({ jsonl_path: filePath, project_path: '/home/jkready' }),
+      resolveJsonlPath: async () => filePath,
+      readContextWindowOverride: () => null,
+    });
+
+    assert.deepEqual(result.breakdown, { input: 61, cacheCreation: 67, cacheRead: 71 });
+    assert.equal(result.used, 199);
+  } finally {
+    await cleanup();
+  }
+});

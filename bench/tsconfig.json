@@ -1,0 +1,20 @@
+{
+  // Type-checks the performance benchmark harness, which the frontend/backend
+  // tsconfigs deliberately exclude. Wired into `npm run typecheck` for the same
+  // reason as e2e/: the harness only runs on demand, so without this a type
+  // error in it would sit undetected until someone tried to measure something.
+  //
+  // Needs both DOM and Node types, unlike the other configs: `instrument.ts` is
+  // authored as browser code (it is serialized into the page), while everything
+  // around it drives Playwright from Node.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "@playwright/test"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["**/*.ts"]
+}

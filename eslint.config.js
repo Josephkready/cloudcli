@@ -274,5 +274,31 @@ export default tseslint.config(
       // Playwright's fixture signature idiom is `async ({}, use) => {}`.
       "no-empty-pattern": "off",
     },
+  },
+  {
+    // Performance benchmark harness. Like the e2e block above it is tooling, not
+    // app code, so the React/Tailwind/boundaries rules do not apply — but it is
+    // unusual in one way: `bench/instrument.ts` is authored as *browser* code
+    // that Playwright serializes into the page, so this block needs both the
+    // browser and Node globals, and has to tolerate the `new Function` the
+    // instrument uses to evaluate harness-supplied predicates.
+    files: ["bench/**/*.ts"],
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    plugins: {
+      "unused-imports": unusedImports,
+    },
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: { ecmaVersion: "latest", sourceType: "module" },
+      globals: { ...globals.node, ...globals.browser },
+    },
+    rules: {
+      "unused-imports/no-unused-imports": "warn",
+      "@typescript-eslint/no-unused-vars": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      // The predicates and actions the harness evaluates in the page arrive as
+      // source strings from this repo, never from the page. See `compile()`.
+      "no-new-func": "off",
+    },
   }
 );

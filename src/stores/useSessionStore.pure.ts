@@ -490,6 +490,115 @@ export function computeMerged(server: NormalizedMessage[], realtime: NormalizedM
 }
 
 /**
+ * True when a freshly-fetched transcript says exactly what the loaded one does.
+ *
+ * Opening a conversation always refetches it, which is right — the file may have
+ * moved on. But re-opening one nothing has written to is the common case, and
+ * the fetch returns rows that are byte-for-byte what is already on screen in a
+ * brand-new array. Assigning it re-renders the whole transcript for no visible
+ * change: on a page of code-heavy messages that is markdown parsing and syntax
+ * highlighting redone from scratch, and it measured as ~320 ms of blocked main
+ * thread every time a user clicked back to a conversation they had just left.
+ *
+ * The comparison covers every field the transcript's rendering reads and that
+ * can legitimately change between two reads of an append-only file. `toolResult`
+ * is the one that is easy to miss and would matter: a `tool_use` row is written
+ * before its result exists, so a later read of the *same* row genuinely differs
+ * only there.
+ */
+export function isSameServerTranscript(
+  loaded: NormalizedMessage[],
+  fetched: NormalizedMessage[],
+): boolean {
+  if (loaded === fetched) {
+    return true;
+  }
+  if (loaded.length !== fetched.length) {
+    return false;
+  }
+
+  for (let index = 0; index < loaded.length; index++) {
+    const left = loaded[index];
+    const right = fetched[index];
+    if (left === right) {
+      continue;
+    }
+    if (
+      left.id !== right.id
+      || left.kind !== right.kind
+      || left.role !== right.role
+      || left.timestamp !== right.timestamp
+      || left.content !== right.content
+      || left.isError !== right.isError
+      || left.toolId !== right.toolId
+      || left.toolResult?.content !== right.toolResult?.content
+      || left.toolResult?.isError !== right.toolResult?.isError
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Splices a freshly-read *tail* of the server transcript onto the rows already
+ * loaded.
+ *
+ * A full refresh can simply replace `serverMessages`, because it holds the
+ * whole transcript. A windowed refresh cannot: replacing a 900-message slot
+ * with the newest 40 would erase everything the user had scrolled back to.
+ *
+ * Transcripts are append-only, so the two arrays overlap at their join and the
+ * newest page is authoritative for everything from its first row onward. That
+ * makes the merge a splice: keep the loaded rows that predate the page, then
+ * take the page.
+ *
+ * When the page's first row is not among the loaded rows the two windows are
+ * disjoint — the page is entirely newer — and it is appended. A gap is possible
+ * in principle (more rows appended than the window covers), which is why
+ * callers size the window from what they need reconciled rather than by taste.
+ */
+export function mergeRefreshedTail(
+  loaded: NormalizedMessage[],
+  page: NormalizedMessage[],
+): NormalizedMessage[] {
+  if (page.length === 0) {
+    return loaded;
+  }
+  if (loaded.length === 0) {
+    return page;
+  }
+
+  const joinIndex = findRefreshTailJoin(loaded, page);
+  return joinIndex >= 0
+    ? [...loaded.slice(0, joinIndex), ...page]
+    : [...loaded, ...page];
+}
+
+/**
+ * Where a refreshed page joins the rows already loaded, or `-1` when it does
+ * not reach back far enough to touch them.
+ *
+ * `-1` is the case worth acting on. It means the window the caller asked for
+ * was smaller than the number of rows appended since, so the two arrays do not
+ * overlap and there is no way to tell whether messages sit in the gap between
+ * them. Appending anyway produces a transcript with a hole that nothing later
+ * repairs — `fetchMore` paginates *older* than what is loaded, so it walks past
+ * the gap rather than into it. Callers use this to fall back to an unwindowed
+ * read instead of splicing something they cannot verify.
+ */
+export function findRefreshTailJoin(
+  loaded: NormalizedMessage[],
+  page: NormalizedMessage[],
+): number {
+  if (page.length === 0 || loaded.length === 0) {
+    return -1;
+  }
+  return loaded.findIndex((message) => message.id === page[0].id);
+}
+
+/**
  * Recompute slot.merged only when the input arrays have actually changed
  * (by reference). Returns true if merged was recomputed.
  */

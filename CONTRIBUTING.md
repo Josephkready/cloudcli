@@ -159,6 +159,27 @@ download).
   unit-testing pure logic, which still belongs in the `node:test`/vitest
   runners above.
 
+## Performance benchmark
+
+`npm run bench` measures how long the core journeys take — boot, starting a
+conversation, typing, a chat turn, switching conversations, filing a bug report
+— against a seeded fixture library, and prints a table. It is a measuring
+instrument, not a gate: nothing in CI runs it, and it is not expected to pass or
+fail.
+
+- One-time setup: `npx playwright install chromium` (shared with the e2e suite).
+- Like e2e, it builds the client once and boots its own server against a
+  throwaway HOME under `/var/tmp` with the deterministic mock provider, so it
+  needs no credentials and touches nothing of yours.
+- Reach for it when changing anything on the transcript-read, session-switch or
+  chat-turn paths, and record the before/after in the PR. Measure **both sides
+  back to back on the same machine** — these numbers move with whatever else the
+  box is doing, and `--compare` reports the delta on the fastest iteration as
+  well as the median for exactly that reason.
+
+See [`bench/README.md`](bench/README.md) for the flows, the flags, and the
+measurement caveats.
+
 ## Testing expectations
 
 Changes should ship with tests on every tier they touch:

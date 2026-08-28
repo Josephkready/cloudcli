@@ -9,6 +9,8 @@ import {
   getUserTurnOrdinalBefore,
   hasServerEchoForLocalUser,
   isAssistantTextEchoedInSameTurnOnServer,
+  isSameServerTranscript,
+  mergeRefreshedTail,
   pruneRealtimeSupersededByServer,
   recomputeMergedIfNeeded,
   userTextFingerprint,
@@ -497,5 +499,138 @@ describe('recomputeMergedIfNeeded', () => {
     recomputeMergedIfNeeded(first);
     assert.deepEqual(second.serverMessages, []);
     assert.deepEqual(second.merged, []);
+  });
+});
+
+describe('mergeRefreshedTail', () => {
+  it('splices an overlapping page onto the loaded rows without losing older ones', () => {
+    const loaded = [
+      user('u1', 'first', 0),
+      assistant('a1', 'first reply', 1),
+      user('u2', 'second', 2),
+      assistant('a2', 'second reply', 3),
+    ];
+    // What the server returns for `?limit=3`: the newest three, where the two
+    // oldest of them are rows we already hold.
+    const page = [
+      user('u2', 'second', 2),
+      assistant('a2', 'second reply', 3),
+      assistant('a3', 'third reply', 4),
+    ];
+
+    assert.deepEqual(
+      mergeRefreshedTail(loaded, page).map((m) => m.id),
+      ['u1', 'a1', 'u2', 'a2', 'a3'],
+    );
+  });
+
+  it('prefers the page for rows both sides hold, since the server is authoritative', () => {
+    const loaded = [assistant('a1', 'partial', 0)];
+    const page = [assistant('a1', 'complete text as persisted', 0)];
+
+    assert.deepEqual(mergeRefreshedTail(loaded, page), page);
+  });
+
+  it('appends a page that is entirely newer than everything loaded', () => {
+    const loaded = [user('u1', 'first', 0)];
+    const page = [assistant('a9', 'much later', 30)];
+
+    assert.deepEqual(
+      mergeRefreshedTail(loaded, page).map((m) => m.id),
+      ['u1', 'a9'],
+    );
+  });
+
+  it('leaves the loaded rows untouched for an empty page', () => {
+    const loaded = [user('u1', 'first', 0)];
+
+    // Identity, not just equality: `recomputeMergedIfNeeded` skips work by
+    // comparing array references, so returning a fresh copy here would make
+    // every empty refresh re-derive the merged transcript for nothing.
+    assert.equal(mergeRefreshedTail(loaded, []), loaded);
+  });
+
+  it('returns the page when nothing is loaded yet', () => {
+    const page = [user('u1', 'first', 0)];
+
+    assert.equal(mergeRefreshedTail([], page), page);
+  });
+
+  it('is idempotent when the same page is applied twice', () => {
+    const loaded = [user('u1', 'first', 0), assistant('a1', 'reply', 1)];
+    const page = [assistant('a1', 'reply', 1), assistant('a2', 'later', 2)];
+
+    const once = mergeRefreshedTail(loaded, page);
+    assert.deepEqual(mergeRefreshedTail(once, page).map((m) => m.id), once.map((m) => m.id));
+  });
+});
+
+describe('isSameServerTranscript', () => {
+  it('recognises a re-fetch of an unchanged transcript', () => {
+    const loaded = [user('u1', 'hello', 0), assistant('a1', 'hi', 1)];
+    // A fresh array of fresh objects, as JSON.parse hands back every time.
+    const refetched = loaded.map((entry) => ({ ...entry }));
+
+    assert.equal(isSameServerTranscript(loaded, refetched), true);
+  });
+
+  it('notices an appended message', () => {
+    const loaded = [user('u1', 'hello', 0)];
+
+    assert.equal(isSameServerTranscript(loaded, [...loaded, assistant('a1', 'hi', 1)]), false);
+  });
+
+  it('notices edited content at the same id', () => {
+    const loaded = [assistant('a1', 'partial', 0)];
+
+    assert.equal(isSameServerTranscript(loaded, [assistant('a1', 'partial and then some', 0)]), false);
+  });
+
+  it('notices a tool result that has since arrived for a row already loaded', () => {
+    // The case worth pinning: a `tool_use` row is written before its result
+    // exists, so two reads of the same append-only file can differ in nothing
+    // but this field. Treating them as equal would freeze the pending state.
+    const pending = message({ id: 't1', kind: 'tool_use', toolId: 'toolu_1', content: '' });
+    const resolved = {
+      ...pending,
+      toolResult: { content: 'done', isError: false },
+    };
+
+    assert.equal(isSameServerTranscript([pending], [resolved]), false);
+    assert.equal(isSameServerTranscript([resolved], [resolved]), true);
+  });
+
+  it('notices an error flag flipping on an otherwise identical row', () => {
+    const ok = message({ id: 't1', kind: 'tool_result', toolId: 'toolu_1', content: 'out', isError: false });
+    const failed = { ...ok, isError: true };
+
+    assert.equal(isSameServerTranscript([ok], [failed]), false);
+  });
+});
+
+/**
+ * The known blind spot, pinned deliberately.
+ *
+ * `isSameServerTranscript` compares the fields the transcript renders and that
+ * two reads of an append-only file can legitimately differ in. It does not
+ * compare everything on a `NormalizedMessage`, and it should not — a deep
+ * comparison would cost more than the re-render it saves. But that makes the
+ * chosen field list load-bearing: if normalization ever starts varying a field
+ * outside it across reads, the store keeps the stale array and the UI silently
+ * stops updating.
+ *
+ * This test documents the boundary rather than asserting it is correct, so that
+ * adding a field to `NormalizedMessage` surfaces the decision instead of
+ * quietly inheriting the gap.
+ */
+describe('isSameServerTranscript — deliberately uncompared fields', () => {
+  it('does not notice a change confined to fields outside the compared set', () => {
+    const before = message({ id: 't1', kind: 'tool_use', toolId: 'toolu_1', toolInput: { path: 'a.ts' } });
+    const after = { ...before, toolInput: { path: 'b.ts' } };
+
+    // Accepted today because `toolInput` is written once when the row is created
+    // and never revised by a later read. If that ever stops being true, this
+    // assertion flips and the field belongs in the comparison.
+    assert.equal(isSameServerTranscript([before], [after]), true);
   });
 });

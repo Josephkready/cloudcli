@@ -232,6 +232,10 @@ function ChatInterface({
     // re-subscribes background runs below — otherwise a run with no open viewer
     // at reconnect time would never re-attach (the second half of issue #204).
     if (selectedProject && selectedSession) {
+      // Deliberately unwindowed, unlike the refresh after a completed run: the
+      // pending-send retry below decides a message was lost by *not finding it*
+      // in the transcript, and an absence only means that if the transcript is
+      // complete. See `transcriptComplete: true` a few lines down.
       await sessionStore.refreshFromServer(selectedSession.id);
 
       // The refresh above is the evidence needed to tell a message the server
