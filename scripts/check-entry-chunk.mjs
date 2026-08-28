@@ -1,27 +1,35 @@
 #!/usr/bin/env node
 // scripts/check-entry-chunk.mjs
 //
-// Entry-chunk regression gate for issues #268 and #269.
+// Entry-chunk regression gate for issues #268, #269 and mermaid diagrams.
 //
 // WHY THIS EXISTS
-//   Both issues were caused by a single import line, and both are trivially
+//   Each of these was caused by a single import line, and each is trivially
 //   reintroduced by one:
 //     - `import { Prism } from 'react-syntax-highlighter'` pulls refractor with
 //       all ~290 language grammars into the entry chunk (#268).
 //     - `import 'katex/dist/katex.min.css'` (or a static `rehype-katex` import
 //       from anything the entry reaches) puts ~18.6 KB of `.katex` rules back
 //       into the render-blocking stylesheet (#269).
-//   The unit and component suites cannot see either regression: they exercise
-//   runtime behaviour, which stays perfectly correct while the bundle silently
-//   doubles. Only the built output shows it, so this reads the built output.
+//     - `import mermaid from 'mermaid'` is the biggest of the three by some way:
+//       the diagram engine and its transitive d3 / dagre / cytoscape / langium /
+//       KaTeX tree is ~650 KB minified, for a feature the overwhelming majority
+//       of chat messages never use.
+//   The unit and component suites cannot see any of these regressions: they
+//   exercise runtime behaviour, which stays perfectly correct while the bundle
+//   silently doubles. Only the built output shows it, so this reads the built
+//   output.
 //
 // WHAT IT CHECKS (against `dist/assets/`)
 //   1. No grammar this app never registers appears in the entry JS chunk.
 //   2. No `.katex` rule appears in the entry (render-blocking) CSS.
 //   3. No KaTeX code appears in the entry JS chunk.
-//   4. Positive controls, so the gate cannot pass vacuously if the marker
+//   4. No mermaid code appears in the entry JS chunk, and nothing the entry
+//      `modulepreload`s carries it either — a chunk that is fetched on every
+//      cold load is on the boot path whether or not it is the entry file.
+//   5. Positive controls, so the gate cannot pass vacuously if the marker
 //      format or the file layout changes: a registered grammar IS present in
-//      the entry chunk, and KaTeX IS still shipped in an on-demand chunk.
+//      the entry chunk, and KaTeX and mermaid ARE still shipped on demand.
 //
 // USAGE
 //   npm run build:client && npm run check:bundle
@@ -65,6 +73,39 @@ export function containsGrammar(source, name) {
 }
 
 /**
+ * Diagram-type ids that only mermaid's runtime ships.
+ *
+ * The library name itself is useless as a marker: this repo's own eager code
+ * legitimately contains the word "mermaid" (the `language-mermaid` class it
+ * matches on, the `mermaid-…` render ids it mints, the name of the on-demand
+ * chunk), so a bare `includes('mermaid')` would fail forever with the split
+ * working perfectly. These strings come from mermaid's diagram registry and
+ * appear nowhere in application code.
+ */
+const MERMAID_MARKERS = ['stateDiagram-v2', 'flowchart-v2', 'erDiagram', 'quadrantChart', 'sequenceDiagram'];
+
+/**
+ * Blank out emitted asset filenames before searching a chunk for library code.
+ *
+ * Vite writes a preload table into every chunk that dynamically imports another
+ * (`__vite__mapDeps(["assets/katex-HP8lGamR.js", …])`), so the entry chunk
+ * contains the NAME of each chunk it can reach. Adding mermaid was enough to
+ * make Rollup split KaTeX into a chunk of its own — at which point the string
+ * `katex` appeared in the entry chunk and check 3 failed, despite the entry
+ * containing not one line of KaTeX. Filenames are references, not code; only
+ * what is left after they are removed says anything about what actually shipped.
+ */
+export function stripAssetFilenames(source) {
+  return source.replace(/assets\/[A-Za-z0-9_.-]+\.(?:js|mjs|css)/g, 'assets/<chunk>');
+}
+
+/** Which of `markers` appear in `source`, ignoring emitted asset filenames. */
+export function findMarkers(source, markers) {
+  const code = stripAssetFilenames(source);
+  return markers.filter((marker) => code.includes(marker));
+}
+
+/**
  * Resolve the real entry files from `index.html` rather than globbing
  * `assets/index-*`.
  *
@@ -87,6 +128,21 @@ export function parseEntryRefs(html) {
   return { js: js[1], css: css[1] };
 }
 
+/**
+ * The chunks `index.html` asks the browser to `modulepreload`.
+ *
+ * Being outside the entry FILE is not the same as being off the boot path: a
+ * preloaded chunk is fetched and parsed on every cold load too, which is exactly
+ * what made #267 invisible for so long (`manualChunks` had split the editor and
+ * terminal into their own files while the entry still preloaded them). So the
+ * mermaid check reads this as well as the entry chunk.
+ */
+export function parsePreloadRefs(html) {
+  return [...html.matchAll(/<link[^>]+rel="modulepreload"[^>]+href="\/assets\/([^"]+\.js)"/g)].map(
+    (match) => match[1],
+  );
+}
+
 function checkBundle(distDir) {
   const assetsDir = join(distDir, 'assets');
   if (!existsSync(assetsDir)) {
@@ -98,7 +154,9 @@ function checkBundle(distDir) {
   if (!existsSync(indexHtmlPath)) {
     throw new Error(`no ${indexHtmlPath} — run \`npm run build:client\` first`);
   }
-  const { js: entryJsName, css: entryCssName } = parseEntryRefs(readFileSync(indexHtmlPath, 'utf8'));
+  const indexHtml = readFileSync(indexHtmlPath, 'utf8');
+  const { js: entryJsName, css: entryCssName } = parseEntryRefs(indexHtml);
+  const preloadedNames = parsePreloadRefs(indexHtml);
   const entryJs = readFileSync(join(assetsDir, entryJsName), 'utf8');
   const entryCss = readFileSync(join(assetsDir, entryCssName), 'utf8');
 
@@ -170,7 +228,10 @@ function checkBundle(distDir) {
     notes.push(`no \`.katex\` rules in ${entryCssName}`);
   }
 
-  if (entryJs.includes('katex')) {
+  // The filename strip matters here: since mermaid arrived, Rollup emits a
+  // `katex-<hash>.js` chunk (KaTeX is shared between the math and mermaid
+  // runtimes) and its NAME is listed in the entry's preload table.
+  if (stripAssetFilenames(entryJs).includes('katex')) {
     failures.push(
       `${entryJsName} references KaTeX. Only src/shared/markdown/mathRuntime.ts may import it, and only ` +
         'that module may be reached through a dynamic `import()` (issue #269).',
@@ -190,6 +251,63 @@ function checkBundle(distDir) {
     );
   } else {
     notes.push(`on-demand math chunk present: ${mathChunkJs[0]} + ${mathChunkCss[0]}`);
+  }
+
+  // 5. Mermaid must not be on the boot path. It is the largest dependency in
+  //    the app, and only `src/shared/markdown/mermaidRuntime.ts` may import it —
+  //    reachable solely through the `import()` in mermaidRuntimeLoader.ts.
+  const eagerMermaid = findMarkers(entryJs, MERMAID_MARKERS);
+  if (eagerMermaid.length > 0) {
+    failures.push(
+      `${entryJsName} contains mermaid (${eagerMermaid.join(', ')}). Only ` +
+        'src/shared/markdown/mermaidRuntime.ts may import `mermaid`, and only mermaidRuntimeLoader.ts may ' +
+        'reach it, through a dynamic `import()`. A static import from anything the entry touches — including ' +
+        'MermaidDiagram.tsx or mermaidConfig.ts, which hold no runtime mermaid on purpose — puts ~650 KB of ' +
+        'diagram engine on every cold load.',
+    );
+  } else {
+    notes.push(`no mermaid code in ${entryJsName}`);
+  }
+
+  // 5b. …and neither may anything index.html preloads: a preloaded chunk is
+  //     fetched on boot too, so being outside the entry file is not enough.
+  const preloadedMermaid = preloadedNames.filter((name) => {
+    const path = join(assetsDir, name);
+    return existsSync(path) && findMarkers(readFileSync(path, 'utf8'), MERMAID_MARKERS).length > 0;
+  });
+  if (preloadedMermaid.length > 0) {
+    failures.push(
+      `index.html modulepreloads mermaid via ${preloadedMermaid.join(', ')}. Splitting the engine into its ` +
+        'own chunk is not enough if that chunk is still fetched on every cold load.',
+    );
+  } else {
+    notes.push(`no mermaid in any modulepreloaded chunk (checked ${preloadedNames.length})`);
+  }
+
+  // 6. Positive controls for mermaid, mirroring the KaTeX pair above: the
+  //    engine must still ship SOMEWHERE (or check 5 passes because the feature
+  //    was deleted, or because the markers drifted), and it must be behind the
+  //    boundary this repo actually built.
+  const mermaidChunks = chunks.filter((chunk) => findMarkers(chunk.source, MERMAID_MARKERS).length > 0);
+  if (mermaidChunks.length === 0) {
+    failures.push(
+      `no chunk contains any mermaid marker (${MERMAID_MARKERS.join(', ')}). Either diagram rendering was ` +
+        'removed — in which case update this gate too — or mermaid renamed its diagram types and the markers ' +
+        'need refreshing. Do not assume the bundle is clean.',
+    );
+  } else {
+    notes.push(`mermaid still shipped on demand in ${mermaidChunks.length} chunk(s)`);
+  }
+
+  const mermaidRuntimeChunk = files.filter((file) => /^mermaidRuntime-[^.]+\.js$/.test(file));
+  if (mermaidRuntimeChunk.length === 0) {
+    failures.push(
+      'no on-demand `mermaidRuntime-*.js` chunk was emitted. The dynamic `import()` in ' +
+        'src/shared/markdown/mermaidRuntimeLoader.ts is what creates it — if it is gone, mermaid is either ' +
+        'absent or folded into something eager.',
+    );
+  } else {
+    notes.push(`on-demand mermaid chunk present: ${mermaidRuntimeChunk[0]}`);
   }
 
   return { failures, notes, entryJsName, entryCssName, entryJsBytes: entryJs.length, entryCssBytes: entryCss.length };
@@ -246,6 +364,77 @@ function selfTest() {
     } catch (error) {
       console.error(`✗ ${label}: threw ${error.message}`);
       failed += 1;
+    }
+  }
+
+  // The filename strip is the difference between "the entry contains KaTeX" and
+  // "the entry knows the name of the chunk that does". Getting it wrong in
+  // either direction breaks the gate: too greedy and a real regression walks
+  // through, too shy and the gate fails on a perfectly split bundle (which is
+  // exactly what happened the day mermaid gave KaTeX a chunk of its own).
+  const stripCases = [
+    ['drops a chunk filename from the preload table', '__vite__mapDeps(["assets/katex-HP8lGamR.js"])', 'katex', false],
+    [
+      'drops a mermaid diagram chunk filename',
+      '["assets/stateDiagram-v2-MP3YSRHH-DXCCLIUi.js","assets/x.css"]',
+      'stateDiagram-v2',
+      false,
+    ],
+    ['drops the mermaid runtime chunk filename', '"assets/mermaidRuntime-Cux2shEV.js"', 'mermaidRuntime', false],
+    ['keeps real library code', 'const t={erDiagram:1,flowchart:2}', 'erDiagram', true],
+    ['keeps KaTeX code that is not a filename', 'function katexRender(e){}', 'katex', true],
+    [
+      'keeps a marker that merely sits next to a filename',
+      '["assets/index-A.js"];var q="quadrantChart"',
+      'quadrantChart',
+      true,
+    ],
+  ];
+  for (const [label, source, marker, expected] of stripCases) {
+    const actual = stripAssetFilenames(source).includes(marker);
+    if (actual !== expected) {
+      console.error(`✗ ${label}: expected ${expected}, got ${actual}`);
+      failed += 1;
+    } else {
+      console.log(`✓ ${label}`);
+    }
+  }
+
+  // `findMarkers` is what the mermaid checks are built on, so pin that it reads
+  // through the strip rather than around it.
+  const markerCases = [
+    ['findMarkers reports a real mermaid marker', 'x="erDiagram"', ['erDiagram', 'flowchart-v2'], ['erDiagram']],
+    ['findMarkers ignores chunk filenames', '"assets/erDiagram-ABC123.js"', ['erDiagram'], []],
+    ['findMarkers returns nothing for unrelated code', 'const a=1', ['erDiagram'], []],
+  ];
+  for (const [label, source, markers, expected] of markerCases) {
+    const actual = findMarkers(source, markers);
+    if (actual.join(',') !== expected.join(',')) {
+      console.error(`✗ ${label}: expected [${expected}], got [${actual}]`);
+      failed += 1;
+    } else {
+      console.log(`✓ ${label}`);
+    }
+  }
+
+  // Preload parsing feeds check 5b; an empty result would make it vacuous.
+  const preloadCases = [
+    [
+      'collects modulepreloaded chunks and ignores the entry script',
+      '<link rel="modulepreload" href="/assets/vendor-react-A.js">' +
+        '<script type="module" src="/assets/index-B.js"></script>' +
+        '<link rel="modulepreload" href="/assets/vendor-x-C.js">',
+      ['vendor-react-A.js', 'vendor-x-C.js'],
+    ],
+    ['returns nothing when nothing is preloaded', '<script type="module" src="/assets/index-B.js"></script>', []],
+  ];
+  for (const [label, html, expected] of preloadCases) {
+    const actual = parsePreloadRefs(html);
+    if (actual.join(',') !== expected.join(',')) {
+      console.error(`✗ ${label}: expected [${expected}], got [${actual}]`);
+      failed += 1;
+    } else {
+      console.log(`✓ ${label}`);
     }
   }
 
