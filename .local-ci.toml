@@ -32,7 +32,7 @@
 #
 # What `setup` is *for* — re-installing first-party code against the mounted tree — has
 # no analogue here: this project is never installed as a package, so `npm ci` fetches
-# only third-party dependencies and the mounted `src/`, `server/` and `e2e/` trees ARE
+# only third-party dependencies and the mounted `src/`, `server/`, `e2e/` and `bench/` trees ARE
 # the code under test. There is no baked snapshot of our own code to go stale.
 #
 # `python3 make g++` are for `better-sqlite3`: neither base image carries a toolchain,

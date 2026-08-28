@@ -127,16 +127,37 @@ function findLatestAssistantUsage(lines: string[]): AssistantUsage | null {
  * reports correctly rather than reporting zero.
  */
 async function readLatestAssistantUsage(filePath: string): Promise<AssistantUsage | null> {
+  // Whether the tail covered the whole file is a question about *bytes*, and it
+  // has to be asked of the file rather than of the decoded string. `tail.length`
+  // counts UTF-16 code units after decoding, so a transcript containing any
+  // multi-byte character (an emoji, a smart quote, any non-Latin script — none
+  // of them rare in a real conversation) decodes 256 KiB into far fewer units
+  // and a genuinely partial read would look complete. The truncated first line
+  // would then be kept and parsed, which is precisely the case the slice below
+  // exists to avoid.
+  const { size } = await fsp.stat(filePath);
+  const readWholeFile = size <= USAGE_SCAN_TAIL_BYTES;
+
   const tail = await readFileTail(filePath, USAGE_SCAN_TAIL_BYTES);
-  // Drop the first line: unless the read covered the whole file it starts
-  // mid-line, and a half-line either fails to parse (harmless) or, worse,
+  // Drop the first line unless the read covered the whole file: otherwise it
+  // starts mid-line, and a half-line either fails to parse (harmless) or, worse,
   // parses into something unintended.
   const tailLines = tail.split('\n');
-  const usableTailLines = tail.length < USAGE_SCAN_TAIL_BYTES ? tailLines : tailLines.slice(1);
+  const usableTailLines = readWholeFile ? tailLines : tailLines.slice(1);
 
   const fromTail = findLatestAssistantUsage(usableTailLines);
   if (fromTail) {
     return fromTail;
+  }
+
+  // Nothing in the recent window carried usage, so the answer is further back
+  // and the O(file) scan is unavoidable. Logged because this is the slow path
+  // the tail read exists to avoid — silently falling back would make a
+  // transcript that always takes it indistinguishable from one that never does.
+  if (!readWholeFile) {
+    console.warn(
+      `[TokenUsage] no usage record in the last ${USAGE_SCAN_TAIL_BYTES} bytes of ${filePath}; scanning the whole transcript.`,
+    );
   }
 
   const fileStream = fs.createReadStream(filePath);

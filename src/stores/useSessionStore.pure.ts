@@ -529,10 +529,32 @@ export function mergeRefreshedTail(
     return page;
   }
 
-  const joinIndex = loaded.findIndex((message) => message.id === page[0].id);
+  const joinIndex = findRefreshTailJoin(loaded, page);
   return joinIndex >= 0
     ? [...loaded.slice(0, joinIndex), ...page]
     : [...loaded, ...page];
+}
+
+/**
+ * Where a refreshed page joins the rows already loaded, or `-1` when it does
+ * not reach back far enough to touch them.
+ *
+ * `-1` is the case worth acting on. It means the window the caller asked for
+ * was smaller than the number of rows appended since, so the two arrays do not
+ * overlap and there is no way to tell whether messages sit in the gap between
+ * them. Appending anyway produces a transcript with a hole that nothing later
+ * repairs — `fetchMore` paginates *older* than what is loaded, so it walks past
+ * the gap rather than into it. Callers use this to fall back to an unwindowed
+ * read instead of splicing something they cannot verify.
+ */
+export function findRefreshTailJoin(
+  loaded: NormalizedMessage[],
+  page: NormalizedMessage[],
+): number {
+  if (page.length === 0 || loaded.length === 0) {
+    return -1;
+  }
+  return loaded.findIndex((message) => message.id === page[0].id);
 }
 
 /**

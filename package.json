@@ -29,7 +29,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p server/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json && tsc --noEmit -p bench/tsconfig.json",
     "test": "npm run test:server && npm run test:unit && npm run test:component",
     "test:server": "tsx --tsconfig server/tsconfig.json --test \"server/**/*.test.ts\" \"server/**/*.test.js\"",
-    "test:unit": "tsx --tsconfig tsconfig.json --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
+    "test:unit": "tsx --tsconfig tsconfig.json --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\" && tsx --tsconfig bench/tsconfig.json --test \"bench/**/*.test.ts\"",
     "test:component": "vitest run",
     "test:component:watch": "vitest",
     "test:coverage": "npm run test:server:coverage && npm run test:unit:coverage && npm run test:component:coverage",

@@ -145,3 +145,63 @@ describe('useSessionStore.refreshFromServer — windowed refresh', () => {
     expect(result.current.getSlot(SESSION).serverMessages).toHaveLength(3);
   });
 });
+
+describe('useSessionStore.refreshFromServer — window too small to reach the loaded rows', () => {
+  it('re-reads the whole transcript rather than splicing a gap it cannot verify', async () => {
+    const { result } = renderHook(() => useSessionStore());
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: [1, 2, 3].map(msg), total: 3, hasMore: false }),
+    );
+    await act(async () => {
+      await result.current.fetchFromServer(SESSION, { limit: 20, offset: 0 });
+    });
+
+    // The run appended more rows than the window covers, so the page starts
+    // *after* everything loaded and shares no row with it. Appending it anyway
+    // would leave m4/m5 missing forever: `fetchMore` paginates older than the
+    // loaded rows, so it walks past the hole rather than into it.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: [6, 7].map(msg), total: 7, hasMore: true }),
+    );
+    // The fallback read, unwindowed.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: [1, 2, 3, 4, 5, 6, 7].map(msg), total: 7, hasMore: false }),
+    );
+
+    await act(async () => {
+      await result.current.refreshFromServer(SESSION, { limit: 2 });
+    });
+
+    expect(requestedUrls()[1]).toContain('limit=2');
+    expect(requestedUrls()[2]).not.toContain('limit=');
+    expect(result.current.getSlot(SESSION).serverMessages.map((message) => message.id)).toEqual([
+      'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7',
+    ]);
+  });
+
+  it('does not re-read when the window does overlap', async () => {
+    const { result } = renderHook(() => useSessionStore());
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: [1, 2, 3].map(msg), total: 3, hasMore: false }),
+    );
+    await act(async () => {
+      await result.current.fetchFromServer(SESSION, { limit: 20, offset: 0 });
+    });
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: [3, 4].map(msg), total: 4, hasMore: false }),
+    );
+    await act(async () => {
+      await result.current.refreshFromServer(SESSION, { limit: 2 });
+    });
+
+    // Exactly two requests: the initial load and the windowed refresh. A third
+    // would mean the fallback fired on a page that was perfectly spliceable.
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(result.current.getSlot(SESSION).serverMessages.map((message) => message.id)).toEqual([
+      'm1', 'm2', 'm3', 'm4',
+    ]);
+  });
+});

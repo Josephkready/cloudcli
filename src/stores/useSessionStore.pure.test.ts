@@ -607,3 +607,30 @@ describe('isSameServerTranscript', () => {
     assert.equal(isSameServerTranscript([ok], [failed]), false);
   });
 });
+
+/**
+ * The known blind spot, pinned deliberately.
+ *
+ * `isSameServerTranscript` compares the fields the transcript renders and that
+ * two reads of an append-only file can legitimately differ in. It does not
+ * compare everything on a `NormalizedMessage`, and it should not — a deep
+ * comparison would cost more than the re-render it saves. But that makes the
+ * chosen field list load-bearing: if normalization ever starts varying a field
+ * outside it across reads, the store keeps the stale array and the UI silently
+ * stops updating.
+ *
+ * This test documents the boundary rather than asserting it is correct, so that
+ * adding a field to `NormalizedMessage` surfaces the decision instead of
+ * quietly inheriting the gap.
+ */
+describe('isSameServerTranscript — deliberately uncompared fields', () => {
+  it('does not notice a change confined to fields outside the compared set', () => {
+    const before = message({ id: 't1', kind: 'tool_use', toolId: 'toolu_1', toolInput: { path: 'a.ts' } });
+    const after = { ...before, toolInput: { path: 'b.ts' } };
+
+    // Accepted today because `toolInput` is written once when the row is created
+    // and never revised by a later read. If that ever stops being true, this
+    // assertion flips and the field belongs in the comparison.
+    assert.equal(isSameServerTranscript([before], [after]), true);
+  });
+});

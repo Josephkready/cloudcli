@@ -14,6 +14,7 @@ import type { LLMProvider } from '../types/app';
 
 import {
   createEmptySlot,
+  findRefreshTailJoin,
   isSameServerTranscript,
   mergeRefreshedTail,
   pruneRealtimeSupersededByServer,
@@ -244,15 +245,22 @@ export function useSessionStore() {
   ) => {
     const slot = getSlot(sessionId);
     const fetchTicket = ++slot._fetchSeq;
-    const limit = opts.limit ?? null;
-    try {
-      const query = limit === null ? '' : `?limit=${limit}&offset=0`;
+    let limit = opts.limit ?? null;
+    const read = async (pageLimit: number | null) => {
+      const query = pageLimit === null ? '' : `?limit=${pageLimit}&offset=0`;
       const url = `/api/providers/sessions/${encodeURIComponent(sessionId)}/messages${query}`;
       const response = await authenticatedFetch(url);
-
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const body = await response.json();
-      const data = body?.data ?? body;
+      return (body?.data ?? body) as {
+        messages?: NormalizedMessage[];
+        total?: number;
+        hasMore?: boolean;
+      };
+    };
+
+    try {
+      let data = await read(limit);
 
       // A later-started fetch already applied: applying this stale transcript
       // would erase rows the user has already seen (and re-prune realtime
@@ -261,7 +269,32 @@ export function useSessionStore() {
         return;
       }
 
-      const refreshed: NormalizedMessage[] = data.messages || [];
+      let refreshed: NormalizedMessage[] = data.messages || [];
+
+      // The window has to reach back far enough to overlap what is loaded, or
+      // the two cannot be spliced: with no shared row there is no way to know
+      // whether messages sit in the gap, and appending regardless leaves a hole
+      // that nothing repairs (`fetchMore` paginates older than the loaded rows,
+      // so it walks past the gap rather than into it). Rather than trust the
+      // caller's window to have been generous enough, notice when it was not
+      // and re-read the whole transcript — the cost the window exists to avoid,
+      // paid only in the rare case that actually needs it.
+      if (
+        limit !== null
+        && refreshed.length > 0
+        && slot.serverMessages.length > 0
+        && findRefreshTailJoin(slot.serverMessages, refreshed) < 0
+      ) {
+        console.warn(
+          `[SessionStore] windowed refresh of ${limit} message(s) did not reach the loaded transcript for ${sessionId}; re-reading it in full`,
+        );
+        limit = null;
+        data = await read(null);
+        if (fetchTicket <= slot._appliedFetchSeq) {
+          return;
+        }
+        refreshed = data.messages || [];
+      }
 
       // An empty refresh over a transcript we already have is never a
       // legitimate reason to clear the screen. The server is not fail-closed:
