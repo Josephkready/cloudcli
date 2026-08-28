@@ -89,6 +89,20 @@ export const MOCK_ASSISTANT_TEXT = ASSISTANT_TEXT_PARTS.join('');
 /** How many `kind:'text'` assistant frames a run emits. */
 export const MOCK_ASSISTANT_FRAME_COUNT = ASSISTANT_TEXT_PARTS.length;
 
+/**
+ * Prefix that turns a prompt into "reply with the rest of this message".
+ *
+ * The mock's fixed reply is the right default — a deterministic transcript is
+ * what most e2e specs want — but some assertions are about how a *particular*
+ * assistant reply renders, and there is otherwise no way for a browser test to
+ * put chosen markdown into an assistant bubble. Rendering ```` ```mermaid ````
+ * fences is the case that needed it: the diagram has to come from the assistant
+ * side, because user messages are deliberately not rendered as markdown.
+ *
+ * Opt-in by prefix, so every existing spec keeps the fixed reply untouched.
+ */
+export const MOCK_ECHO_PREFIX = 'echo:';
+
 /** Cumulative token snapshot the run reports via a `token_budget` status frame. */
 export const MOCK_TOKEN_BUDGET = {
   inputTokens: 100,
@@ -107,9 +121,11 @@ export const MOCK_TOKEN_BUDGET = {
  *    This is the seam the Playwright e2e suite drives so a full browser chat turn
  *    (send -> streamed frames -> terminal `complete`) runs with no real CLI/SDK.
  *
- * @param {string} message - The user's task message. Only inspected for
- *        `MOCK_CODE_BLOCK_SENTINEL`, which swaps the prose reply for one made
- *        of code surfaces; otherwise echoed via logs alone.
+ * @param {string} message - The user's task message. Logged, and inspected for two
+ *        independent test hooks: `MOCK_CODE_BLOCK_SENTINEL` anywhere in it swaps the
+ *        prose reply for one made of code surfaces, and a leading `MOCK_ECHO_PREFIX`
+ *        makes the remainder the assistant's reply instead of the fixed
+ *        `ASSISTANT_TEXT_PARTS`. The sentinel wins if a spec somehow asks for both.
  * @param {{ sessionId?: string|null, provider?: string }} [options] - Run options;
  *        `sessionId` seeds the emitted session id when provided (a fresh unique id
  *        is minted otherwise so concurrent app sessions never share a provider id),
@@ -136,8 +152,15 @@ export async function runMockAgentProvider(message, options = {}, writer) {
   // A non-assistant frame that must NOT appear in getAssistantMessages().
   writer.send(createNormalizedMessage({ kind: 'status', text: 'thinking', sessionId, provider }));
 
+  // Two independent hooks, checked in precedence order. The sentinel swaps in the
+  // code-surface fixture; `echo:` replies with the rest of the prompt as ONE frame,
+  // because a spec that chooses the assistant's markdown wants it whole, not chunked.
   const wantsCodeSurfaces = String(message || '').includes(MOCK_CODE_BLOCK_SENTINEL);
-  const textParts = wantsCodeSurfaces ? CODE_SURFACE_TEXT_PARTS : ASSISTANT_TEXT_PARTS;
+  const textParts = wantsCodeSurfaces
+    ? CODE_SURFACE_TEXT_PARTS
+    : typeof message === 'string' && message.startsWith(MOCK_ECHO_PREFIX)
+      ? [message.slice(MOCK_ECHO_PREFIX.length)]
+      : ASSISTANT_TEXT_PARTS;
 
   for (const content of textParts) {
     writer.send(createNormalizedMessage({ kind: 'text', role: 'assistant', content, sessionId, provider }));

@@ -41,6 +41,16 @@ const DEMAND_LOADED_PACKAGES = [
     prefix: 'react-dropzone',
     reason: 'still used by the skills upload surface, which is behind a lazy boundary',
   },
+  // The largest dependency in the app — mermaid drags d3, dagre, cytoscape,
+  // langium and its own KaTeX along with it. Only `src/shared/markdown/
+  // mermaidRuntime.ts` may import it, and only a dynamic `import()` may reach
+  // that module. `import type { MermaidConfig } from 'mermaid'` in
+  // `mermaidConfig.ts` is fine and deliberately not an exception here: the
+  // walker erases type-only imports, exactly as the bundler does.
+  {
+    prefix: 'mermaid',
+    reason: 'the diagram engine (~1 MB) belongs to rendered ```mermaid fences',
+  },
 ];
 
 const graph = walkStaticGraph(ENTRY, ROOT);
@@ -89,6 +99,12 @@ describe('entry chunk static import graph (#267)', () => {
       // and it must never import from this module or Prism comes back with it.
       'src/shared/markdown/PrismCodeBlock.tsx',
       'src/shared/markdown/prismLanguages.ts',
+      // The mermaid engine. Its detection (`mermaidFences.ts`), its config
+      // (`mermaidConfig.ts`) and the component that draws the result
+      // (`MermaidDiagram.tsx`) ARE eager by design — none of them imports
+      // mermaid, and the component needs to be on hand to render the code-block
+      // fallback while the chunk is still in flight.
+      'src/shared/markdown/mermaidRuntime.ts',
     ];
 
     const eager = mustBeLazy.filter((path) => graph.files.includes(join(ROOT, path)));
