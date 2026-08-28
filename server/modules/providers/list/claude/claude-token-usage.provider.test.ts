@@ -236,3 +236,51 @@ test('getClaudeSessionTokenUsage is not fooled by a partial line at the tail bou
     await cleanup();
   }
 });
+
+test('getClaudeSessionTokenUsage reads a large multi-byte transcript correctly', async () => {
+  const sessionId = '55555555-6666-7777-8888-999999999999';
+  // Every other fixture in this file is ASCII, which left the byte-vs-character
+  // distinction in the tail read entirely uncovered: 256 KiB of Japanese and
+  // emoji decodes to roughly a third as many UTF-16 units, so any length check
+  // that confuses the two behaves differently here than on English text.
+  //
+  // Note what this asserts and what it does not. It pins the *answer* on a
+  // non-ASCII transcript. It does not discriminate the specific bug that
+  // prompted it (`tail.length` compared against a byte budget), because that bug
+  // is not reachable through this function's result: the scan runs backwards, so
+  // a first line truncated mid-character is only ever consulted after everything
+  // newer, and it then fails `JSON.parse` and is skipped — after which the
+  // full-scan fallback returns the right record anyway. The fix is still worth
+  // having (the check was measuring the wrong quantity, and cost one `stat` to
+  // make honest), but a test claiming to guard it would be claiming more than it
+  // can deliver.
+  const multiByteLine = (index: number): string =>
+    JSON.stringify({
+      type: 'user',
+      index,
+      message: { role: 'user', content: '日本語のテキスト🙂'.repeat(400) },
+    });
+
+  const paddingLines = Math.ceil(TAIL_WINDOW_BYTES / Buffer.byteLength(multiByteLine(0))) + 4;
+  const lines = [
+    ...Array.from({ length: paddingLines }, (_unused, index) => multiByteLine(index)),
+    JSON.stringify({
+      type: 'assistant',
+      message: { usage: { input_tokens: 61, cache_creation_input_tokens: 67, cache_read_input_tokens: 71 } },
+    }),
+  ];
+  const { filePath, cleanup } = await createSandboxJsonl(sessionId, lines);
+
+  try {
+    const result = await getClaudeSessionTokenUsage(sessionId, {
+      getSessionById: () => ({ jsonl_path: filePath, project_path: '/home/jkready' }),
+      resolveJsonlPath: async () => filePath,
+      readContextWindowOverride: () => null,
+    });
+
+    assert.deepEqual(result.breakdown, { input: 61, cacheCreation: 67, cacheRead: 71 });
+    assert.equal(result.used, 199);
+  } finally {
+    await cleanup();
+  }
+});

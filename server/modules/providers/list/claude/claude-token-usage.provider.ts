@@ -131,10 +131,14 @@ async function readLatestAssistantUsage(filePath: string): Promise<AssistantUsag
   // has to be asked of the file rather than of the decoded string. `tail.length`
   // counts UTF-16 code units after decoding, so a transcript containing any
   // multi-byte character (an emoji, a smart quote, any non-Latin script — none
-  // of them rare in a real conversation) decodes 256 KiB into far fewer units
-  // and a genuinely partial read would look complete. The truncated first line
-  // would then be kept and parsed, which is precisely the case the slice below
-  // exists to avoid.
+  // of them rare in a real conversation) decodes 256 KiB into far fewer units,
+  // and a genuinely partial read would read as complete.
+  //
+  // The consequence is bounded rather than dramatic, which is why it survived
+  // review once: the truncated first line would be kept, but the scan runs
+  // backwards and reaches it only after everything newer, at which point it
+  // fails `JSON.parse` and is skipped. It costs one `stat` to ask the right
+  // question instead of relying on that.
   const { size } = await fsp.stat(filePath);
   const readWholeFile = size <= USAGE_SCAN_TAIL_BYTES;
 
