@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test, { mock } from 'node:test';
 
+import { sessionsDb } from '@/modules/database/index.js';
 import {
   CLAUDE_FALLBACK_MODELS,
   ClaudeProviderModels,
@@ -302,6 +306,61 @@ test('no resolved model falls back to the catalog default, which is a real picke
   assert.deepEqual(activeModel, { model: 'default' });
   assert.equal(activeModel.model, CLAUDE_FALLBACK_MODELS.DEFAULT);
   assert.ok(findClaudeModelOption(activeModel.model), 'the fallback must be a selectable option');
+});
+
+// ---------------------------------------------------------------------------
+// getCurrentActiveModel id-namespace resolution (#461).
+//
+// The transcript stamps events with the PROVIDER session id. getCurrentActiveModel
+// is called with the APP session id, so it must translate via the row's
+// provider_session_id before the transcript guard compares ids — otherwise every
+// event in a cloudcli-created session's transcript is rejected and the picker shows
+// 'default' for a session that is plainly running a real model.
+// ---------------------------------------------------------------------------
+
+/** Writes a one-turn transcript whose event carries `eventSessionId`, returns its path. */
+const writeTranscript = async (eventSessionId: string, model: string): Promise<string> => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'models-461-'));
+  const jsonlPath = path.join(dir, 'session.jsonl');
+  await fsp.writeFile(jsonlPath, `${assistantTurn(model, 'ok', eventSessionId)}\n`);
+  return jsonlPath;
+};
+
+test('getCurrentActiveModel resolves via the provider session id, not the app id (#461)', async () => {
+  const appId = 'app-session-1111';
+  const providerId = 'provider-session-9999';
+  const jsonlPath = await writeTranscript(providerId, 'opus');
+  const stub = mock.method(sessionsDb, 'getSessionById', () => ({
+    jsonl_path: jsonlPath,
+    provider_session_id: providerId,
+  }) as unknown as ReturnType<typeof sessionsDb.getSessionById>);
+
+  try {
+    const active = await new ClaudeProviderModels().getCurrentActiveModel(appId);
+    assert.deepEqual(active, { model: 'opus' }, 'must resolve the transcript model, not fall back to default');
+  } finally {
+    stub.mock.restore();
+    await fsp.rm(path.dirname(jsonlPath), { recursive: true, force: true });
+  }
+});
+
+test('getCurrentActiveModel falls back to the app id when no provider id is recorded (#461)', async () => {
+  // A disk-discovered session: provider_session_id is null and the transcript is
+  // stamped with the app id, so the app-id fallback still resolves the model.
+  const appId = 'disk-session-2222';
+  const jsonlPath = await writeTranscript(appId, 'sonnet');
+  const stub = mock.method(sessionsDb, 'getSessionById', () => ({
+    jsonl_path: jsonlPath,
+    provider_session_id: null,
+  }) as unknown as ReturnType<typeof sessionsDb.getSessionById>);
+
+  try {
+    const active = await new ClaudeProviderModels().getCurrentActiveModel(appId);
+    assert.deepEqual(active, { model: 'sonnet' });
+  } finally {
+    stub.mock.restore();
+    await fsp.rm(path.dirname(jsonlPath), { recursive: true, force: true });
+  }
 });
 
 test('no transcript can ever resolve to an angle-bracketed value', () => {
