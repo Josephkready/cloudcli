@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react';
 
 import { readQueuedMessages, writeQueuedMessages } from '../components/chat/utils/chatStorage';
+import {
+  appendPendingSend,
+  makePendingSendId,
+  markPendingSendDispatched,
+} from '../components/chat/utils/pendingSends';
 
 import type { MarkSessionProcessing, SessionActivityMap } from './useSessionProtection';
 
@@ -62,14 +67,42 @@ export function useQueuedMessageAutoSend({
       // Dispatch the head; persist the tail (the claim: remove before send) so
       // the next completion drains the following message, in order.
       const [head, ...rest] = queued;
+      const sendOptions = { ...(head.options ?? {}), images: [] };
+
+      // Give this auto-send the same durable, dedupable identity a composer send
+      // has (#459). Without a clientMessageId the server cannot dedupe a resend
+      // and never acks it (sendChatSendAccepted returns early on an empty id), so
+      // a drained off-screen message had no delivery guarantee in either
+      // direction. The pending record — written BEFORE the socket write, as the
+      // composer does — is the only durable copy if the frame is lost on a
+      // half-open socket, and it is what retryPendingSends resends on reconnect.
+      const pendingSendId = makePendingSendId();
+      appendPendingSend(sessionId, {
+        id: pendingSendId,
+        content: head.content,
+        timestamp: new Date().toISOString(),
+        options: sendOptions,
+        dispatched: false,
+      });
+
       writeQueuedMessages(sessionId, rest);
-      sendMessage({
+      const dispatched = sendMessage({
         type: 'chat.send',
         sessionId,
         content: head.content,
-        options: { ...(head.options ?? {}), images: [] },
+        options: sendOptions,
+        clientMessageId: pendingSendId,
       });
-      markSessionProcessing(sessionId, { statusText: null, canInterrupt: true });
+
+      // Only a socket that accepted the frame means a run started, so mirror the
+      // composer: promote the pending record and flip the activity indicator only
+      // then. A refused frame stays undelivered in the pending store (dispatched
+      // false) and goes out on the next reconnect, without falsely showing the
+      // session as processing.
+      if (dispatched) {
+        markPendingSendDispatched(sessionId, pendingSendId);
+        markSessionProcessing(sessionId, { statusText: null, canInterrupt: true });
+      }
     }
   }, [processingSessions, activeSessionId, ws, sendMessage, markSessionProcessing]);
 }
