@@ -85,6 +85,11 @@ export function useQueuedMessageAutoSend({
         dispatched: false,
       });
 
+      // Durability-first ordering: the pending record is written above, then the
+      // head is dropped from the queue (the claim that stops the composer's own
+      // flush from double-sending). A hard crash in the gap between these two
+      // writes leaves the message in both stores, which errs toward a duplicate
+      // rather than the message loss the reverse order would risk.
       writeQueuedMessages(sessionId, rest);
       const dispatched = sendMessage({
         type: 'chat.send',

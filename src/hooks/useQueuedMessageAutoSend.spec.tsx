@@ -107,6 +107,13 @@ describe('useQueuedMessageAutoSend', () => {
       clientMessageId: expect.any(String),
     });
     expect(readQueuedMessages('s1')).toEqual([]);
+
+    // Each drain gets its OWN identity and durable record, so a resend of one
+    // can never be mistaken for the other.
+    const ids = sendMessage.mock.calls.map((call) => (call[0] as { clientMessageId: string }).clientMessageId);
+    expect(new Set(ids).size).toBe(2);
+    const pending = readPendingSends('s1');
+    expect(pending.map((entry) => entry.id).sort()).toEqual([...ids].sort());
   });
 
   it('preserves the queue when the socket is closed — never drops the message (#64)', () => {
@@ -121,6 +128,10 @@ describe('useQueuedMessageAutoSend', () => {
     expect(sendMessage).not.toHaveBeenCalled();
     expect(markSessionProcessing).not.toHaveBeenCalled();
     expect(readQueuedMessages('s1')).toEqual([{ content: 'first' }, { content: 'second' }]);
+    // The pending record must NOT be written when the socket is unusable — it is
+    // written only after the readyState check passes (a future reordering that
+    // littered the pending store on a closed socket would be caught here).
+    expect(readPendingSends('s1')).toEqual([]);
   });
 
   it('preserves the queue when there is no socket at all (#64)', () => {
@@ -132,6 +143,7 @@ describe('useQueuedMessageAutoSend', () => {
 
     expect(sendMessage).not.toHaveBeenCalled();
     expect(readQueuedMessages('s1')).toEqual([{ content: 'only' }]);
+    expect(readPendingSends('s1')).toEqual([]);
   });
 
   it('never auto-sends the queue of the currently-viewed session (owned by the composer)', () => {
@@ -175,7 +187,9 @@ describe('useQueuedMessageAutoSend', () => {
     expect(pending).toHaveLength(1);
     expect(pending[0].id).toBe(frame.clientMessageId);
     expect(pending[0].content).toBe('first');
-    expect(pending[0].dispatched).not.toBe(false);
+    // dispatched:true round-trips as an absent field (the store's "assumed
+    // dispatched" convention), so undefined here means it was promoted.
+    expect(pending[0].dispatched).toBeUndefined();
   });
 
   it('keeps a refused send durable as undelivered and does not mark it processing (#459)', () => {
