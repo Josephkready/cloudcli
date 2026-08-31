@@ -2,6 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { readQueuedMessages, writeQueuedMessages } from '../components/chat/utils/chatStorage';
+import { readPendingSends } from '../components/chat/utils/pendingSends';
 
 import { useQueuedMessageAutoSend } from './useQueuedMessageAutoSend';
 import type { SessionActivity, SessionActivityMap } from './useSessionProtection';
@@ -22,6 +23,9 @@ const WS_CLOSED = 3;
 
 // jsdom does not implement WebSocket, but the hook reads `WebSocket.OPEN`.
 beforeEach(() => {
+  // The pending-send store persists across tests within the jsdom localStorage,
+  // so clear it (and any queued messages) to keep each case isolated.
+  localStorage.clear();
   vi.stubGlobal('WebSocket', class {
     static OPEN = WS_OPEN;
     static CLOSED = WS_CLOSED;
@@ -44,7 +48,10 @@ function fakeWs(readyState: number) {
 type Args = Parameters<typeof useQueuedMessageAutoSend>[0];
 
 function mountAutoSend(overrides: Partial<Args>) {
-  const sendMessage = vi.fn();
+  // Production sendMessage returns whether the frame reached the socket; the hook
+  // now gates the pending-record promotion and the processing band on that, so a
+  // truthy default mirrors a healthy socket. Individual tests override it.
+  const sendMessage = vi.fn<Args['sendMessage']>(() => true);
   const markSessionProcessing = vi.fn();
   const props: Args = {
     processingSessions: processing(),
@@ -85,6 +92,7 @@ describe('useQueuedMessageAutoSend', () => {
       sessionId: 's1',
       content: 'first',
       options: { model: 'a', images: [] },
+      clientMessageId: expect.any(String),
     });
     expect(readQueuedMessages('s1')).toEqual([{ content: 'second', options: { model: 'b' } }]);
 
@@ -96,8 +104,16 @@ describe('useQueuedMessageAutoSend', () => {
       sessionId: 's1',
       content: 'second',
       options: { model: 'b', images: [] },
+      clientMessageId: expect.any(String),
     });
     expect(readQueuedMessages('s1')).toEqual([]);
+
+    // Each drain gets its OWN identity and durable record, so a resend of one
+    // can never be mistaken for the other.
+    const ids = sendMessage.mock.calls.map((call) => (call[0] as { clientMessageId: string }).clientMessageId);
+    expect(new Set(ids).size).toBe(2);
+    const pending = readPendingSends('s1');
+    expect(pending.map((entry) => entry.id).sort()).toEqual([...ids].sort());
   });
 
   it('preserves the queue when the socket is closed — never drops the message (#64)', () => {
@@ -112,6 +128,10 @@ describe('useQueuedMessageAutoSend', () => {
     expect(sendMessage).not.toHaveBeenCalled();
     expect(markSessionProcessing).not.toHaveBeenCalled();
     expect(readQueuedMessages('s1')).toEqual([{ content: 'first' }, { content: 'second' }]);
+    // The pending record must NOT be written when the socket is unusable — it is
+    // written only after the readyState check passes (a future reordering that
+    // littered the pending store on a closed socket would be caught here).
+    expect(readPendingSends('s1')).toEqual([]);
   });
 
   it('preserves the queue when there is no socket at all (#64)', () => {
@@ -123,6 +143,7 @@ describe('useQueuedMessageAutoSend', () => {
 
     expect(sendMessage).not.toHaveBeenCalled();
     expect(readQueuedMessages('s1')).toEqual([{ content: 'only' }]);
+    expect(readPendingSends('s1')).toEqual([]);
   });
 
   it('never auto-sends the queue of the currently-viewed session (owned by the composer)', () => {
@@ -144,5 +165,55 @@ describe('useQueuedMessageAutoSend', () => {
     completeRun(rerender, props, 's1');
 
     expect(markSessionProcessing).toHaveBeenCalledWith('s1', { statusText: null, canInterrupt: true });
+  });
+
+  it('gives the auto-send a clientMessageId and a durable, dispatched pending record (#459)', () => {
+    writeQueuedMessages('s1', [{ content: 'first', options: { model: 'a' } }]);
+
+    const { rerender, sendMessage, props } = mountAutoSend({ ws: fakeWs(WS_OPEN) });
+
+    completeRun(rerender, props, 's1');
+
+    // The frame carries the id the server dedupes and acks on.
+    const frame = sendMessage.mock.calls[0][0] as { clientMessageId: string };
+    expect(typeof frame.clientMessageId).toBe('string');
+    expect(frame.clientMessageId.length).toBeGreaterThan(0);
+
+    // A durable pending record exists under the same id, so a frame lost on a
+    // half-open socket is recoverable by retryPendingSends. It was promoted to
+    // dispatched after the socket accepted it (dispatched:true round-trips as an
+    // absent field, the store's "assumed dispatched" convention).
+    const pending = readPendingSends('s1');
+    expect(pending).toHaveLength(1);
+    expect(pending[0].id).toBe(frame.clientMessageId);
+    expect(pending[0].content).toBe('first');
+    // dispatched:true round-trips as an absent field (the store's "assumed
+    // dispatched" convention), so undefined here means it was promoted.
+    expect(pending[0].dispatched).toBeUndefined();
+  });
+
+  it('keeps a refused send durable as undelivered and does not mark it processing (#459)', () => {
+    writeQueuedMessages('s1', [{ content: 'only' }]);
+
+    // A socket that reads OPEN but refuses the frame (returns false) — the
+    // half-open case. The message must survive as an undelivered pending record
+    // and the session must NOT be shown as processing.
+    const refusedSend = vi.fn(() => false);
+    const markSessionProcessing = vi.fn();
+    const { rerender, props } = mountAutoSend({
+      ws: fakeWs(WS_OPEN),
+      sendMessage: refusedSend,
+      markSessionProcessing,
+    });
+
+    completeRun(rerender, props, 's1');
+
+    expect(refusedSend).toHaveBeenCalledTimes(1);
+    expect(markSessionProcessing).not.toHaveBeenCalled();
+
+    const pending = readPendingSends('s1');
+    expect(pending).toHaveLength(1);
+    expect(pending[0].content).toBe('only');
+    expect(pending[0].dispatched).toBe(false);
   });
 });
