@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { isInternalContent, resolveClaudeJsonlPath } from '@/modules/providers/list/claude/claude-sessions.provider.js';
+import { ClaudeSessionsProvider, isInternalContent, resolveClaudeJsonlPath } from '@/modules/providers/list/claude/claude-sessions.provider.js';
 
 test('isInternalContent flags the skill-preamble line so it is not rendered as a user bubble', () => {
   assert.equal(isInternalContent('Base directory for this skill: /home/user/.claude/skills/foo'), true);
@@ -163,4 +163,24 @@ test('resolveClaudeJsonlPath prefers home-rewrite recovery even when project_pat
   } finally {
     await cleanup();
   }
+});
+
+test('normalizeMessage coerces a contentless tool_result to an empty string (#463)', () => {
+  // A tool_result part with no `content` used to be stored as the value undefined
+  // (JSON.stringify(undefined)), violating the `content: string` contract the UI
+  // reads. The source coercion must yield '' so consumers never see undefined.
+  const provider = new ClaudeSessionsProvider();
+  const out = provider.normalizeMessage(
+    {
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'call-1', is_error: false }],
+      },
+    },
+    's1',
+  );
+
+  const toolResult = out.find((m) => m.kind === 'tool_result');
+  assert.ok(toolResult, 'a tool_result message should be produced');
+  assert.equal(toolResult?.content, '');
 });

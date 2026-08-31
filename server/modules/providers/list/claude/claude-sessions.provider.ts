@@ -477,7 +477,10 @@ export class ClaudeSessionsProvider implements IProviderSessions {
               provider: PROVIDER,
               kind: 'tool_result',
               toolId: part.tool_use_id,
-              content: typeof part.content === 'string' ? part.content : JSON.stringify(part.content),
+              // JSON.stringify(undefined) is the value undefined, not a string, so
+              // a contentless tool_result would otherwise write undefined into a
+              // field consumers read as a string. Coerce at the source (#463).
+              content: typeof part.content === 'string' ? part.content : (JSON.stringify(part.content) ?? ''),
               isError: Boolean(part.is_error),
               subagentTools: raw.subagentTools,
               toolUseResult: raw.toolUseResult,
@@ -771,9 +774,12 @@ export class ClaudeSessionsProvider implements IProviderSessions {
         }
 
         msg.toolResult = {
+          // toolResult.content is typed string but can be undefined for a
+          // contentless result; JSON.stringify(undefined) would keep it undefined,
+          // breaking the `content: string` contract on msg.toolResult (#463).
           content: typeof toolResult.content === 'string'
             ? toolResult.content
-            : JSON.stringify(toolResult.content),
+            : (JSON.stringify(toolResult.content) ?? ''),
           isError: toolResult.isError,
           toolUseResult: toolResult.toolUseResult,
         };
