@@ -309,9 +309,18 @@ export class ClaudeProviderModels implements IProviderModels {
     }
 
     try {
-      const jsonlPath = sessionsDb.getSessionById(sessionId)?.jsonl_path;
+      const row = sessionsDb.getSessionById(sessionId);
+      const jsonlPath = row?.jsonl_path;
+      // Each transcript event is stamped with the PROVIDER session id, so the guard
+      // in resolveClaudeSessionModelFromTranscript must compare against that id, not
+      // the app session id we were handed. For a session created inside cloudcli the
+      // two differ, and comparing the app id rejected every event and forced
+      // 'default' for the picker (#461). A session discovered from disk has no
+      // distinct provider id recorded yet, so fall back to the app id — which for
+      // those sessions already equals the id written into the transcript.
+      const transcriptSessionId = row?.provider_session_id ?? sessionId;
       const activeModel = jsonlPath
-        ? await readClaudeSessionModelFromJsonl(sessionId, jsonlPath)
+        ? await readClaudeSessionModelFromJsonl(transcriptSessionId, jsonlPath)
         : null;
       if (activeModel?.model) {
         return activeModel;
