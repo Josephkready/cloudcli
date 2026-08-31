@@ -85,12 +85,27 @@ test('independent call_ids each render their own result', () => {
   assert.equal(tools[1].toolResult?.content, 'second');
 });
 
-test('a contentless tool_result does not throw and renders as empty (#463)', () => {
-  // The inline-result path (useChatMessages.ts:182) is unguarded, so a tool result
-  // whose `content` is absent used to hit JSON.stringify(undefined) -> undefined and
-  // throw on .trim(), taking down the whole transcript render.
+test('a contentless inline tool_result does not throw and renders as empty (#463)', () => {
+  // The inline-result branch passes tr.content unguarded, so a tool result whose
+  // `content` is absent used to hit JSON.stringify(undefined) -> undefined and throw
+  // on .trim(), taking down the whole transcript render.
   const messages: NormalizedMessage[] = [
     edit('call-1', 'src/a.ts', { content: undefined as unknown as string, isError: false }),
+  ];
+
+  const tools = toolUses(normalizedToChatMessages(messages));
+
+  assert.equal(tools.length, 1);
+  assert.equal(tools[0].toolResult?.content, '');
+});
+
+test('a contentless standalone-result fallback does not throw and renders as empty (#463)', () => {
+  // The structurally distinct path: no inline result, so the result is attached via
+  // the toolResultMap fallback. It reaches the same formatToolResultContent call and
+  // must be equally safe when the standalone result has no content.
+  const messages: NormalizedMessage[] = [
+    edit('call-1', 'src/only.ts'),
+    result('call-1', undefined as unknown as string),
   ];
 
   const tools = toolUses(normalizedToChatMessages(messages));
