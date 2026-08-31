@@ -199,8 +199,12 @@ export const normalizeToClaudeModelSlug = (value: string | null | undefined): st
     return direct.value;
   }
 
+  // Match the family as a whole word, not a bare substring, so a value that
+  // merely contains a family name (`octopus` -> `opus`) is not misread. Real ids
+  // always delimit it with a space or hyphen (`Opus 5`, `claude-opus-4-8`).
   const lower = trimmed.toLowerCase();
-  const family = (['opus', 'sonnet', 'haiku', 'fable'] as const).find((name) => lower.includes(name));
+  const family = (['opus', 'sonnet', 'haiku', 'fable'] as const)
+    .find((name) => new RegExp(`\\b${name}\\b`).test(lower));
   if (!family) {
     return null;
   }
@@ -244,7 +248,11 @@ const extractTaggedContent = (content: string, tagName: string): string | null =
 const extractClaudeModelFromTextContent = (content: string): string | null => {
   const localCommandStdout = extractTaggedContent(content, 'local-command-stdout');
   if (localCommandStdout !== null) {
-    const cleanedStdout = stripAnsi(localCommandStdout).replace(/\s+/g, ' ').trim();
+    // Real `/model` output is short and the model name is at the very start, so
+    // bound the input before the lazy regex below — it backtracks quadratically
+    // on a large unbounded blob, and a crafted stdout block should not be able to
+    // stall transcript resolution.
+    const cleanedStdout = stripAnsi(localCommandStdout).replace(/\s+/g, ' ').trim().slice(0, 512);
     // Capture only the model name, stopping at the first trailing clause. The old
     // end-anchored `(.+?)\.?$` swallowed the whole sentence ("Opus 5 and saved as
     // your default...") (#462); the boundary also keeps the multi-line "settings

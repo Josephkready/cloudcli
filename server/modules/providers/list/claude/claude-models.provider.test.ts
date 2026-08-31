@@ -303,8 +303,16 @@ test('normalizeToClaudeModelSlug maps API ids, display names, and slugs to catal
     assert.equal(normalizeToClaudeModelSlug(option.value), option.value);
   }
 
-  // Haiku/Fable have no 1M entry, so a stray 1M marker falls back to the base.
+  // A bare slug with a trailing period (as /model can print) still resolves.
+  assert.equal(normalizeToClaudeModelSlug('opus.'), 'opus');
+
+  // Haiku and Fable have no 1M entry, so a stray 1M marker falls back to the base.
   assert.equal(normalizeToClaudeModelSlug('Haiku 4.5 (1M context)'), 'haiku');
+  assert.equal(normalizeToClaudeModelSlug('Fable 5 (1M context)'), 'fable');
+
+  // A family name that is only a SUBSTRING of another word must not match.
+  assert.equal(normalizeToClaudeModelSlug('octopus'), null);
+  assert.equal(normalizeToClaudeModelSlug('sonnets of shakespeare'), null);
 
   // Unknown, placeholder, and empty inputs resolve to nothing.
   assert.equal(normalizeToClaudeModelSlug('grok-fast'), null);
@@ -354,18 +362,32 @@ test('a real /model stdout switch resolves to the catalog slug, trailing clause 
 });
 
 test('a base-model /model switch is not mislabelled 1M by a settings-pin note (#462)', () => {
-  // Multi-line variant: the user switched to base Opus 5, but a second line notes
-  // the settings file pins the 1M variant. The active model is the base.
+  // Multi-line variant, byte-exact to real transcripts: the user switched to base
+  // Opus 5, but a dim-styled second line notes the settings file pins the 1M
+  // variant. The active model is the base - the pinned 1M name must not win.
   const b = '\u001b[1m';
   const e = '\u001b[22m';
-  const stdout = `Set model to ${b}Opus 5${e} and saved as your default for new sessions`
-    + `\n     .claude/settings.json pins ${b}Opus 5 (1M context)${e} - that applies on restart`;
+  const d = '\u001b[2m';
+  const stdout = `Set model to ${b}Opus 5${e} and saved as your default for new sessions${d}${e}`
+    + `\n${d}     .claude/settings.json pins ${b}Opus 5 (1M context)${e}${d} \u2014 that applies on restart${e}`;
   const content = `<local-command-stdout>${stdout}</local-command-stdout>`;
   const jsonl = transcript(
     JSON.stringify({ type: 'user', sessionId: SESSION_ID, message: { role: 'user', content } }),
   );
 
   assert.equal(resolveClaudeSessionModelFromTranscript(SESSION_ID, jsonl), 'opus');
+});
+
+test('a newer assistant turn wins over an older /model stdout switch (newest-first)', () => {
+  // Ordering: an old /model switch to opus, then the user actually ran a newer
+  // turn on sonnet. Newest-first scanning must report the newer model.
+  const content = '<local-command-stdout>Set model to opus.</local-command-stdout>';
+  const jsonl = transcript(
+    JSON.stringify({ type: 'user', sessionId: SESSION_ID, message: { role: 'user', content } }),
+    assistantTurn('claude-sonnet-5'),
+  );
+
+  assert.equal(resolveClaudeSessionModelFromTranscript(SESSION_ID, jsonl), 'sonnet');
 });
 
 test('turns belonging to another session are ignored, synthetic or not', () => {
