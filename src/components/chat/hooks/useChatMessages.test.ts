@@ -84,3 +84,17 @@ test('independent call_ids each render their own result', () => {
   assert.equal(tools[0].toolResult?.content, 'first');
   assert.equal(tools[1].toolResult?.content, 'second');
 });
+
+test('a contentless tool_result does not throw and renders as empty (#463)', () => {
+  // The inline-result path (useChatMessages.ts:182) is unguarded, so a tool result
+  // whose `content` is absent used to hit JSON.stringify(undefined) -> undefined and
+  // throw on .trim(), taking down the whole transcript render.
+  const messages: NormalizedMessage[] = [
+    edit('call-1', 'src/a.ts', { content: undefined as unknown as string, isError: false }),
+  ];
+
+  const tools = toolUses(normalizedToChatMessages(messages));
+
+  assert.equal(tools.length, 1);
+  assert.equal(tools[0].toolResult?.content, '');
+});

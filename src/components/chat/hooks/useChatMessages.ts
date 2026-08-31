@@ -8,7 +8,11 @@ import type { ChatMessage, SubagentChildTool } from '../types/types';
 import { decodeHtmlEntities, unescapeWithMathProtection, formatUsageLimitText } from '../utils/chatFormatting';
 
 function formatToolResultContent(content: unknown): string {
-  const text = typeof content === 'string' ? content : JSON.stringify(content);
+  // JSON.stringify returns the *value* undefined (not a string) for undefined,
+  // functions, and symbols, so a contentless tool_result would make `text.trim()`
+  // below throw and take down the whole transcript render. Coerce here rather than
+  // at one call site so every caller is safe (the :182 path is unguarded). (#463)
+  const text = typeof content === 'string' ? content : (JSON.stringify(content) ?? '');
   const toolUseErrorMatch = /^<tool_use_error>([\s\S]*)<\/tool_use_error>$/.exec(text.trim());
   return toolUseErrorMatch ? toolUseErrorMatch[1] : text;
 }
