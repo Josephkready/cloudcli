@@ -363,6 +363,39 @@ test('getCurrentActiveModel falls back to the app id when no provider id is reco
   }
 });
 
+test('getCurrentActiveModel returns the default when the row id does not match the transcript (#461)', async () => {
+  // A stale/corrupt mapping: the row names one provider id, the transcript is
+  // stamped with another. Every event is legitimately rejected, so the picker
+  // shows the catalog default rather than adopting an unrelated session's model.
+  const jsonlPath = await writeTranscript('provider-session-BBBB', 'opus');
+  const stub = mock.method(sessionsDb, 'getSessionById', () => ({
+    jsonl_path: jsonlPath,
+    provider_session_id: 'provider-session-AAAA',
+  }) as unknown as ReturnType<typeof sessionsDb.getSessionById>);
+
+  try {
+    const active = await new ClaudeProviderModels().getCurrentActiveModel('app-session-3333');
+    assert.deepEqual(active, { model: 'default' });
+  } finally {
+    stub.mock.restore();
+    await fsp.rm(path.dirname(jsonlPath), { recursive: true, force: true });
+  }
+});
+
+test('getCurrentActiveModel returns the default when the row has no jsonl_path (#461)', async () => {
+  const stub = mock.method(sessionsDb, 'getSessionById', () => ({
+    jsonl_path: null,
+    provider_session_id: 'provider-session-CCCC',
+  }) as unknown as ReturnType<typeof sessionsDb.getSessionById>);
+
+  try {
+    const active = await new ClaudeProviderModels().getCurrentActiveModel('app-session-4444');
+    assert.deepEqual(active, { model: 'default' });
+  } finally {
+    stub.mock.restore();
+  }
+});
+
 test('no transcript can ever resolve to an angle-bracketed value', () => {
   // Belt-and-braces: the property that actually matters downstream.
   const jsonl = transcript(
