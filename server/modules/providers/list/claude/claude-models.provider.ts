@@ -173,15 +173,51 @@ export const isPlaceholderModelValue = (value: string): boolean => {
   return trimmed.startsWith('<') && trimmed.includes('>');
 };
 
-/** Returns the value only when it is a usable model id, else null. */
-const acceptModelValue = (value: string | null | undefined): string | null => {
+/**
+ * Maps any model identifier a transcript can carry onto a catalog slug the model
+ * picker can match, or null when it names no model we offer. A transcript names
+ * the model three different ways depending on the source:
+ *   - a bare catalog slug in a `<model>` tag (`opus[1m]`),
+ *   - the API model id on an assistant turn (`claude-opus-4-8`, `claude-sonnet-5`),
+ *   - the display name in `/model` command stdout (`Opus 5 (1M context)`).
+ * All three must resolve to the same slug, otherwise the picker highlights
+ * nothing and `/models` prints a string that matches no option (#461, #462).
+ *
+ * API ids do not encode the 1M-context choice, so they resolve to the base
+ * family; only a value that actually says 1M (a display name or a `[1m]` suffix)
+ * yields the `[1m]` variant. Exported for tests.
+ */
+export const normalizeToClaudeModelSlug = (value: string | null | undefined): string | null => {
   const trimmed = value?.trim();
   if (!trimmed || isPlaceholderModelValue(trimmed)) {
     return null;
   }
 
-  return trimmed;
+  // An exact catalog slug (incl. `default` and the `[1m]` variants) wins as-is.
+  const direct = findClaudeModelOption(trimmed);
+  if (direct) {
+    return direct.value;
+  }
+
+  const lower = trimmed.toLowerCase();
+  const family = (['opus', 'sonnet', 'haiku', 'fable'] as const).find((name) => lower.includes(name));
+  if (!family) {
+    return null;
+  }
+
+  // Prefer the 1M variant only when the value says so AND the catalog offers it
+  // (opus/sonnet do, haiku/fable do not), else fall back to the base family.
+  const wants1m = lower.includes('(1m context)') || lower.includes('[1m]');
+  return (
+    (wants1m ? findClaudeModelOption(`${family}[1m]`)?.value : null)
+    ?? findClaudeModelOption(family)?.value
+    ?? null
+  );
 };
+
+/** Returns the catalog slug for a usable model id, else null. */
+const acceptModelValue = (value: string | null | undefined): string | null =>
+  normalizeToClaudeModelSlug(value);
 
 const extractClaudeEventModel = (event: ClaudeInitEvent, sessionId: string): string | null => {
   const eventSessionId = event.sessionId ?? event.session_id;
@@ -209,8 +245,14 @@ const extractClaudeModelFromTextContent = (content: string): string | null => {
   const localCommandStdout = extractTaggedContent(content, 'local-command-stdout');
   if (localCommandStdout !== null) {
     const cleanedStdout = stripAnsi(localCommandStdout).replace(/\s+/g, ' ').trim();
-    const changedModel = /(?:set|changed|switched)\s+model\s+to\s+(.+?)\.?$/i.exec(cleanedStdout);
-    // A placeholder capture must not shadow a real <model> tag further down.
+    // Capture only the model name, stopping at the first trailing clause. The old
+    // end-anchored `(.+?)\.?$` swallowed the whole sentence ("Opus 5 and saved as
+    // your default...") (#462); the boundary also keeps the multi-line "settings
+    // pins Opus 5 (1M context)" note from mislabelling a base-model switch as 1M.
+    const changedModel = /(?:set|changed|switched)\s+model\s+to\s+(.+?)(?:\s+and\s+saved\b|\.(?:\s|$)|$)/i
+      .exec(cleanedStdout);
+    // Normalized to a catalog slug (or null); a placeholder or unknown capture
+    // must not shadow a real <model> tag further down.
     const stdoutModel = acceptModelValue(changedModel?.[1]);
     if (stdoutModel) {
       return stdoutModel;

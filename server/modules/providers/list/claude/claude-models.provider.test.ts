@@ -10,6 +10,7 @@ import {
   ClaudeProviderModels,
   findClaudeModelOption,
   isPlaceholderModelValue,
+  normalizeToClaudeModelSlug,
   resolveClaudeSessionModelFromTranscript,
 } from '@/modules/providers/list/claude/claude-models.provider.js';
 
@@ -262,16 +263,105 @@ test('a /model stdout announcing a placeholder does not shadow the real <model> 
 });
 
 test('a non-placeholder /model stdout switch is still read', () => {
-  // NOTE: this is a *simplified* stdout string. Real `/model` rows look like
-  // `Set model to [1mOpus 5 (1M context)[22m and saved as your
-  // default for new sessions`, and the end-anchored capture in
-  // extractClaudeModelFromTextContent swallows the trailing clause, yielding a
-  // non-model string. That is a pre-existing bug independent of the placeholder
-  // guard (see the PR description) — deliberately not fixed or pinned here, so
-  // this test covers only the guard's behaviour on this path.
+  // A bare-slug switch is normalized straight through by normalizeToClaudeModelSlug.
   const content = '<local-command-stdout>Set model to opus.</local-command-stdout>';
   const jsonl = transcript(
     assistantTurn('haiku'),
+    JSON.stringify({ type: 'user', sessionId: SESSION_ID, message: { role: 'user', content } }),
+  );
+
+  assert.equal(resolveClaudeSessionModelFromTranscript(SESSION_ID, jsonl), 'opus');
+});
+
+// ---------------------------------------------------------------------------
+// Model-slug normalization (#462, and the common-case highlight #461).
+//
+// A transcript names the model three ways - a bare catalog slug, the API id on
+// an assistant turn (claude-opus-4-8), and the /model display name - and all
+// three must resolve to the same catalog slug or the picker highlights nothing.
+// ---------------------------------------------------------------------------
+
+test('normalizeToClaudeModelSlug maps API ids, display names, and slugs to catalog slugs', () => {
+  // API ids (what assistant turns actually carry): base family, no 1M variant.
+  assert.equal(normalizeToClaudeModelSlug('claude-opus-4-8'), 'opus');
+  assert.equal(normalizeToClaudeModelSlug('claude-opus-5'), 'opus');
+  assert.equal(normalizeToClaudeModelSlug('claude-sonnet-5'), 'sonnet');
+  assert.equal(normalizeToClaudeModelSlug('claude-sonnet-4-6'), 'sonnet');
+  assert.equal(normalizeToClaudeModelSlug('claude-fable-5'), 'fable');
+  assert.equal(normalizeToClaudeModelSlug('claude-haiku-4-5-20251001'), 'haiku');
+
+  // /model display names, incl. the 1M-context variant.
+  assert.equal(normalizeToClaudeModelSlug('Opus 5'), 'opus');
+  assert.equal(normalizeToClaudeModelSlug('Opus 5 (1M context)'), 'opus[1m]');
+  assert.equal(normalizeToClaudeModelSlug('Sonnet 5'), 'sonnet');
+  assert.equal(normalizeToClaudeModelSlug('Sonnet 5 (1M context)'), 'sonnet[1m]');
+  assert.equal(normalizeToClaudeModelSlug('Fable 5'), 'fable');
+  assert.equal(normalizeToClaudeModelSlug('Haiku 4.5'), 'haiku');
+
+  // Bare catalog slugs pass through unchanged.
+  for (const option of CLAUDE_FALLBACK_MODELS.OPTIONS) {
+    assert.equal(normalizeToClaudeModelSlug(option.value), option.value);
+  }
+
+  // Haiku/Fable have no 1M entry, so a stray 1M marker falls back to the base.
+  assert.equal(normalizeToClaudeModelSlug('Haiku 4.5 (1M context)'), 'haiku');
+
+  // Unknown, placeholder, and empty inputs resolve to nothing.
+  assert.equal(normalizeToClaudeModelSlug('grok-fast'), null);
+  assert.equal(normalizeToClaudeModelSlug('auto-low'), null);
+  assert.equal(normalizeToClaudeModelSlug('<synthetic>'), null);
+  assert.equal(normalizeToClaudeModelSlug('  '), null);
+  assert.equal(normalizeToClaudeModelSlug(undefined), null);
+});
+
+test('an assistant turn carrying an API id resolves to its catalog slug (#461 common case)', () => {
+  // The dominant real-world case: newest turn is an assistant turn stamped with
+  // the API id. It must map to a slug the picker can highlight, not leak raw.
+  const jsonl = transcript(
+    JSON.stringify({
+      type: 'assistant',
+      sessionId: SESSION_ID,
+      message: { role: 'assistant', model: 'claude-opus-4-8', content: [{ type: 'text', text: 'ok' }] },
+    }),
+  );
+
+  assert.equal(resolveClaudeSessionModelFromTranscript(SESSION_ID, jsonl), 'opus');
+});
+
+test('a real /model stdout switch resolves to the catalog slug, trailing clause and all (#462)', () => {
+  // Real bytes Claude Code writes: ANSI bold around the name plus the trailing
+  // "and saved as your default..." clause the old end-anchored capture swallowed.
+  const b = '\u001b[1m';
+  const e = '\u001b[22m';
+  const cases: Array<[string, string]> = [
+    [`Set model to ${b}Opus 5${e} and saved as your default for new sessions`, 'opus'],
+    [`Set model to ${b}Opus 5 (1M context)${e} and saved as your default for new sessions`, 'opus[1m]'],
+    [`Set model to ${b}Fable 5${e} and saved as your default for new sessions with low effort`, 'fable'],
+    [`Set model to ${b}Sonnet 5${e} and saved as your default for new sessions`, 'sonnet'],
+  ];
+
+  for (const [stdout, expected] of cases) {
+    const content = `<local-command-stdout>${stdout}</local-command-stdout>`;
+    const jsonl = transcript(
+      JSON.stringify({ type: 'user', sessionId: SESSION_ID, message: { role: 'user', content } }),
+    );
+    assert.equal(
+      resolveClaudeSessionModelFromTranscript(SESSION_ID, jsonl),
+      expected,
+      `real /model stdout should resolve to ${expected}`,
+    );
+  }
+});
+
+test('a base-model /model switch is not mislabelled 1M by a settings-pin note (#462)', () => {
+  // Multi-line variant: the user switched to base Opus 5, but a second line notes
+  // the settings file pins the 1M variant. The active model is the base.
+  const b = '\u001b[1m';
+  const e = '\u001b[22m';
+  const stdout = `Set model to ${b}Opus 5${e} and saved as your default for new sessions`
+    + `\n     .claude/settings.json pins ${b}Opus 5 (1M context)${e} - that applies on restart`;
+  const content = `<local-command-stdout>${stdout}</local-command-stdout>`;
+  const jsonl = transcript(
     JSON.stringify({ type: 'user', sessionId: SESSION_ID, message: { role: 'user', content } }),
   );
 
