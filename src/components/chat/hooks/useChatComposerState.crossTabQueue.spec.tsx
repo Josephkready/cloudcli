@@ -104,6 +104,22 @@ describe('reconcileQueuedDraftsFromStorage', () => {
     expect(result?.[0].images).toEqual([image]); // images never persist, kept from memory
     expect(result?.[1].images).toEqual([]);
   });
+
+  it('keeps the image-bearing survivor when a duplicate-content draft is removed', () => {
+    // Storage carries no id, so which of two identical "foo" drafts the other tab
+    // removed is ambiguous; the surviving one must keep its attachment, not drop it.
+    const image = new File(['x'], 'x.png', { type: 'image/png' });
+    const current: QueuedDraft[] = [
+      { id: 'a', content: 'foo', images: [] },
+      { id: 'c', content: 'foo', images: [image] },
+    ];
+    const stored = [{ content: 'foo' }];
+
+    const result = reconcileQueuedDraftsFromStorage(current, stored, makeId);
+
+    expect(result?.map((d) => d.content)).toEqual(['foo']);
+    expect(result?.[0].images).toEqual([image]); // the attachment survives
+  });
 });
 
 // --- hook-level cross-tab sync ---------------------------------------------
@@ -212,6 +228,16 @@ describe('useChatComposerState — cross-tab queue sync (#459 item 3)', () => {
     expect(rendered.result.current.queuedDrafts.map((d) => d.content)).toEqual(['kept']);
   });
 
+  it('adopts a full drain-to-empty (the other tab removed the shared key)', async () => {
+    writeQueuedMessages(SESSION_ID, [{ content: 'only' }]);
+    const rendered = setup();
+    expect(rendered.result.current.queuedDrafts.map((d) => d.content)).toEqual(['only']);
+
+    otherTabWrites([]); // removeItem + event with the session key and null value
+
+    expect(rendered.result.current.queuedDrafts).toEqual([]);
+  });
+
   it('ignores storage events for other keys', async () => {
     writeQueuedMessages(SESSION_ID, [{ content: 'mine' }]);
     const rendered = setup();
@@ -223,5 +249,47 @@ describe('useChatComposerState — cross-tab queue sync (#459 item 3)', () => {
     });
 
     expect(rendered.result.current.queuedDrafts.map((d) => d.content)).toEqual(['mine']);
+  });
+
+  it('does not wipe the queue on an unrelated storage.clear() from another tab', async () => {
+    writeQueuedMessages(SESSION_ID, [{ content: 'still composing' }]);
+    const rendered = setup();
+
+    // Simulate another tab's storage.clear(): the key really is gone from storage,
+    // and the event carries a null key. Syncing to empty on it would discard a
+    // message still queued here, so it must be ignored (in-memory self-heals on
+    // the next persist). If the null key were NOT ignored, the handler would read
+    // the now-empty store and wipe the in-memory queue.
+    act(() => {
+      localStorage.clear();
+      window.dispatchEvent(new StorageEvent('storage', { key: null, newValue: null, storageArea: localStorage }));
+    });
+
+    expect(rendered.result.current.queuedDrafts.map((d) => d.content)).toEqual(['still composing']);
+  });
+
+  it('does not re-persist when a storage event matches the current queue (no ping-pong)', async () => {
+    writeQueuedMessages(SESSION_ID, [{ content: 'in sync' }]);
+    const rendered = setup(); // mount restores + persists ['in sync'] before the spy below
+
+    // Spy AFTER mount so only a re-persist triggered by the event would register.
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+    // Storage already holds ['in sync'], so an event carrying that same value must
+    // reconcile to a no-op: no setQueuedDrafts, hence no persist. Otherwise two
+    // synced tabs would ping-pong identical writes forever. Dispatch the event
+    // directly (no setItem) so any write the spy sees is this tab re-persisting.
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent('storage', {
+          key: queuedMessageKey(SESSION_ID),
+          newValue: JSON.stringify([{ content: 'in sync' }]),
+          storageArea: localStorage,
+        }),
+      );
+    });
+
+    const queueWrites = setItemSpy.mock.calls.filter(([key]) => key === queuedMessageKey(SESSION_ID));
+    expect(queueWrites).toHaveLength(0);
+    expect(rendered.result.current.queuedDrafts.map((d) => d.content)).toEqual(['in sync']);
   });
 });

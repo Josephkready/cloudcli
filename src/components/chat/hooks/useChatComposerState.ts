@@ -233,6 +233,16 @@ export const reconcileQueuedDraftsFromStorage = (
       reusableByContent.set(draft.content, [draft]);
     }
   }
+  // Storage carries no per-item id, so when another tab removes one of several
+  // identical-content drafts we cannot tell WHICH survived. Reuse image-bearing
+  // drafts first, so a surviving duplicate keeps its (non-persisted) attachment
+  // rather than silently dropping it. Ids are ephemeral React keys, so which id
+  // the survivor inherits does not matter.
+  for (const bucket of reusableByContent.values()) {
+    if (bucket.length > 1) {
+      bucket.sort((a, b) => (b.images.length > 0 ? 1 : 0) - (a.images.length > 0 ? 1 : 0));
+    }
+  }
 
   return stored.map((message) => {
     const reused = reusableByContent.get(message.content)?.shift();
@@ -1268,9 +1278,12 @@ export function useChatComposerState({
       if (event.storageArea && event.storageArea !== window.localStorage) {
         return;
       }
-      // A null key is another tab's storage.clear(); otherwise only our session's
-      // queue key matters.
-      if (event.key !== null && event.key !== key) {
+      // Only our session's queue key. A drain-to-empty in the other tab arrives
+      // as this key with a null value (removeItem), which is handled. We
+      // deliberately ignore a null key (another tab's storage.clear()): syncing
+      // to empty on any unrelated clear would discard a message still being
+      // composed here, and the in-memory queue self-heals on the next persist.
+      if (event.key !== key) {
         return;
       }
       const stored = readQueuedMessages(sessionKey);
