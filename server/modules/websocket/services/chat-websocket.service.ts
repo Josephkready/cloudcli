@@ -644,6 +644,21 @@ async function handleChatResume(
       break;
     }
 
+    if (result.action === 'duplicate') {
+      // Two interrupted markers hold identical content for this session (the same
+      // message journaled twice, or rows from a pre-#459 server): an earlier row
+      // is already resuming this content, so retire THIS duplicate marker without
+      // starting or counting it — leaving it would resurface and run twice (#459).
+      // Best-effort, like the retire below: a DB failure must not abort the resume.
+      try {
+        activeRunsDb.remove(row.id);
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : String(error);
+        console.error('[Chat] Failed to retire duplicate interrupted marker on resume', { sessionId, error: messageText });
+      }
+      continue;
+    }
+
     // start or queued: the message now owns a fresh live journal row (inserted
     // by submitMessage), so retire the old interrupted marker. Order matters —
     // the new row is written BEFORE this delete, so a hard kill in between leaves

@@ -651,6 +651,25 @@ test('empty content is never treated as a duplicate (#459)', async () => {
   });
 });
 
+test('whitespace-only content is exempt from dedup, like empty content (#459)', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('dup-5', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const input = {
+      appSessionId: 'dup-5',
+      provider: 'claude' as const,
+      providerSessionId: null,
+      connection: connection as never,
+      userId: null,
+    };
+
+    // The guard exempts content via `.trim()`, so a whitespace-only string is
+    // treated like empty — not collapsed as a duplicate.
+    assert.equal(chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, '   ')).action, 'start');
+    assert.equal(chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, '   ')).action, 'queued');
+  });
+});
+
 /** How long a completed run stays replayable (COMPLETED_RUN_RETENTION_MS). */
 const RETENTION_MS = 5 * 60 * 1000;
 
