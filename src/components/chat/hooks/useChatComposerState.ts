@@ -16,10 +16,12 @@ import { SHARED_TEXT_KEY } from '../../../pwa/launchParams';
 import type { MarkSessionProcessing } from '../../../hooks/useSessionProtection';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
 import {
+  queuedMessageKey,
   readQueuedMessages,
   safeLocalStorage,
   writeQueuedMessages,
   type QueuedSendOptions,
+  type StoredQueuedMessage,
 } from '../utils/chatStorage';
 import { appendPendingSend, makePendingSendId, markPendingSendDispatched } from '../utils/pendingSends';
 import { decideQueueFlush } from '../utils/queueFlush';
@@ -194,6 +196,62 @@ const restoreQueuedDrafts = (sessionKey: string): QueuedDraft[] =>
     options: saved.options,
   }));
 
+/**
+ * Reconciles the in-memory queued drafts to what another tab wrote to storage
+ * for the same session (#459). Two tabs on one session share the single
+ * `queued_message_<id>` key, and the persistence effect below writes this tab's
+ * in-memory copy over it — so without adopting the other tab's writes, a stale
+ * tab would clobber a message the other tab queued (loss) or resurrect one it
+ * drained. Returns the new draft list, or `null` when the two already hold the
+ * same messages in the same order, so the caller can skip the state update —
+ * which is also what stops a cross-tab write from ping-ponging between two
+ * already-synced tabs.
+ *
+ * Drafts are matched to stored messages by content, in order, so a surviving
+ * message keeps its stable React id and any in-memory image attachments (which
+ * never persist); a genuinely new message from the other tab gets a fresh id
+ * and no images.
+ */
+export const reconcileQueuedDraftsFromStorage = (
+  current: QueuedDraft[],
+  stored: StoredQueuedMessage[],
+  makeId: () => string,
+): QueuedDraft[] | null => {
+  const unchanged =
+    current.length === stored.length
+    && current.every((draft, index) => draft.content === stored[index]?.content);
+  if (unchanged) {
+    return null;
+  }
+
+  const reusableByContent = new Map<string, QueuedDraft[]>();
+  for (const draft of current) {
+    const bucket = reusableByContent.get(draft.content);
+    if (bucket) {
+      bucket.push(draft);
+    } else {
+      reusableByContent.set(draft.content, [draft]);
+    }
+  }
+  // Storage carries no per-item id, so when another tab removes one of several
+  // identical-content drafts we cannot tell WHICH survived. Reuse image-bearing
+  // drafts first, so a surviving duplicate keeps its (non-persisted) attachment
+  // rather than silently dropping it. Ids are ephemeral React keys, so which id
+  // the survivor inherits does not matter.
+  for (const bucket of reusableByContent.values()) {
+    if (bucket.length > 1) {
+      bucket.sort((a, b) => (b.images.length > 0 ? 1 : 0) - (a.images.length > 0 ? 1 : 0));
+    }
+  }
+
+  return stored.map((message) => {
+    const reused = reusableByContent.get(message.content)?.shift();
+    return reused
+      ? { ...reused, options: message.options }
+      : { id: makeId(), content: message.content, images: [], options: message.options };
+  });
+};
+
 const getNotificationSessionSummary = (
   selectedSession: ProjectSession | null,
   fallbackInput: string,
@@ -279,6 +337,11 @@ export function useChatComposerState({
     }
     return restoreQueuedDrafts(sessionKey);
   });
+  // Latest queuedDrafts, for the cross-tab storage listener to read without
+  // re-registering on every queue change (and so its reconcile runs outside the
+  // setState updater, keeping that updater side-effect free).
+  const queuedDraftsRef = useRef(queuedDrafts);
+  queuedDraftsRef.current = queuedDrafts;
   // Which session the in-memory `queuedDrafts` belong to. On a session switch
   // there is one commit where `sessionKey` already points at the new session
   // while `queuedDrafts` still holds the old session's queue; the persistence
@@ -1197,6 +1260,41 @@ export function useChatComposerState({
       });
     }
   }, [queuedDrafts, sessionKey]);
+
+  // Keep the viewed session's queue in sync with other tabs (#459). The queue
+  // lives under one shared `queued_message_<id>` key, so a second tab on the same
+  // session would otherwise blindly overwrite this tab's copy on its next persist
+  // — losing a message queued here, or resurrecting one drained here. Adopting
+  // the other tab's write means this tab's next persist reflects the shared state
+  // instead of clobbering it. `storage` events fire only in OTHER documents, so
+  // this never sees its own writes, and reconcile returns null (no state update)
+  // when already in sync, which stops two synced tabs from ping-ponging.
+  useEffect(() => {
+    if (!sessionKey || typeof window === 'undefined') {
+      return undefined;
+    }
+    const key = queuedMessageKey(sessionKey);
+    const handleStorage = (event: StorageEvent) => {
+      if (event.storageArea && event.storageArea !== window.localStorage) {
+        return;
+      }
+      // Only our session's queue key. A drain-to-empty in the other tab arrives
+      // as this key with a null value (removeItem), which is handled. We
+      // deliberately ignore a null key (another tab's storage.clear()): syncing
+      // to empty on any unrelated clear would discard a message still being
+      // composed here, and the in-memory queue self-heals on the next persist.
+      if (event.key !== key) {
+        return;
+      }
+      const stored = readQueuedMessages(sessionKey);
+      const reconciled = reconcileQueuedDraftsFromStorage(queuedDraftsRef.current, stored, makeQueuedDraftId);
+      if (reconciled) {
+        setQueuedDrafts(reconciled);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [sessionKey]);
 
   // Switching sessions swaps in that session's queued messages (image
   // attachments can't survive a reload, so only text and options restore).
