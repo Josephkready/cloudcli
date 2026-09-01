@@ -556,6 +556,101 @@ test('submitMessage rejects past the pending-queue cap instead of dropping silen
   });
 });
 
+/* ------------------------------------------------------------------ */
+/*  Content-level duplicate suppression (issue #459)                   */
+/* ------------------------------------------------------------------ */
+
+test('submitMessage suppresses a duplicate of the RUNNING message content (#459)', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('dup-1', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const input = {
+      appSessionId: 'dup-1',
+      provider: 'claude' as const,
+      providerSessionId: null,
+      connection: connection as never,
+      userId: null,
+    };
+
+    assert.equal(chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'hello')).action, 'start');
+
+    // Same text while the first run is still in flight (a re-press or a second
+    // tab): suppressed, not queued — so it can never run a second time.
+    const again = chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'hello'));
+    assert.equal(again.action, 'duplicate');
+    assert.equal(chatRunRegistry.getPendingCount('dup-1'), 0);
+
+    // Different text is unaffected and queues normally behind the running run.
+    assert.equal(chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'world')).action, 'queued');
+  });
+});
+
+test('submitMessage suppresses a duplicate of a QUEUED message content (#459)', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('dup-2', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const input = {
+      appSessionId: 'dup-2',
+      provider: 'claude' as const,
+      providerSessionId: null,
+      connection: connection as never,
+      userId: null,
+    };
+
+    chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'head')); // start
+    assert.equal(chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'tail')).action, 'queued');
+
+    // 'tail' is already waiting in the queue: a second copy is suppressed, not
+    // appended, so the queue does not grow a duplicate.
+    const again = chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'tail'));
+    assert.equal(again.action, 'duplicate');
+    assert.deepEqual(chatRunRegistry.listPending('dup-2').map((m) => m.content), ['tail']);
+  });
+});
+
+test('an identical message is allowed again once the first run completes (not over-suppressed) (#459)', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('dup-3', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const input = {
+      appSessionId: 'dup-3',
+      provider: 'claude' as const,
+      providerSessionId: null,
+      connection: connection as never,
+      userId: null,
+    };
+
+    assert.equal(chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'again please')).action, 'start');
+    chatRunRegistry.completeRun('dup-3', { exitCode: 0 });
+    // Drop the dispatcher role the start acquired, mirroring the real dispatcher
+    // draining an empty queue after the run finished.
+    assert.equal(chatRunRegistry.takeNextQueued('dup-3'), null);
+
+    // Legitimately asking the same thing again after it finished must start a
+    // fresh run — a completed run left in the map for replay must not block it.
+    const repeat = chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, 'again please'));
+    assert.equal(repeat.action, 'start');
+  });
+});
+
+test('empty content is never treated as a duplicate (#459)', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('dup-4', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const input = {
+      appSessionId: 'dup-4',
+      provider: 'claude' as const,
+      providerSessionId: null,
+      connection: connection as never,
+      userId: null,
+    };
+
+    assert.equal(chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, '')).action, 'start');
+    // A second empty send is not suppressed as a content duplicate (it queues).
+    assert.equal(chatRunRegistry.submitMessage(input, makeQueuedMessage(connection, '')).action, 'queued');
+  });
+});
+
 /** How long a completed run stays replayable (COMPLETED_RUN_RETENTION_MS). */
 const RETENTION_MS = 5 * 60 * 1000;
 

@@ -471,6 +471,18 @@ async function handleChatSend(
     return;
   }
 
+  if (result.action === 'duplicate') {
+    // The same text is already running or queued for this session — an
+    // undedupable copy (no clientMessageId, or a fresh id for a re-press or a
+    // second tab) that the id-keyed guard above cannot catch (#459). Remember
+    // this id and ack so the client retires its pending copy, exactly as for an
+    // id-level duplicate, without starting or queueing a second run.
+    console.warn('[Chat] Suppressing duplicate chat.send by content', { sessionId, clientMessageId });
+    rememberClientMessage(sessionId, clientMessageId);
+    sendChatSendAccepted(ws, sessionId, clientMessageId);
+    return;
+  }
+
   // The server now owns this message, whether it runs immediately or waits in
   // the FIFO. Say so (#389).
   //

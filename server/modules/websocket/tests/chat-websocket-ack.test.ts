@@ -314,23 +314,54 @@ test('a resend is suppressed even while the original is still queued', async () 
   });
 });
 
-test('distinct ids with identical text both run — dedup is by id, not content', async () => {
+test('distinct ids with identical text are content-deduped while the first is in flight (#459)', async () => {
   await withIsolatedDatabase(async () => {
     sessionsDb.createAppSession('dedupe-text', 'claude', '/workspace/demo');
     const { spawn, calls } = makeControllableSpawn();
     const socket = new FakeSocket();
     connect(socket, makeDependencies(spawn));
 
-    // Deliberately asking the same thing twice is a legitimate thing to do.
+    // A re-press (or second tab) sends the same text with a FRESH id while the
+    // first run is still going — the id guard can't catch it, but the content
+    // guard must, so it never runs a second time.
     sendChat(socket, 'dedupe-text', 'again please', 'pending_1');
     await settle();
     sendChat(socket, 'dedupe-text', 'again please', 'pending_2');
     await settle();
 
+    assert.equal(calls.length, 1, 'the duplicate content must not start a second run');
+    assert.equal(chatRunRegistry.getPendingCount('dedupe-text'), 0, 'nor join the queue');
+    assert.equal(
+      socket.acks().filter((frame) => frame.clientMessageId === 'pending_2').length,
+      1,
+      'the suppressed copy is acked so the client retires its pending entry',
+    );
+
+    finishRun(calls[0] as SpawnCall);
+    await settle();
+  });
+});
+
+test('the same text asked again AFTER the first completes still runs (not over-suppressed) (#459)', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('dedupe-after', 'claude', '/workspace/demo');
+    const { spawn, calls } = makeControllableSpawn();
+    const socket = new FakeSocket();
+    connect(socket, makeDependencies(spawn));
+
+    sendChat(socket, 'dedupe-after', 'again please', 'pending_1');
+    await settle();
     finishRun(calls[0] as SpawnCall);
     await settle();
 
-    assert.equal(calls.length, 2, 'a genuinely new message must not be swallowed');
+    // Deliberately asking the same thing once the first has finished is a
+    // legitimate new turn — a completed run must not block it.
+    sendChat(socket, 'dedupe-after', 'again please', 'pending_2');
+    await settle();
+
+    assert.equal(calls.length, 2, 'a genuinely new turn must not be swallowed');
+    finishRun(calls[1] as SpawnCall);
+    await settle();
   });
 });
 
