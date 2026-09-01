@@ -351,3 +351,40 @@ test('resume that overflows the queue mid-replay surfaces QUEUE_FULL and keeps t
     assert.equal(calls.length, CAP + 1, 'head + cap runs were dispatched');
   });
 });
+
+test('resume collapses two interrupted markers with identical content into one run (#459)', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('dupe-resume-session', 'claude', '/workspace/demo');
+    const { spawn, calls } = makeControllableSpawn();
+    const dependencies = makeDependencies(spawn);
+
+    // Two interrupted rows hold the SAME content (e.g. the message journaled
+    // twice before the restart, or rows from a pre-#459 server).
+    for (let i = 0; i < 2; i += 1) {
+      activeRunsDb.recordQueued({
+        sessionId: 'dupe-resume-session', provider: 'claude', providerSessionId: null,
+        content: 'same thing', options: {}, userId: null, enqueuedAt: 1000 + i,
+      });
+    }
+    activeRunsDb.markAllInterrupted();
+    assert.equal(activeRunsDb.getInterrupted('dupe-resume-session').length, 2);
+
+    const device = new FakeSocket();
+    connect(device, dependencies);
+    resume(device, 'dupe-resume-session');
+    await settle();
+
+    // Only one run starts — the second identical marker is suppressed, not run
+    // or queued a second time — and it is counted as resumed only once.
+    assert.equal(calls.length, 1, 'the duplicate content must not start a second run');
+    assert.equal(chatRunRegistry.getPendingCount('dupe-resume-session'), 0, 'nor join the queue');
+    assert.equal(device.framesOfKind('chat_resumed')[0]?.resumed, 1);
+    // Both interrupted markers are retired, so neither resurfaces on a later reconcile.
+    assert.equal(activeRunsDb.getInterrupted('dupe-resume-session').length, 0);
+
+    finishRun(calls[0] as SpawnCall);
+    await settle();
+    assert.equal(activeRunsDb.getBySession('dupe-resume-session').length, 0);
+    assert.equal(device.protocolErrors().length, 0);
+  });
+});

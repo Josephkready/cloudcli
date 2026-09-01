@@ -471,6 +471,18 @@ async function handleChatSend(
     return;
   }
 
+  if (result.action === 'duplicate') {
+    // The same text is already running or queued for this session — an
+    // undedupable copy (no clientMessageId, or a fresh id for a re-press or a
+    // second tab) that the id-keyed guard above cannot catch (#459). Remember
+    // this id and ack so the client retires its pending copy, exactly as for an
+    // id-level duplicate, without starting or queueing a second run.
+    console.warn('[Chat] Suppressing duplicate chat.send by content', { sessionId, clientMessageId });
+    rememberClientMessage(sessionId, clientMessageId);
+    sendChatSendAccepted(ws, sessionId, clientMessageId);
+    return;
+  }
+
   // The server now owns this message, whether it runs immediately or waits in
   // the FIFO. Say so (#389).
   //
@@ -630,6 +642,21 @@ async function handleChatResume(
         sessionId
       );
       break;
+    }
+
+    if (result.action === 'duplicate') {
+      // Two interrupted markers hold identical content for this session (the same
+      // message journaled twice, or rows from a pre-#459 server): an earlier row
+      // is already resuming this content, so retire THIS duplicate marker without
+      // starting or counting it — leaving it would resurface and run twice (#459).
+      // Best-effort, like the retire below: a DB failure must not abort the resume.
+      try {
+        activeRunsDb.remove(row.id);
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : String(error);
+        console.error('[Chat] Failed to retire duplicate interrupted marker on resume', { sessionId, error: messageText });
+      }
+      continue;
     }
 
     // start or queued: the message now owns a fresh live journal row (inserted

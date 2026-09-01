@@ -60,6 +60,13 @@ export type ChatRun = {
    */
   awaitingInputSince: number | null;
   /**
+   * The message text that started this run, used to suppress a duplicate
+   * `chat.send` of the same content while the run is still in flight (#459).
+   * `undefined` for runs created through the test-only `startRun` primitive,
+   * which carries no message.
+   */
+  content?: string;
+  /**
    * Number of tool approvals currently outstanding for the run. A single turn
    * can have several `canUseTool` awaits in flight at once, so blocked state is
    * refcounted: `awaitingInputSince` is stamped when the count goes 0->1 and
@@ -562,7 +569,7 @@ function persistQueued(input: StartRunInput, message: QueuedChatMessage): number
  * session id. Callers are responsible for the concurrency decision (whether a
  * run is allowed to start) — this only constructs and registers.
  */
-function createAndRegisterRun(input: StartRunInput): ChatRun {
+function createAndRegisterRun(input: StartRunInput, content?: string): ChatRun {
   const run: ChatRun = {
     appSessionId: input.appSessionId,
     provider: input.provider,
@@ -575,6 +582,7 @@ function createAndRegisterRun(input: StartRunInput): ChatRun {
     completedAt: null,
     lastActivityAt: Date.now(),
     awaitingInputSince: null,
+    content,
     pendingApprovalCount: 0,
   };
 
@@ -595,6 +603,32 @@ function createAndRegisterRun(input: StartRunInput): ChatRun {
 
   runs.set(input.appSessionId, run);
   return run;
+}
+
+/**
+ * Whether an identical message is already running or queued for this session —
+ * the content-level duplicate guard (#459).
+ *
+ * Server-side dedupe is otherwise keyed on the client's `clientMessageId`, so a
+ * resend that arrives with no id, or a fresh id for the same text (a re-press
+ * after a swallowed ack, a second tab flushing the same queue), slips through
+ * and runs a second time. Matching on `(sessionId, content)` catches all of
+ * those regardless of id handling.
+ *
+ * Only an *in-flight* copy blocks: a `running` run or a still-queued message.
+ * A completed run left in the map for replay does NOT block, so legitimately
+ * asking the same thing again after it finishes still starts a new run. Empty
+ * content is never treated as a duplicate.
+ */
+function hasInFlightContent(sessionId: string, content: string): boolean {
+  if (!content.trim()) {
+    return false;
+  }
+  const running = runs.get(sessionId);
+  if (running?.status === 'running' && running.content === content) {
+    return true;
+  }
+  return (pendingQueues.get(sessionId) ?? []).some((queued) => queued.content === content);
 }
 
 /**
@@ -645,6 +679,7 @@ export const chatRunRegistry = {
     | { action: 'start'; run: ChatRun }
     | { action: 'queued'; queueLength: number }
     | { action: 'rejected' }
+    | { action: 'duplicate' }
     | { action: 'draining' } {
     const sessionId = input.appSessionId;
 
@@ -654,6 +689,14 @@ export const chatRunRegistry = {
     // lost (issue #70).
     if (draining) {
       return { action: 'draining' };
+    }
+
+    // Content-level duplicate: the same text is already running or queued for
+    // this session. Suppress it here — the atomic entry point — so it can never
+    // start or join a second time regardless of client id handling (#459). The
+    // caller acks it so the client retires its pending copy.
+    if (hasInFlightContent(sessionId, message.content)) {
+      return { action: 'duplicate' };
     }
 
     const runInProgress = runs.get(sessionId)?.status === 'running';
@@ -670,7 +713,7 @@ export const chatRunRegistry = {
     }
 
     dispatchingSessions.add(sessionId);
-    const run = createAndRegisterRun(input);
+    const run = createAndRegisterRun(input, message.content);
     run.persistId = persistRunning(input, message);
     return { action: 'start', run };
   },
@@ -708,7 +751,7 @@ export const chatRunRegistry = {
    * its resumability — survives the queue-to-run handoff (issue #70).
    */
   startDispatchedRun(input: StartRunInput, message: QueuedChatMessage): ChatRun {
-    const run = createAndRegisterRun(input);
+    const run = createAndRegisterRun(input, message.content);
     if (message.persistId != null) {
       run.persistId = message.persistId;
       try {
