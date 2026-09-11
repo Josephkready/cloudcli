@@ -8,11 +8,23 @@
  * Config: `BUG_REPORT_QUEUE_BIN` (default `issue-queue`),
  * `BUG_REPORT_QUEUE_TIMEOUT_MS` (positive milliseconds, default `5000`), and
  * `ISSUE_QUEUE_DB` (the SQLite path shared by this producer and the worker).
+ *
+ * **Screenshots** (dante-config skills/bug-report-button/SKILL.md §9) ride
+ * the same POST as a `multipart/form-data` request instead of JSON — the
+ * image-free case (the overwhelming common one) keeps posting plain JSON
+ * completely unchanged; multipart is only ever parsed when the request
+ * actually declares that content type. Attachments are re-validated here
+ * independently of the client (count/size/sniffed-mime — see
+ * `@/shared/bug-report-attachments.js`) and never enter the allowlisted
+ * metadata object. Validated bytes travel to `issue-queue enqueue` through a
+ * temp-file manifest (`@/shared/bug-report-manifest.js`), which durably
+ * copies them into the queue's own storage before this handler responds.
  */
 
 import { spawn } from 'node:child_process';
 
 import express from 'express';
+import multer from 'multer';
 
 import {
   buildIssueBody,
@@ -22,11 +34,93 @@ import {
   resolveBugReportRepo,
   type BugReportMetadata,
 } from '@/shared/bug-report.js';
+import {
+  MAX_ATTACHMENTS,
+  prepareAttachments,
+  type PreparedAttachment,
+} from '@/shared/bug-report-attachments.js';
+import { withAttachmentsManifest } from '@/shared/bug-report-manifest.js';
 import { AppError, asyncHandler, createApiSuccessResponse, readObjectRecord } from '@/shared/utils.js';
 
 const DEFAULT_QUEUE_TIMEOUT_MS = 5000;
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const PUBLIC_QUEUE_STATUSES = new Set(['pending', 'retry', 'filing', 'filed', 'uncertain', 'failed']);
+
+/** The minimal shape this route needs from a multer-parsed upload. */
+type MulterUpload = { buffer: Buffer; originalname: string };
+type RequestWithUploads = express.Request & { files?: MulterUpload[] };
+
+/**
+ * Coarse safety net against memory abuse, not the standard's real cap:
+ * comfortably above the ~2MB post-compression limit `prepareAttachments`
+ * enforces, so a legitimate near-cap upload always reaches that precise,
+ * correctly-coded 413 rather than a generic multer rejection. Only a request
+ * that is wildly over-size (a client bypassing its own compression) is
+ * stopped here instead.
+ */
+const MULTER_FILE_SIZE_CEILING_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The request carries exactly two non-file fields today (`description`,
+ * `metadata`); a small margin over that, rather than multer's Infinity
+ * default, keeps an authenticated request from padding the multipart body
+ * with an unbounded number of extra text parts ahead of the file parts this
+ * route actually cares about.
+ */
+const MULTER_MAX_FIELDS = 4;
+const MULTER_MAX_PARTS = MAX_ATTACHMENTS + MULTER_MAX_FIELDS;
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MULTER_FILE_SIZE_CEILING_BYTES,
+    files: MAX_ATTACHMENTS,
+    fields: MULTER_MAX_FIELDS,
+    parts: MULTER_MAX_PARTS,
+  },
+});
+
+/** Runs multer's `attachments` array parser, mapping its errors onto the app's AppError shape. */
+function parseAttachmentUploads(req: express.Request, res: express.Response): Promise<void> {
+  return new Promise((resolve, reject) => {
+    upload.array('attachments', MAX_ATTACHMENTS)(req, res, (error: unknown) => {
+      if (!error) {
+        resolve();
+        return;
+      }
+      if (error instanceof multer.MulterError) {
+        if (error.code === 'LIMIT_FILE_SIZE') {
+          reject(new AppError('An attached image was too large.', {
+            code: 'BUG_REPORT_ATTACHMENT_TOO_LARGE',
+            statusCode: 413,
+          }));
+          return;
+        }
+        if (error.code === 'LIMIT_FILE_COUNT' || error.code === 'LIMIT_UNEXPECTED_FILE') {
+          reject(new AppError(`Up to ${MAX_ATTACHMENTS} screenshots are allowed per report.`, {
+            code: 'BUG_REPORT_ATTACHMENT_COUNT',
+            statusCode: 413,
+          }));
+          return;
+        }
+      }
+      reject(new AppError('Could not read the uploaded screenshots.', {
+        code: 'BUG_REPORT_ATTACHMENT_UPLOAD_FAILED',
+        statusCode: 400,
+      }));
+    });
+  });
+}
+
+/** Parses the `metadata` multipart field (always a string) back into an object. */
+function parseMultipartMetadata(raw: unknown): unknown {
+  if (typeof raw !== 'string' || raw.trim().length === 0) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
 
 export type QueueResult = { code: number | null; stdout: string; stderr: string };
 export type QueueRunner = (args: string[], input?: string) => Promise<QueueResult>;
@@ -161,6 +255,13 @@ export function createBugReportRouter(dependencies: { runQueue?: QueueRunner } =
   router.post(
     '/',
     asyncHandler(async (req, res) => {
+      // Attachments ride a multipart request; the overwhelmingly common
+      // image-free case posts plain JSON and never touches multer at all.
+      const isMultipart = Boolean(req.is('multipart/form-data'));
+      if (isMultipart) {
+        await parseAttachmentUploads(req, res);
+      }
+
       const body = readObjectRecord(req.body) ?? {};
       const description = normalizeDescription(body.description);
 
@@ -171,7 +272,8 @@ export function createBugReportRouter(dependencies: { runQueue?: QueueRunner } =
         });
       }
 
-      const clientMetadata = (readObjectRecord(body.metadata) ?? {}) as BugReportMetadata;
+      const rawMetadata = isMultipart ? parseMultipartMetadata(body.metadata) : body.metadata;
+      const clientMetadata = (readObjectRecord(rawMetadata) ?? {}) as BugReportMetadata;
       const metadata: BugReportMetadata = {
         ...clientMetadata,
         platform: `${process.platform} ${process.arch}`,
@@ -179,12 +281,22 @@ export function createBugReportRouter(dependencies: { runQueue?: QueueRunner } =
         reportedAt: new Date().toISOString(),
       };
 
+      const uploadedFiles = (req as RequestWithUploads).files ?? [];
+      const attachments: PreparedAttachment[] = uploadedFiles.length
+        ? prepareAttachments(uploadedFiles.map((file) => ({
+            buffer: file.buffer,
+            originalname: file.originalname,
+          })))
+        : [];
+
       const repo = resolveBugReportRepo();
       const title = buildIssueTitle(description);
-      const issueBody = buildIssueBody(description, metadata);
-      const payload = await queueCommand(run, [
-        'enqueue', '--repo', repo, '--title', title, '--label', 'bug', '--body-file', '-',
-      ], issueBody);
+      const issueBody = buildIssueBody(description, metadata, { hasAttachments: attachments.length > 0 });
+      const payload = await withAttachmentsManifest(attachments, (manifestPath) => {
+        const args = ['enqueue', '--repo', repo, '--title', title, '--label', 'bug', '--body-file', '-'];
+        if (manifestPath) args.push('--attachments-manifest', manifestPath);
+        return queueCommand(run, args, issueBody);
+      });
       const id = payload.id;
 
       if (payload.status !== 'queued' || !validJobId(id)) {
@@ -192,7 +304,7 @@ export function createBugReportRouter(dependencies: { runQueue?: QueueRunner } =
         throw queueProtocolError();
       }
 
-      console.info('Bug report queued:', id, repo);
+      console.info('Bug report queued:', id, repo, 'attachments:', attachments.length);
       res.status(202).json(createApiSuccessResponse({ status: 'queued', id, repo }));
     }),
   );

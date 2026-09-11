@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Bug, CheckCircle2, ExternalLink, Loader2, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, Bug, CheckCircle2, ExternalLink, Loader2, Paperclip, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Button, Dialog, DialogContent, DialogTitle, disabledBusyControlClasses } from '../../shared/view/ui';
@@ -14,6 +14,16 @@ import {
   type BrowserEnvironment,
   type BugReportMetadata,
 } from './buildBugReportMetadata';
+import {
+  canAcceptMore,
+  extractImageEntries,
+  privacyNotice,
+  rejectionMessage,
+  removeStaged,
+  stageResult,
+  type StagedAttachment,
+} from './attachments';
+import { compressImage } from './compressImage';
 
 /** Mirrors the server's `MAX_DESCRIPTION_LENGTH`, so the UI blocks what the API would reject. */
 const MAX_DESCRIPTION_LENGTH = 20000;
@@ -84,6 +94,30 @@ export default function BugReportDialog({
   const [submitState, setSubmitState] = useState<SubmitState>({ status: 'idle' });
   const [showMetadata, setShowMetadata] = useState(false);
 
+  // Screenshots (dante-config skills/bug-report-button/SKILL.md §9): staged,
+  // previewed, and compressed client-side, but never persisted anywhere — a
+  // compressed blob is too large to keep around the way the typed draft is,
+  // and this dialog has no durable draft store to put binary content in
+  // regardless. Session-only for exactly as long as this dialog is open.
+  const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([]);
+  const [attachmentHint, setAttachmentHint] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Every `URL.createObjectURL()` preview must be revoked exactly once: on
+  // removal, on a confirmed send, and here — whenever the tray this ref
+  // tracks is about to be replaced or the dialog unmounts with images still
+  // staged. Kept in a ref (not derived from state) so the unmount cleanup
+  // below always sees the latest tray without re-subscribing on every stage.
+  const stagedAttachmentsRef = useRef<StagedAttachment[]>([]);
+  useEffect(() => {
+    stagedAttachmentsRef.current = stagedAttachments;
+  }, [stagedAttachments]);
+  useEffect(() => () => {
+    for (const attachment of stagedAttachmentsRef.current) {
+      URL.revokeObjectURL(attachment.previewUrl);
+    }
+  }, []);
+
   // Prefer the caller's snapshot; only read the environment here if there isn't
   // one.
   //
@@ -125,6 +159,14 @@ export default function BugReportDialog({
     setDescription('');
     setSubmitState({ status: 'idle' });
     setShowMetadata(false);
+    setAttachmentHint('');
+    // Screenshots are session-only (see the note above `stagedAttachments`) —
+    // closing the dialog without sending drops them, same as a hard reload
+    // would, and every preview URL for them must be revoked right here.
+    for (const attachment of stagedAttachmentsRef.current) {
+      URL.revokeObjectURL(attachment.previewUrl);
+    }
+    setStagedAttachments([]);
   }, [open]);
 
   useEffect(() => {
@@ -185,6 +227,69 @@ export default function BugReportDialog({
     };
   }, [submitState, t]);
 
+  /**
+   * The single entry point for every WIRED capture path — the file input and
+   * the textarea's `paste` listener below (drag-and-drop is optional per the
+   * standard and not wired here; `extractImageEntries` already accepts a
+   * `DataTransfer`-shaped source, so adding a `drop` listener later is a
+   * small addition, not a redesign). Compresses each file in turn and stages
+   * what's accepted, surfacing exactly one rejection reason at a time so a
+   * batch that's mostly fine doesn't get buried under repeated hints.
+   */
+  const stageFiles = useCallback(async (files: Array<{ name?: string; type?: string }>) => {
+    let lastRejection: string | null = null;
+    for (const file of files) {
+      if (!canAcceptMore(stagedAttachmentsRef.current)) {
+        lastRejection = 'too-many';
+        break;
+      }
+      let compressed;
+      try {
+        compressed = await compressImage(file as File);
+      } catch (error) {
+        setAttachmentHint(error instanceof Error && error.message ? error.message : rejectionMessage('unsupported'));
+        continue;
+      }
+      const previewUrl = URL.createObjectURL(compressed.blob);
+      const { list, rejected } = stageResult(stagedAttachmentsRef.current, { ...compressed, previewUrl });
+      if (rejected) {
+        URL.revokeObjectURL(previewUrl);
+        lastRejection = rejected;
+        continue;
+      }
+      stagedAttachmentsRef.current = list;
+      setStagedAttachments(list);
+    }
+    if (lastRejection) setAttachmentHint(rejectionMessage(lastRejection));
+  }, []);
+
+  // File picker: `capture="environment"` (set in the markup) offers the rear
+  // camera on a phone without removing the picker. The input is cleared after
+  // every change so selecting the SAME file twice in a row still fires a
+  // `change` event (which only fires on an actual value change otherwise).
+  const handleFileInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = extractImageEntries(event.target.files);
+    event.target.value = '';
+    if (files.length) void stageFiles(files);
+  }, [stageFiles]);
+
+  // Clipboard paste: never intercepted or blocked. A paste that carries both
+  // a screenshot and typed text must still let the text land in the textarea
+  // via the browser's own default behavior — this only ever ADDS staged
+  // images alongside whatever the paste does normally.
+  const handleDescriptionPaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = extractImageEntries(event.clipboardData);
+    if (files.length) void stageFiles(files);
+  }, [stageFiles]);
+
+  const handleRemoveAttachment = useCallback((id: string) => {
+    const target = stagedAttachmentsRef.current.find((attachment) => attachment.id === id);
+    if (target) URL.revokeObjectURL(target.previewUrl);
+    const next = removeStaged(stagedAttachmentsRef.current, id);
+    stagedAttachmentsRef.current = next;
+    setStagedAttachments(next);
+  }, []);
+
   const trimmedLength = description.trim().length;
   const canSubmit =
     trimmedLength >= MIN_DESCRIPTION_LENGTH &&
@@ -196,7 +301,11 @@ export default function BugReportDialog({
 
     setSubmitState({ status: 'submitting' });
     try {
-      const response = await api.createBugReport({ description: description.trim(), metadata });
+      const attachments = stagedAttachments.map((attachment) => ({
+        name: attachment.name,
+        blob: attachment.blob,
+      }));
+      const response = await api.createBugReport({ description: description.trim(), metadata, attachments });
       const payload = await response.json().catch(() => null);
 
       if (!response.ok) {
@@ -213,12 +322,22 @@ export default function BugReportDialog({
         return;
       }
 
+      // This attempt's request already carried these bytes — revoke every
+      // preview now, matching the draft's own clear-on-confirmed-enqueue
+      // behavior. Left staged (not cleared) on any error path above, so a
+      // retried "File issue" click doesn't ask the reporter to reattach.
+      for (const attachment of stagedAttachmentsRef.current) {
+        URL.revokeObjectURL(attachment.previewUrl);
+      }
+      stagedAttachmentsRef.current = [];
+      setStagedAttachments([]);
+
       recordFeatureUse('bug_report.submit');
       setSubmitState({ status: 'queued', jobId });
     } catch {
       setSubmitState({ status: 'error', message: t('bugReport.networkError') });
     }
-  }, [canSubmit, description, metadata, t]);
+  }, [canSubmit, description, metadata, stagedAttachments, t]);
 
   const metadataEntries = Object.entries(metadata);
   const isSubmitting = submitState.status === 'submitting';
@@ -296,6 +415,7 @@ export default function BugReportDialog({
                   id="bug-report-description"
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
+                  onPaste={handleDescriptionPaste}
                   maxLength={MAX_DESCRIPTION_LENGTH}
                   rows={9}
                   autoFocus
@@ -304,6 +424,85 @@ export default function BugReportDialog({
                   className={`w-full resize-y rounded-xl border border-border/70 bg-background px-3 py-2.5 text-sm leading-6 text-foreground shadow-none outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/30 ${disabledBusyControlClasses}`}
                 />
                 <p className="text-xs text-muted-foreground">{t('bugReport.descriptionHint')}</p>
+              </div>
+
+              {/* Screenshots (dante-config skills/bug-report-button/SKILL.md
+                  §9): explicit and user-initiated only — a file picker
+                  (`capture="environment"` offers the camera on a phone
+                  without removing the picker) plus clipboard paste on the
+                  textarea above, wired via `stageFiles`. Never an automatic
+                  snapshot. Excluded entirely from the metadata disclosure
+                  above: screenshots are binary user-attached content, not
+                  allowlisted/sanitized context. */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isSubmitting || !canAcceptMore(stagedAttachments)}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="rounded-xl"
+                  >
+                    <Paperclip className="mr-1.5 h-3.5 w-3.5" />
+                    {t('bugReport.attachScreenshot')}
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    multiple
+                    hidden
+                    data-testid="bug-report-file-input"
+                    onChange={handleFileInputChange}
+                  />
+                  {attachmentHint ? (
+                    <span className="flex-1 text-xs text-muted-foreground" aria-live="polite">
+                      {attachmentHint}
+                    </span>
+                  ) : (
+                    // Desktop-only affordance the standard also calls for
+                    // (§9: "plus paste-from-clipboard on desktop"); yields the
+                    // slot to a rejection hint the moment there is one.
+                    <span className="flex-1 text-xs text-muted-foreground">
+                      {t('bugReport.attachmentsHint')}
+                    </span>
+                  )}
+                </div>
+
+                {stagedAttachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2" data-testid="bug-report-attachments">
+                    {stagedAttachments.map((attachment) => (
+                      <div
+                        key={attachment.id}
+                        className="relative h-16 w-16 overflow-hidden rounded-lg border border-border/70 bg-muted"
+                        data-testid="bug-report-attachment-thumbnail"
+                      >
+                        <img
+                          src={attachment.previewUrl}
+                          alt={attachment.name}
+                          className="h-full w-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAttachment(attachment.id)}
+                          aria-label={t('bugReport.removeScreenshot', { name: attachment.name })}
+                          data-testid="bug-report-attachment-remove"
+                          className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* The one-line notice §9 requires: shown only once something
+                    is actually staged, because only then does it apply. */}
+                {stagedAttachments.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground">{privacyNotice()}</p>
+                )}
               </div>
 
               {metadataEntries.length > 0 && (

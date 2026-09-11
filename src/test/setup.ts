@@ -57,6 +57,16 @@ window.scrollTo = () => {};
 window.HTMLElement.prototype.hasPointerCapture ??= () => false;
 window.HTMLElement.prototype.releasePointerCapture ??= () => {};
 
+// jsdom implements neither of these at all (not even as a stub that throws
+// gracefully) — anything staging a client-side file preview (screenshots,
+// image attachments) needs them.
+if (typeof URL.createObjectURL !== 'function') {
+  URL.createObjectURL = vi.fn(() => `blob:mock-${Math.random().toString(36).slice(2)}`);
+}
+if (typeof URL.revokeObjectURL !== 'function') {
+  URL.revokeObjectURL = vi.fn();
+}
+
 if (!navigator.clipboard) {
   Object.defineProperty(navigator, 'clipboard', {
     configurable: true,

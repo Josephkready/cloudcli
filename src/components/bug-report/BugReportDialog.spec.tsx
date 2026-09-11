@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import BugReportDialog from './BugReportDialog';
+import { MAX_ATTACHMENT_BYTES, rejectionMessage } from './attachments';
 
 import type { Project, ProjectSession } from '@/types/app';
 
@@ -31,6 +32,22 @@ vi.mock('@/hooks/useVersionCheck', () => ({
     runningVersion: '1.36.3',
     restartRequired: false,
   }),
+}));
+
+// jsdom ships no canvas/`createImageBitmap`, so the real client-side
+// compression (dante-config skills/bug-report-button/SKILL.md §9) is
+// exercised for real in `compressImage.spec.ts` and by the Playwright e2e.
+// Here it's mocked to a deterministic result so these tests exercise only
+// this dialog's OWN staging/paste/remove wiring around it.
+const compressImageMock = vi.fn(async (file: File) => ({
+  name: file.name || 'screenshot.jpg',
+  mime: 'image/jpeg',
+  size: 1234,
+  blob: new Blob(['compressed'], { type: 'image/jpeg' }),
+}));
+
+vi.mock('./compressImage', () => ({
+  compressImage: (...args: [File]) => compressImageMock(...args),
 }));
 
 const project = {
@@ -316,5 +333,177 @@ describe('BugReportDialog', () => {
     // than the row vanishing: a caller with no press to hang a snapshot on has
     // no keyboard to lose either.
     expect(screen.getByText(`${window.innerWidth}×${window.innerHeight}`)).toBeInTheDocument();
+  });
+
+  /*
+   * Screenshots (dante-config skills/bug-report-button/SKILL.md §9). Real
+   * client-side compression is covered in `compressImage.spec.ts` and the
+   * Playwright e2e; these tests exercise this dialog's OWN wiring around the
+   * (mocked) compressor — staging, the thumbnail/remove control, paste, and
+   * the image-free path staying unaffected.
+   */
+  describe('screenshots', () => {
+    beforeEach(() => {
+      compressImageMock.mockClear();
+    });
+
+    function pngFile(name = 'shot.png') {
+      return new File(['fake-png-bytes'], name, { type: 'image/png' });
+    }
+
+    it('stages a chosen file as a thumbnail and shows the privacy notice', async () => {
+      renderDialog();
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+      expect(screen.queryByTestId('bug-report-attachment-thumbnail')).toBeNull();
+
+      await act(async () => {
+        fireEvent.change(input, { target: { files: [pngFile()] } });
+        await Promise.resolve();
+      });
+
+      expect(await screen.findByTestId('bug-report-attachment-thumbnail')).toBeInTheDocument();
+      expect(screen.getByText(/Screenshots may show more of your screen/)).toBeInTheDocument();
+    });
+
+    it('the remove control drops the staged image, hides the notice, and revokes its preview', async () => {
+      const revokeSpy = vi.spyOn(URL, 'revokeObjectURL');
+      renderDialog();
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.change(input, { target: { files: [pngFile()] } });
+        await Promise.resolve();
+      });
+      await screen.findByTestId('bug-report-attachment-thumbnail');
+
+      await userEvent.click(screen.getByTestId('bug-report-attachment-remove'));
+
+      expect(screen.queryByTestId('bug-report-attachment-thumbnail')).toBeNull();
+      expect(screen.queryByText(/Screenshots may show more of your screen/)).toBeNull();
+      expect(revokeSpy).toHaveBeenCalled();
+    });
+
+    it('the count cap refuses a 4th image with a visible hint, keeping the first three', async () => {
+      renderDialog();
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.change(input, {
+          target: { files: [pngFile('a.png'), pngFile('b.png'), pngFile('c.png'), pngFile('d.png')] },
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(await screen.findAllByTestId('bug-report-attachment-thumbnail')).toHaveLength(3);
+      expect(screen.getByText(/Up to 3 screenshots per report/)).toBeInTheDocument();
+    });
+
+    it('rejects a source the browser cannot decode, with a visible hint', async () => {
+      compressImageMock.mockRejectedValueOnce(new Error(rejectionMessage('unsupported')));
+      renderDialog();
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.change(input, { target: { files: [pngFile('unreadable.heic')] } });
+        await Promise.resolve();
+      });
+
+      expect(screen.queryByTestId('bug-report-attachment-thumbnail')).toBeNull();
+      expect(await screen.findByText(/format isn.t supported/i)).toBeInTheDocument();
+    });
+
+    it('rejects a compressed blob still over the size cap, and revokes its discarded preview', async () => {
+      const revokeSpy = vi.spyOn(URL, 'revokeObjectURL');
+      compressImageMock.mockResolvedValueOnce({
+        name: 'huge.png',
+        mime: 'image/webp',
+        size: MAX_ATTACHMENT_BYTES + 1,
+        blob: new Blob(['oversized'], { type: 'image/webp' }),
+      });
+      renderDialog();
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.change(input, { target: { files: [pngFile('huge.png')] } });
+        await Promise.resolve();
+      });
+
+      expect(screen.queryByTestId('bug-report-attachment-thumbnail')).toBeNull();
+      expect(await screen.findByText(rejectionMessage('too-large'))).toBeInTheDocument();
+      // The rejected candidate's own preview URL — created to build the
+      // staging entry before the size check ran — must not leak.
+      expect(revokeSpy).toHaveBeenCalled();
+    });
+
+    it('pasting an image stages it without swallowing typed text', async () => {
+      renderDialog();
+      const textarea = screen.getByLabelText('What happened?') as HTMLTextAreaElement;
+      await userEvent.type(textarea, 'a real and detailed report');
+
+      const clipboardData = {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => pngFile('pasted.png') }],
+      };
+      await act(async () => {
+        fireEvent.paste(textarea, { clipboardData });
+        await Promise.resolve();
+      });
+
+      expect(await screen.findByTestId('bug-report-attachment-thumbnail')).toBeInTheDocument();
+      // The paste handler never calls preventDefault, so the browser's own
+      // default paste behavior (which jsdom doesn't simulate) is untouched —
+      // what's asserted here is that OUR handler never clears the typed text.
+      expect(textarea).toHaveValue('a real and detailed report');
+    });
+
+    it('pasting text only never stages anything', async () => {
+      renderDialog();
+      const textarea = screen.getByLabelText('What happened?') as HTMLTextAreaElement;
+
+      const clipboardData = { items: [{ kind: 'string', type: 'text/plain' }] };
+      await act(async () => {
+        fireEvent.paste(textarea, { clipboardData });
+        await Promise.resolve();
+      });
+
+      expect(screen.queryByTestId('bug-report-attachment-thumbnail')).toBeNull();
+      expect(compressImageMock).not.toHaveBeenCalled();
+    });
+
+    it('sends an image-free report exactly as before, with an empty attachments list', async () => {
+      createBugReport.mockResolvedValue(
+        jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
+      );
+      renderDialog();
+
+      await userEvent.type(screen.getByLabelText('What happened?'), 'the tab bar scrolls itself');
+      await userEvent.click(screen.getByRole('button', { name: 'File issue' }));
+
+      await waitFor(() => expect(createBugReport).toHaveBeenCalledTimes(1));
+      expect(createBugReport.mock.calls[0][0].attachments).toEqual([]);
+    });
+
+    it('sends the staged, compressed attachment alongside the report on submit', async () => {
+      createBugReport.mockResolvedValue(
+        jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
+      );
+      renderDialog();
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.change(input, { target: { files: [pngFile('shot.png')] } });
+        await Promise.resolve();
+      });
+      await screen.findByTestId('bug-report-attachment-thumbnail');
+
+      await userEvent.type(screen.getByLabelText('What happened?'), 'see the attached screenshot');
+      await userEvent.click(screen.getByRole('button', { name: 'File issue' }));
+
+      await waitFor(() => expect(createBugReport).toHaveBeenCalledTimes(1));
+      const attachments = createBugReport.mock.calls[0][0].attachments;
+      expect(attachments).toHaveLength(1);
+      expect(attachments[0].name).toBe('shot.png');
+      expect(attachments[0].blob).toBeInstanceOf(Blob);
+    });
   });
 });

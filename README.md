@@ -105,14 +105,21 @@ a verdict. Give it a long window (90+ days — rare is not dead), and rule out
 The bug icon in the app's top panel opens a reporter: write what went wrong, and
 the app attaches the session details (versions, provider, space, active tab,
 browser) and durably queues a GitHub issue for you. It shows you exactly what it
-will send before it sends it.
+will send before it sends it. You can also attach up to 3 screenshots — a file
+picker (with the camera offered on a phone) or pasting an image (Ctrl/Cmd-V) on
+desktop — each compressed client-side (1600px long edge, WebP/JPEG) to roughly
+2MB or less before it ever reaches the network, with a thumbnail preview and a
+remove control. The server re-validates count, size, and the actual file
+content independently of the client before queueing.
 
 The POST returns as soon as the host-local `issue-queue` SQLite database owns
-the report. The dialog then polls a content-free authenticated status endpoint
-for the final issue link; a separate worker owns GitHub authentication, rate
-limits, retries, and ambiguous-create reconciliation. The server and worker
-must share `ISSUE_QUEUE_DB`. Reports go to `Josephkready/cloudcli` unless
-`BUG_REPORT_REPO` says otherwise.
+the report (and, for a report with screenshots, has durably copied their bytes
+into its own storage). The dialog then polls a content-free authenticated
+status endpoint for the final issue link; a separate worker owns GitHub
+authentication, rate limits, retries, ambiguous-create reconciliation, and
+uploading any screenshots to the shared assets repo referenced in the filed
+issue. The server and worker must share `ISSUE_QUEUE_DB`. Reports go to
+`Josephkready/cloudcli` unless `BUG_REPORT_REPO` says otherwise.
 
 ## Deployment
 

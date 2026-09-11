@@ -244,11 +244,34 @@ export const api = {
   },
 
   // Durably queues a GitHub issue from the in-app bug reporter (top-panel bug button).
-  createBugReport: ({ description, metadata }) =>
-    authenticatedFetch('/api/bug-report', {
+  //
+  // `attachments` (dante-config skills/bug-report-button/SKILL.md §9) is an
+  // optional array of `{ name, blob }` — already-compressed screenshots
+  // staged by BugReportDialog. The image-free path (the overwhelming common
+  // case) keeps posting plain JSON, byte-for-byte what it always has; only a
+  // report carrying at least one attachment switches to multipart, since
+  // binary bytes cannot ride inside a JSON string.
+  /**
+   * @param {{ description: string, metadata?: Record<string, unknown>, attachments?: Array<{ name: string, blob: Blob }> }} params
+   */
+  createBugReport: ({ description, metadata, attachments }) => {
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      const formData = new FormData();
+      formData.append('description', description);
+      formData.append('metadata', JSON.stringify(metadata ?? {}));
+      for (const attachment of attachments) {
+        formData.append('attachments', attachment.blob, attachment.name);
+      }
+      return authenticatedFetch('/api/bug-report', {
+        method: 'POST',
+        body: formData,
+      });
+    }
+    return authenticatedFetch('/api/bug-report', {
       method: 'POST',
       body: JSON.stringify({ description, metadata }),
-    }),
+    });
+  },
   getBugReportStatus: (jobId) =>
     authenticatedFetch(`/api/bug-report/${encodeURIComponent(jobId)}`),
 

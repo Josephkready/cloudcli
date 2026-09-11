@@ -130,7 +130,10 @@
     "statusUnavailable": "The report is saved, but its filing status is unavailable.",
     "viewIssue": "View issue",
     "genericError": "The report could not be filed. Please try again.",
-    "networkError": "Could not reach the server. Check your connection and try again."
+    "networkError": "Could not reach the server. Check your connection and try again.",
+    "attachScreenshot": "Attach screenshot",
+    "removeScreenshot": "Remove {{name}}",
+    "attachmentsHint": "You can also paste a screenshot (Ctrl/Cmd-V)."
   },
   "fileTree": {
     "loading": "Loading files...",
