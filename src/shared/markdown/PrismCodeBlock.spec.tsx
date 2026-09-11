@@ -73,6 +73,9 @@ describe('PrismCodeBlock — memoized against unchanged props', () => {
 
       rerender(<PrismCodeBlock code="const x = 2;" language="ts" isDarkMode />);
       expect(spy).toHaveBeenCalledTimes(3);
+
+      rerender(<PrismCodeBlock code="const x = 2;" language="python" isDarkMode />);
+      expect(spy).toHaveBeenCalledTimes(4);
     } finally {
       restore();
     }
