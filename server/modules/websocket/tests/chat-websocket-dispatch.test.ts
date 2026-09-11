@@ -159,6 +159,23 @@ async function settle(times = 4): Promise<void> {
   }
 }
 
+/**
+ * Polls until `predicate` is true, for asserting on something that finishes
+ * via real (not just microtask) async work — e.g. the opening-name broadcast
+ * (#368), which does a DB read plus a filesystem probe before it reaches a
+ * socket. A fixed `settle()` tick count races that I/O under CPU/disk load;
+ * polling with a generous deadline waits for the actual event instead.
+ */
+async function waitUntil(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`waitUntil: condition was not met within ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
   const tempDirectory = await mkdtemp(path.join(tmpdir(), 'chat-ws-dispatch-'));
@@ -1436,6 +1453,13 @@ test('an app-created session takes its name from the first message', async () =>
     // Persisted is not enough: without the broadcast the sidebar keeps showing
     // "New Session" until something else triggers a refresh, which is the whole
     // symptom. Assert the name actually reached the client.
+    //
+    // The broadcast is deferred to a macrotask and does its own DB read plus a
+    // filesystem live-status probe (#368) — real I/O, not just a microtask —
+    // so waiting on a fixed `settle()` tick count races that work under
+    // CPU/disk load. Poll for the frame instead of assuming it has already
+    // arrived.
+    await waitUntil(() => socket.frames.some((frame) => frame.kind === 'session_upserted'));
     const upserts = socket.frames.filter((frame) => frame.kind === 'session_upserted');
     assert.equal(upserts.length, 1, 'the derived name is broadcast to open clients');
     assert.match(JSON.stringify(upserts[0]), /Show me a long code sample/);
