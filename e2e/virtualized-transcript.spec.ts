@@ -99,6 +99,13 @@ async function loadHistoryUntil(page: Page, container: Locator, minLoaded: numbe
 
 let fixture: LargeConversationHandles;
 
+// A 520-row session opens, pages, and (in the Load-all case) flat-renders
+// every row under whatever load the CI host is under — the first gate run
+// blew the default 45s budget on exactly those steps while sharing the host
+// with a dozen other CI lanes. The waits below are generous for the same
+// reason; none of them are load-bearing for what is being asserted.
+test.setTimeout(120_000);
+
 test.beforeEach(async ({ server }) => {
   fixture = seedLargeConversation(server.home, server.projectPath);
 });
@@ -108,7 +115,7 @@ test('bounds mounted rows to a small window even once hundreds of messages are l
 
   const container = page.locator('.chat-messages-pane');
   await expect(container).toBeVisible();
-  await expect(page.getByText(fixture.lastMessageText)).toBeVisible();
+  await expect(page.getByText(fixture.lastMessageText)).toBeVisible({ timeout: 30_000 });
 
   // Nowhere near loaded yet, let alone rendered.
   await expect(page.getByText(fixture.firstMessageText)).toHaveCount(0);
@@ -124,7 +131,7 @@ test('bounds mounted rows to a small window even once hundreds of messages are l
 
 test('auto-follows a streamed reply into an already-long conversation', async ({ page }) => {
   await page.goto(`/session/${fixture.sessionId}`);
-  await expect(page.getByText(fixture.lastMessageText)).toBeVisible();
+  await expect(page.getByText(fixture.lastMessageText)).toBeVisible({ timeout: 30_000 });
 
   const composer = page.locator('[data-slot="prompt-input-textarea"]');
   await composer.fill('one more turn, please');
@@ -152,7 +159,7 @@ test('auto-follows a streamed reply into an already-long conversation', async ({
 
 test('stops following once the reader scrolls up, and does not snap back', async ({ page }) => {
   await page.goto(`/session/${fixture.sessionId}`);
-  await expect(page.getByText(fixture.lastMessageText)).toBeVisible();
+  await expect(page.getByText(fixture.lastMessageText)).toBeVisible({ timeout: 30_000 });
 
   const container = page.locator('.chat-messages-pane');
   const composer = page.locator('[data-slot="prompt-input-textarea"]');
@@ -185,8 +192,9 @@ test('stops following once the reader scrolls up, and does not snap back', async
 
 test('an off-screen diagram finishing its async layout does not shift the reader\'s current view', async ({ page }) => {
   await page.goto(`/session/${fixture.sessionId}`);
+  await expect(page.getByText(fixture.lastMessageText)).toBeVisible({ timeout: 30_000 });
   const anchor = page.getByText(fixture.afterMermaidMessageText);
-  await expect(anchor).toBeVisible();
+  await expect(anchor).toBeVisible({ timeout: 30_000 });
 
   // Pin the anchor to the TOP of the viewport, deterministically pushing the
   // mermaid message (which sits right before it) above the fold — a fixed
@@ -207,19 +215,31 @@ test('an off-screen diagram finishing its async layout does not shift the reader
 
 test('"Load all" still mounts every message, preserving the search-to-message affordance', async ({ page }) => {
   await page.goto(`/session/${fixture.sessionId}`);
-  await expect(page.getByText(fixture.lastMessageText)).toBeVisible();
+  await expect(page.getByText(fixture.lastMessageText)).toBeVisible({ timeout: 30_000 });
 
   const container = page.locator('.chat-messages-pane');
-  // A large, deliberately overshooting delta: the trigger is an *absolute*
-  // `scrollTop < 100`, not "scrolled up by some amount", so this has to clear
-  // the top regardless of how tall the loaded content happens to be.
-  await wheelUp(page, container, 50_000);
-
+  // The "Load all" overlay appears when the reader reaches the top and fades
+  // out again 2.5s later, so under load a single attempt can miss its window.
+  // Reach the top with a deliberately overshooting delta (the trigger is an
+  // *absolute* `scrollTop < 100`, not "scrolled up by some amount"), try to
+  // click within the window, and if it faded first scroll back down past the
+  // re-arm threshold (`scrollTop >= 100`) and go again.
   const loadAllButton = page.getByRole('button', { name: /Load all messages/ });
-  await expect(loadAllButton).toBeVisible({ timeout: 5_000 });
-  await loadAllButton.click();
+  let clicked = false;
+  for (let attempt = 0; attempt < 6 && !clicked; attempt++) {
+    await wheelUp(page, container, 50_000);
+    try {
+      await loadAllButton.click({ timeout: 2_000 });
+      clicked = true;
+    } catch {
+      await page.mouse.wheel(0, 600);
+      await page.waitForTimeout(300);
+    }
+  }
+  expect(clicked).toBe(true);
 
-  await expect(page.getByText(fixture.firstMessageText)).toBeVisible({ timeout: 15_000 });
+  // Fetching and flat-rendering all 520 rows is the slowest thing in this file.
+  await expect(page.getByText(fixture.firstMessageText)).toBeVisible({ timeout: 60_000 });
 
   const mountedAfterLoadAll = (await scrollMetrics(container)).mounted;
   expect(mountedAfterLoadAll).toBeGreaterThan(400);
