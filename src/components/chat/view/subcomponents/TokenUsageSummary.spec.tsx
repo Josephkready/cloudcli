@@ -53,4 +53,20 @@ describe('TokenUsageSummary', () => {
     render(<TokenUsageSummary usage={null} />);
     expect(screen.getByRole('button', { name: /show token usage/i })).toHaveTextContent('0');
   });
+
+  it('omits the denominator when total is zero or negative rather than showing "/0"', () => {
+    const { rerender } = render(
+      <TokenUsageSummary usage={{ inputTokens: 1_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, total: 0 }} />,
+    );
+    let button = screen.getByRole('button', { name: /show token usage/i });
+    expect(button).not.toHaveTextContent('/0');
+    expect(button.title).not.toContain('/');
+
+    rerender(
+      <TokenUsageSummary usage={{ inputTokens: 1_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, total: -5 }} />,
+    );
+    button = screen.getByRole('button', { name: /show token usage/i });
+    expect(button).not.toHaveTextContent('/-5');
+    expect(button.title).not.toContain('/');
+  });
 });

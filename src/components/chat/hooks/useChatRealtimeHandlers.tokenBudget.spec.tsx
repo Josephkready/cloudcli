@@ -151,4 +151,83 @@ describe('token_budget realtime handling', () => {
 
     expect(setTokenBudget).toHaveBeenCalledTimes(1);
   });
+
+  it('resets the staleness guard on an idle chat_subscribed ack, not just on complete', () => {
+    // A run that finishes while this client is disconnected replays no
+    // buffered `complete` on reconnect (chat-websocket service serves a
+    // completed run's history over REST instead) — only an idle
+    // `chat_subscribed` ack. Without also resetting there, the next run's
+    // restarted seq would be permanently rejected as stale.
+    const { deliver, setTokenBudget } = setup(SESSION);
+
+    deliver(tokenBudgetFrame(SESSION, 5, 200_000));
+    // No 'complete' — simulates the run finishing while disconnected.
+    deliver({ kind: 'chat_subscribed', sessionId: SESSION, isProcessing: false } as unknown as ServerEvent);
+    deliver(tokenBudgetFrame(SESSION, 1, 10_000)); // new run's own seq count, starting over
+
+    expect(setTokenBudget).toHaveBeenCalledTimes(2);
+    expect(setTokenBudget).toHaveBeenNthCalledWith(2, expect.objectContaining({ inputTokens: 10_000 }));
+  });
+
+  it('does not reset the staleness guard on a processing chat_subscribed ack (a run is still live)', () => {
+    const { deliver, setTokenBudget } = setup(SESSION);
+
+    deliver(tokenBudgetFrame(SESSION, 5, 200_000));
+    deliver({ kind: 'chat_subscribed', sessionId: SESSION, isProcessing: true } as unknown as ServerEvent);
+    deliver(tokenBudgetFrame(SESSION, 3, 50_000)); // stale relative to the still-live run's seq 5
+
+    expect(setTokenBudget).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the session-scope and seq guards independent across a view switch away and back', () => {
+    const setTokenBudget = vi.fn();
+    let listener: ((event: ServerEvent) => void) | null = null;
+    let activeSessionId = SESSION;
+    const subscribe = (fn: (event: ServerEvent) => void) => {
+      listener = fn;
+      return () => {
+        listener = null;
+      };
+    };
+
+    const { rerender } = renderHook(() => {
+      const streamingStatesRef = useRef(new Map());
+      const lastSeqRef = useRef(new Map<string, number>());
+      const statusCheckSentAtRef = useRef(new Map<string, number>());
+
+      useChatRealtimeHandlers({
+        subscribe,
+        provider: 'claude' as LLMProvider,
+        selectedSession: { id: activeSessionId } as ProjectSession,
+        currentSessionId: activeSessionId,
+        setTokenBudget,
+        pendingPermissionRequests: [],
+        setPendingPermissionRequests: vi.fn(),
+        streamingStatesRef,
+        lastSeqRef,
+        statusCheckSentAtRef,
+        sessionStore: makeSessionStore(),
+      });
+    });
+
+    const deliver = (event: ServerEvent) => listener?.(event);
+
+    // Session A streams while viewed.
+    deliver(tokenBudgetFrame(SESSION, 1, 10_000));
+    expect(setTokenBudget).toHaveBeenCalledTimes(1);
+
+    // View switches to B; A keeps running in the background — its frames
+    // must not reach the (now different) viewed session's display.
+    activeSessionId = OTHER_SESSION;
+    rerender();
+    deliver(tokenBudgetFrame(SESSION, 2, 20_000));
+    expect(setTokenBudget).toHaveBeenCalledTimes(1);
+
+    // View switches back to A mid-run — its later frames resume applying.
+    activeSessionId = SESSION;
+    rerender();
+    deliver(tokenBudgetFrame(SESSION, 3, 30_000));
+    expect(setTokenBudget).toHaveBeenCalledTimes(2);
+    expect(setTokenBudget).toHaveBeenNthCalledWith(2, expect.objectContaining({ inputTokens: 30_000 }));
+  });
 });

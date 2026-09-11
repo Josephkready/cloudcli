@@ -463,6 +463,15 @@ function readNumber(value) {
  * count). Both extraction branches funnel through here so they can never drift
  * into reporting different shapes or different totals for the same run.
  *
+ * `used` is that context-window occupancy alone — `inputTokens`, never
+ * `inputTokens + outputTokens`. The reply the model just generated hasn't been
+ * resent as input yet, so it does not occupy the context window the way the
+ * disjoint input/cache counters do; folding it in here would make this
+ * payload's `used` disagree with the REST `/token-usage` endpoint's `used`
+ * (`getClaudeSessionTokenUsage`), which reports context size the same way.
+ * `outputTokens` is still reported separately for callers that want it (e.g.
+ * a cost estimate, where output legitimately counts).
+ *
  * @param {{inputTokens: number, outputTokens: number, cacheReadTokens: number, cacheCreationTokens: number}} counts
  * @returns {Object} Token budget object
  */
@@ -470,7 +479,7 @@ function buildTokenBudget({ inputTokens, outputTokens, cacheReadTokens, cacheCre
   const contextWindow = parseInt(process.env.CONTEXT_WINDOW, 10) || 160000;
 
   return {
-    used: inputTokens + outputTokens,
+    used: inputTokens,
     total: contextWindow,
     inputTokens,
     outputTokens,

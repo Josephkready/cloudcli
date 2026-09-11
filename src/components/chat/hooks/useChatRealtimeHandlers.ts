@@ -309,6 +309,18 @@ export function useChatRealtimeHandlers({
             onSessionIdle?.(sid, {
               ifStartedBefore: statusCheckSentAtRef.current.get(sid),
             });
+
+            // A run that finishes while this client is disconnected has no
+            // buffered `complete` replayed on reconnect (chat-websocket
+            // service serves a completed run's history over REST instead) —
+            // only this idle ack. Without this, `tokenBudgetSeqRef` would
+            // keep that finished run's high-water seq forever, and the next
+            // run's frames (whose seq restarts low) would be wrongly
+            // rejected as stale until they organically climbed back past it,
+            // freezing the widget at the previous run's value. An idle ack
+            // proves nothing from the old seq generation is still in flight,
+            // same as the `complete` reset below.
+            tokenBudgetSeqRef.current.delete(sid);
           }
 
           const isViewedSession = sid === activeViewSessionId;

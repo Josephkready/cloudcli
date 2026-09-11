@@ -68,7 +68,7 @@ test('extractTokenBudget sums cache tokens into inputTokens without double count
   assert.equal(budget.cacheCreationTokens, 2_000);
   assert.equal(budget.cacheReadTokens, 30_000);
   assert.equal(budget.cacheTokens, 32_000);
-  assert.equal(budget.used, 32_600);
+  assert.equal(budget.used, 32_100, 'used is context size only: input+cache, never +output');
   assert.deepEqual(budget.breakdown, { input: 32_100, output: 500 });
 });
 
@@ -80,7 +80,7 @@ test('extractTokenBudget reads result-level usage when there is no nested messag
 
   assert.equal(budget.inputTokens, 10);
   assert.equal(budget.outputTokens, 7);
-  assert.equal(budget.used, 17);
+  assert.equal(budget.used, 10, 'used excludes output_tokens');
   assert.equal(budget.cacheTokens, 0);
 });
 
@@ -145,7 +145,7 @@ test('extractTokenBudget falls back to modelUsage when no usage payload exists',
 
   assert.equal(budget.inputTokens, 120);
   assert.equal(budget.outputTokens, 40);
-  assert.equal(budget.used, 160);
+  assert.equal(budget.used, 120, 'used excludes output_tokens');
 });
 
 test('extractTokenBudget prefers cumulative modelUsage counters', () => {
@@ -183,7 +183,7 @@ test('extractTokenBudget folds cache tokens into the modelUsage branch too', () 
   assert.equal(budget.cacheReadTokens, 30_000);
   assert.equal(budget.cacheTokens, 32_000);
   assert.equal(budget.inputTokens, 32_100);
-  assert.equal(budget.used, 32_600);
+  assert.equal(budget.used, 32_100, 'used is context size only: input+cache, never +output');
 });
 
 test('extractTokenBudget reports identical totals for the usage and modelUsage branches', () => {
@@ -222,7 +222,7 @@ test('extractTokenBudget sums every model in modelUsage, not just the first', ()
 
   assert.equal(budget.inputTokens, 4_010);
   assert.equal(budget.outputTokens, 1_005);
-  assert.equal(budget.used, 5_015);
+  assert.equal(budget.used, 4_010, 'used excludes output_tokens');
 });
 
 test('extractTokenBudget skips malformed modelUsage entries but keeps the valid ones', () => {
