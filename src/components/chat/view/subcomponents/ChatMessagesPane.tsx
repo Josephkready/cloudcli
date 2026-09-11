@@ -159,11 +159,20 @@ function ChatMessagesPane({
       ref={scrollContainerRef}
       onWheel={onWheel}
       onTouchMove={onTouchMove}
-      className={`chat-messages-pane relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden pt-3 sm:pt-4 ${
-        hasActivityIndicator ? 'pb-12 sm:pb-14' : 'pb-3 sm:pb-4'
-      }`}
+      className="chat-messages-pane relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
     >
-      <div className="mx-auto w-full max-w-[54.25rem] space-y-3 px-4 sm:space-y-4">
+      {/* Vertical padding lives here, on the scrolled content, rather than on
+          the scroll container above (cloudcli#475). A flex item's box-sizing
+          can never resolve smaller than its own padding, so padding on the
+          *container* put a floor (~24-56px, depending on breakpoint/activity
+          indicator) under how far this pane could ever shrink — space a short
+          (e.g. landscape phone) viewport with a keyboard up needs to hand to
+          the composer instead. Padding on the *scrolled* content has no such
+          effect: the container can still shrink to 0 while this div (and its
+          padding) simply scrolls further out of view. */}
+      <div className={`mx-auto w-full max-w-[54.25rem] space-y-3 px-4 pt-3 sm:space-y-4 sm:pt-4 ${
+        hasActivityIndicator ? 'pb-12 sm:pb-14' : 'pb-3 sm:pb-4'
+      }`}>
       {paneView === 'loading' ? (
         <div className="mt-8 text-center text-gray-500 dark:text-gray-400">
           <div className="flex items-center justify-center space-x-2">
