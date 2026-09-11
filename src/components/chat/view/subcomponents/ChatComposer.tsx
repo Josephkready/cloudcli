@@ -30,6 +30,7 @@ import {
   PromptInputSubmit,
 } from '../../../../shared/view/ui';
 
+import { computeComposerTextareaMaxHeight } from './composerTextareaHeight';
 import CommandMenu from './CommandMenu';
 import EffortDropdown from './EffortDropdown';
 import ActivityIndicator from './ActivityIndicator';
@@ -38,6 +39,10 @@ import VoiceInputButton from './VoiceInputButton';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
 import TokenUsageSummary from './TokenUsageSummary';
 import QueuedMessageCard from './QueuedMessageCard';
+
+// Computed once: the formula has no dependency on props/state, only on CSS
+// custom properties/units the browser resolves at layout time (cloudcli#475).
+const COMPOSER_TEXTAREA_MAX_HEIGHT = computeComposerTextareaMaxHeight();
 
 interface MentionableFile {
   name: string;
@@ -387,6 +392,14 @@ export default function ChatComposer({
               onBlur={() => onInputFocusChange?.(false)}
               onInput={onTextareaInput}
               placeholder={placeholder}
+              // Overrides the base `max-h-[40vh] sm:max-h-[300px]` classes with a
+              // viewport/keyboard-aware ceiling so a short (e.g. landscape phone)
+              // viewport or an open soft keyboard can't grow the textarea past the
+              // point where the footer's send button is pushed off-screen
+              // (cloudcli#475). Inline style always wins over the classes, and the
+              // formula only ever narrows the original cap — see
+              // composerTextareaHeight.ts.
+              style={{ maxHeight: COMPOSER_TEXTAREA_MAX_HEIGHT }}
             />
         </PromptInputBody>
 

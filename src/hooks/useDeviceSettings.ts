@@ -1,17 +1,35 @@
 import { useEffect, useState } from 'react';
 
+import { computeIsMobile } from './isMobileViewport';
+
 type UseDeviceSettingsOptions = {
   mobileBreakpoint?: number;
   trackMobile?: boolean;
   trackPWA?: boolean;
 };
 
+// A phone rotated to landscape (e.g. 844x390) is wider than the 768px
+// breakpoint, so width alone would put it in the desktop layout (cloudcli#475).
+// `computeIsMobile` also treats a coarse-pointer, no-hover device (touch, never
+// a mouse) as mobile regardless of width — see its doc comment for why that
+// can't regress a real desktop window.
 const getIsMobile = (mobileBreakpoint: number): boolean => {
   if (typeof window === 'undefined') {
     return false;
   }
 
-  return window.innerWidth < mobileBreakpoint;
+  return computeIsMobile(
+    {
+      width: window.innerWidth,
+      isCoarsePointer: typeof window.matchMedia === 'function'
+        ? window.matchMedia('(pointer: coarse)').matches
+        : false,
+      hasNoHover: typeof window.matchMedia === 'function'
+        ? window.matchMedia('(hover: none)').matches
+        : false,
+    },
+    mobileBreakpoint,
+  );
 };
 
 const getIsPWA = (): boolean => {
