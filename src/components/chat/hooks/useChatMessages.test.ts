@@ -113,3 +113,90 @@ test('a contentless standalone-result fallback does not throw and renders as emp
   assert.equal(tools.length, 1);
   assert.equal(tools[0].toolResult?.content, '');
 });
+
+// --- incremental derivation (per-row memoization keyed on row identity) ---
+//
+// `normalizedToChatMessages` caches each row's converted output keyed on the
+// row's own object reference (the store never mutates a NormalizedMessage in
+// place, so reference identity already is "content version"). These tests
+// observe that cache through the only thing callers can see: whether the
+// SAME output ChatMessage object comes back across two calls for a row whose
+// reference didn't change.
+
+test('an unchanged prefix is not recomputed: same row references return the same ChatMessage objects', () => {
+  const a = nm({ kind: 'text', role: 'assistant', content: 'settled one' });
+  const b = nm({ kind: 'text', role: 'assistant', content: 'settled two' });
+  const streamV1 = nm({ kind: 'stream_delta', content: 'Hel' });
+
+  const first = normalizedToChatMessages([a, b, streamV1]);
+  const streamV2 = nm({ kind: 'stream_delta', content: 'Hello wor' }); // simulates updateStreaming's tick
+  const second = normalizedToChatMessages([a, b, streamV2]);
+
+  assert.equal(second[0], first[0], 'row a unchanged -> same output object reused');
+  assert.equal(second[1], first[1], 'row b unchanged -> same output object reused');
+  assert.notEqual(second[2], first[2], 'the replaced streaming row must get a fresh object');
+  assert.equal(second[2].content, 'Hello wor');
+});
+
+test('a new chunk only touches the tail: an appended row does not disturb earlier cached output', () => {
+  const a = nm({ kind: 'text', role: 'assistant', content: 'one' });
+  const b = nm({ kind: 'text', role: 'assistant', content: 'two' });
+
+  const first = normalizedToChatMessages([a, b]);
+  const c = nm({ kind: 'text', role: 'assistant', content: 'three' });
+  const second = normalizedToChatMessages([a, b, c]);
+
+  assert.equal(second.length, 3);
+  assert.equal(second[0], first[0]);
+  assert.equal(second[1], first[1]);
+  assert.equal(second[2].content, 'three');
+});
+
+test('a compaction/replace (whole array swapped for new row objects) re-derives everything', () => {
+  const first = normalizedToChatMessages([
+    nm({ kind: 'text', role: 'assistant', content: 'one' }),
+    nm({ kind: 'text', role: 'assistant', content: 'two' }),
+  ]);
+
+  // Same values, but every row is a brand-new object -- e.g. a fresh transcript
+  // fetch that replaced `serverMessages` wholesale.
+  const second = normalizedToChatMessages([
+    nm({ kind: 'text', role: 'assistant', content: 'one' }),
+    nm({ kind: 'text', role: 'assistant', content: 'two' }),
+  ]);
+
+  assert.equal(second.length, first.length);
+  assert.notEqual(second[0], first[0]);
+  assert.notEqual(second[1], first[1]);
+  assert.deepEqual(
+    second.map((m) => m.content),
+    first.map((m) => m.content),
+  );
+});
+
+test('a standalone tool_result arriving on a later call updates the earlier, unchanged tool_use row (not served stale from cache)', () => {
+  // The hazard this cache exists to avoid: `tool_use`'s rendered result can
+  // depend on a DIFFERENT row (a standalone tool_result) that shows up later,
+  // while the tool_use row's own reference never changes.
+  const toolUse = edit('call-1', 'src/only.ts'); // no inline toolResult
+
+  const first = toolUses(normalizedToChatMessages([toolUse]));
+  assert.equal(first.length, 1);
+  assert.equal(first[0].toolResult, null, 'no result yet -> unset');
+
+  const resultRow = result('call-1', 'Success. Updated 1 file');
+  const second = toolUses(normalizedToChatMessages([toolUse, resultRow]));
+
+  assert.equal(second.length, 1);
+  assert.equal(
+    second[0].toolResult?.content,
+    'Success. Updated 1 file',
+    'the tool_use row must pick up its result once the tool_result row appears, even though its own reference is unchanged',
+  );
+  assert.notEqual(second[0], first[0], 'the tool_use row\'s output must be fresh, not the stale cached "no result" render');
+
+  // And once the result is attached, a further call with the exact same two
+  // rows must reuse the (now-correct) cached output rather than recompute.
+  const third = toolUses(normalizedToChatMessages([toolUse, resultRow]));
+  assert.equal(third[0], second[0], 'stable inputs -> cached output reused');
+});
