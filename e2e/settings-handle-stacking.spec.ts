@@ -81,14 +81,24 @@ test('the handle still works when the sidebar is closed', async ({ page }) => {
  * its send button right where the handle (parked at its default 50% mark)
  * already was. See `handleStyle.test.ts` for the pure-logic coverage of the
  * replacement CSS calculation; this pins the same claim against real layout.
+ *
+ * Deliberately overrides this file's shared 390x797 viewport and the default
+ * 336px `IOS_KEYBOARD_HEIGHT`: at those numbers the pre-fix arithmetic left a
+ * 5.5px gap between the handle and the send button (confirmed by reverting
+ * useQuickSettingsDrag.ts to its pre-fix logic and re-measuring) — narrowly
+ * non-overlapping, so a regression back to that exact code would pass this
+ * test undetected. 390x844 with a 400px keyboard is the geometry the original
+ * QA sweep actually measured overlapping (17x35px) against the pre-fix code,
+ * so it is what a regression guard needs to reproduce.
  */
 test('the send button and the settings handle never overlap once the keyboard opens', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
 
   const composer = page.locator('[data-slot="prompt-input-textarea"]');
   await expect(composer).toBeVisible();
   await composer.click();
-  await showKeyboard(page);
+  await showKeyboard(page, 400);
 
   const handle = page.locator(HANDLE);
   await expect(handle).toBeVisible();

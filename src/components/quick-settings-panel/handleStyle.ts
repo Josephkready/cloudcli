@@ -29,15 +29,31 @@ import type { QuickSettingsHandleStyle } from './types';
  * possible), and folding `var(--keyboard-height, 0px)` into the formula keeps
  * the handle above the keyboard the same way the rest of the app does.
  *
- * ## The reserved band
+ * ## The reserved band (mobile only)
  *
- * `reservedBottomPx` is a floor: no matter what the drag percentage or the
- * keyboard height says, the handle cannot come closer than this many pixels
- * to the keyboard line (or, with no keyboard, the bottom of the screen) —
- * enough room for the resting composer and its send button. This also fixes
- * a narrower, pre-existing version of the same bug: dragging the handle to
- * its minimum position (10%) could already overlap the composer even with no
- * keyboard up.
+ * `reservedBottomPx` is a floor applied to the **mobile** drag range: no
+ * matter what the drag percentage or the keyboard height says, the handle
+ * cannot come closer than this many pixels to the keyboard line (or, with no
+ * keyboard, the bottom of the screen) — enough room for the resting composer
+ * and its send button. This also fixes a narrower, pre-existing version of
+ * the same bug: dragging the handle to its minimum position (10%) could
+ * already overlap the composer even with no keyboard up.
+ *
+ * The **desktop** branch deliberately does NOT apply this reserve. An early
+ * version did, and review caught that it silently compressed the normal
+ * desktop drag range: at any real laptop window height under ~1600px (i.e.
+ * effectively all of them), `min(handlePosition%, calc(100% - 160px))`
+ * clamps a saved position anywhere above ~75-84% even with no keyboard in
+ * sight, which is a real, unannounced behaviour change for mouse users this
+ * bug was never about. Desktop only needs the keyboard term — a mouse-driven
+ * session never has `--keyboard-height` above 0, so `min(handlePosition%,
+ * calc(100% - 0px))` is exactly `handlePosition%`, i.e. pixel-identical to
+ * the pre-fix behaviour. The only case the desktop ceiling actually engages
+ * is a touch session pushed into this layout by width alone (a phone
+ * rotated to landscape crosses the 768px breakpoint — see cloudcli#475),
+ * where it at least keeps the handle inside the visible area; it does not
+ * fully clear the composer there, which is why #475 is tracked separately
+ * rather than folded into this reserve.
  */
 export function computeHandleStyle({
   isMobile,
@@ -52,11 +68,12 @@ export function computeHandleStyle({
 
   if (!isMobile) {
     // Desktop drag range: a percentage from the top, vertically centred.
-    // Floored (via `min`, since `top` grows downward) so the handle's centre
-    // cannot drop into the reserved band at the bottom of a short or
-    // keyboard-shrunk container.
+    // Ceiling'd (via `min`, since `top` grows downward) only by the keyboard
+    // height — see "The reserved band (mobile only)" above for why this does
+    // NOT also subtract `reservedBottomPx`. `reservedBottomPx` is accepted
+    // but unused on this branch so the two branches share one call signature.
     return {
-      top: `min(${handlePosition}%, calc(100% - ${keyboard} - ${reservedBottomPx}px))`,
+      top: `min(${handlePosition}%, calc(100% - ${keyboard}))`,
       transform: 'translateY(-50%)',
     };
   }
@@ -69,7 +86,15 @@ export function computeHandleStyle({
   //     keyboard, shifted up by the keyboard height so it is measured from
   //     the keyboard line rather than the (possibly keyboard-covered) true
   //     bottom of the screen.
-  const fraction = handlePosition / 100;
+  //
+  // `handlePosition` comes from live pixel-delta drag math, so production
+  // values are rarely round numbers (e.g. 33.333...). Rounded to 4 decimal
+  // places purely for output hygiene — `33.333 / 100` is
+  // `0.33332999999999996` in IEEE-754, and embedding that verbatim in a CSS
+  // string serves no one. 4 places is far finer than a CSS pixel can resolve
+  // at any realistic viewport height, so this rounding is not observable in
+  // rendered layout.
+  const fraction = Math.round((handlePosition / 100) * 10_000) / 10_000;
   return {
     bottom: `max(calc(${keyboard} + ${reservedBottomPx}px), calc(${keyboard} + (100% - ${keyboard}) * ${fraction}))`,
   };
