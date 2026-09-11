@@ -7,6 +7,7 @@ import {
   HANDLE_POSITION_MIN,
   HANDLE_POSITION_STORAGE_KEY,
 } from '../constants';
+import { computeHandleStyle } from '../handleStyle';
 import type { QuickSettingsHandleStyle } from '../types';
 
 type UseQuickSettingsDragProps = {
@@ -216,18 +217,15 @@ export function useQuickSettingsDrag({ isMobile }: UseQuickSettingsDragProps) {
     return true;
   }, []);
 
-  const handleStyle = useMemo<QuickSettingsHandleStyle>(() => {
-    if (!isMobile || typeof window === 'undefined') {
-      return {
-        top: `${handlePosition}%`,
-        transform: 'translateY(-50%)',
-      };
-    }
-
-    return {
-      bottom: `${(window.innerHeight * handlePosition) / 100}px`,
-    };
-  }, [handlePosition, isMobile]);
+  // A pure CSS calculation (see handleStyle.ts) rather than a JS-computed
+  // pixel value: it recomputes on every layout the browser does — including a
+  // resize/rotation this `useMemo` never observed before (cloudcli#474) — and
+  // folds in `--keyboard-height` so the handle cannot land on the composer
+  // once the soft keyboard raises it.
+  const handleStyle = useMemo<QuickSettingsHandleStyle>(
+    () => computeHandleStyle({ isMobile, handlePosition }),
+    [handlePosition, isMobile],
+  );
 
   return {
     isDragging,

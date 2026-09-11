@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { showKeyboard } from './keyboard';
 
 /**
  * #361 — the quick-settings handle must not float above the mobile sidebar.
@@ -68,4 +69,45 @@ test('the handle still works when the sidebar is closed', async ({ page }) => {
 
   await page.locator(HANDLE).click();
   await expect(page.getByRole('button', { name: 'Close settings panel' })).toBeVisible();
+});
+
+/**
+ * #474 — the handle must not land on top of the composer's send button once
+ * the soft keyboard raises it.
+ *
+ * The handle used to be positioned from a JS-computed `bottom: Npx` derived
+ * once from `window.innerHeight`, with no awareness of `--keyboard-height` at
+ * all. On a tall enough phone the composer's rise to clear the keyboard put
+ * its send button right where the handle (parked at its default 50% mark)
+ * already was. See `handleStyle.test.ts` for the pure-logic coverage of the
+ * replacement CSS calculation; this pins the same claim against real layout.
+ */
+test('the send button and the settings handle never overlap once the keyboard opens', async ({ page }) => {
+  await page.goto('/');
+
+  const composer = page.locator('[data-slot="prompt-input-textarea"]');
+  await expect(composer).toBeVisible();
+  await composer.click();
+  await showKeyboard(page);
+
+  const handle = page.locator(HANDLE);
+  await expect(handle).toBeVisible();
+  const sendButton = page.getByRole('button', { name: 'Send' });
+  await expect(sendButton).toBeVisible();
+
+  const [handleBox, sendBox] = await Promise.all([
+    handle.boundingBox(),
+    sendButton.boundingBox(),
+  ]);
+  if (!handleBox || !sendBox) {
+    throw new Error('expected both the handle and the send button to have a layout box');
+  }
+
+  const intersects =
+    handleBox.x < sendBox.x + sendBox.width &&
+    handleBox.x + handleBox.width > sendBox.x &&
+    handleBox.y < sendBox.y + sendBox.height &&
+    handleBox.y + handleBox.height > sendBox.y;
+
+  expect(intersects, `handle ${JSON.stringify(handleBox)} vs send ${JSON.stringify(sendBox)}`).toBe(false);
 });

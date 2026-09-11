@@ -14,6 +14,14 @@ export const HANDLE_POSITION_MIN = 10;
 export const HANDLE_POSITION_MAX = 90;
 export const DRAG_THRESHOLD_PX = 5;
 
+// The band above the keyboard line (or, at rest, above the bottom of the
+// screen) the drag handle must never enter, in CSS px: the composer's resting
+// height (~64px) plus its bottom padding/gap (~66px) plus a safety margin.
+// Without this floor, dragging the handle low (or the composer rising to
+// clear an open keyboard) lands the handle on top of the send button
+// (cloudcli#474). See handleStyle.ts.
+export const HANDLE_KEYBOARD_RESERVE_PX = 160;
+
 export const SETTING_ROW_CLASS =
   'flex items-center justify-between p-3 rounded-lg bg-muted/60 hover:bg-accent transition-colors border border-transparent hover:border-border';
 
