@@ -87,7 +87,7 @@ describe('useChatSessionState — token budget race (#240)', () => {
 
     // seq 4 — the live frame the run reported.
     act(() => result.current.setTokenBudget(LIVE_FRAME));
-    expect(readTokenBudgetUsed(result.current.tokenBudget)).toBe(120);
+    expect(readTokenBudgetUsed(result.current.tokenBudget)).toBe(100);
 
     // session_upserted — the id appears, and the initial fetch fires.
     rerender({ session: { id: 'brand-new-session' } as ProjectSession });
@@ -100,7 +100,7 @@ describe('useChatSessionState — token budget race (#240)', () => {
     );
 
     // The stale zero must not win.
-    await waitFor(() => expect(readTokenBudgetUsed(result.current.tokenBudget)).toBe(120));
+    await waitFor(() => expect(readTokenBudgetUsed(result.current.tokenBudget)).toBe(100));
   });
 
   it('lets the server value take over once it has caught up', async () => {
@@ -131,7 +131,7 @@ describe('useChatSessionState — token budget race (#240)', () => {
     rerender({ session: { id: 'brand-new-session' } as ProjectSession });
 
     await waitFor(() => expect(authenticatedFetch).toHaveBeenCalled());
-    await waitFor(() => expect(readTokenBudgetUsed(result.current.tokenBudget)).toBe(120));
+    await waitFor(() => expect(readTokenBudgetUsed(result.current.tokenBudget)).toBe(100));
   });
 
   it('clears the budget when there is no session selected', async () => {

@@ -284,3 +284,110 @@ test('getClaudeSessionTokenUsage reads a large multi-byte transcript correctly',
     await cleanup();
   }
 });
+
+/*
+ * Reproduces the "200,000 tokens, then 50,000" complaint end to end against a
+ * realistic transcript shape: a multi-line streamed assistant turn (several
+ * JSONL rows sharing one `message.id`, each repeating the same usage block —
+ * this is how the CLI writes a single logical reply as it streams), a
+ * mid-conversation compaction, and a co-located subagent transcript.
+ */
+
+test('getClaudeSessionTokenUsage does not multiply-count a multi-line streamed message', async () => {
+  // A single assistant turn streamed as three JSONL rows sharing one
+  // `message.id`, each repeating the SAME usage snapshot (as the real CLI
+  // does). Summing across rows would triple-count; reading only the last one
+  // must report the turn's actual usage once.
+  const sessionId = 'streamed-0001-0001-0001-000000000001';
+  const repeatedUsage = { input_tokens: 40, cache_creation_input_tokens: 100, cache_read_input_tokens: 860 };
+  const { filePath, cleanup } = await createSandboxJsonl(sessionId, [
+    JSON.stringify({ type: 'assistant', message: { id: 'msg_1', usage: repeatedUsage } }),
+    JSON.stringify({ type: 'assistant', message: { id: 'msg_1', usage: repeatedUsage } }),
+    JSON.stringify({ type: 'assistant', message: { id: 'msg_1', usage: repeatedUsage } }),
+  ]);
+
+  try {
+    const result = await getClaudeSessionTokenUsage(sessionId, {
+      getSessionById: () => ({ jsonl_path: filePath, project_path: '/home/jkready' }),
+      resolveJsonlPath: async () => filePath,
+      readContextWindowOverride: () => null,
+    });
+
+    assert.deepEqual(result.breakdown, { input: 40, cacheCreation: 100, cacheRead: 860 });
+    assert.equal(result.used, 1000, 'must read one row worth of usage, not 3x it');
+  } finally {
+    await cleanup();
+  }
+});
+
+test('getClaudeSessionTokenUsage drops to the post-compaction size once compaction happens', async () => {
+  // Context size is not monotonic: a mid-session compaction rebuilds the
+  // transcript into a short summary, and every assistant usage record after
+  // it reflects the smaller, rebuilt context. The endpoint must report that
+  // drop, not the pre-compaction high-water mark.
+  const sessionId = 'compact0-0001-0001-0001-000000000001';
+  const { filePath, cleanup } = await createSandboxJsonl(sessionId, [
+    // Pre-compaction: a large, nearly-full context.
+    JSON.stringify({
+      type: 'assistant',
+      message: { id: 'msg_pre', usage: { input_tokens: 500, cache_creation_input_tokens: 2_000, cache_read_input_tokens: 197_000 } },
+    }),
+    // The compaction event itself.
+    JSON.stringify({ type: 'summary', isCompactSummary: true, summary: 'Conversation summary…' }),
+    // Post-compaction: a fresh, small context built from the summary alone.
+    JSON.stringify({
+      type: 'assistant',
+      message: { id: 'msg_post', usage: { input_tokens: 300, cache_creation_input_tokens: 0, cache_read_input_tokens: 1_200 } },
+    }),
+  ]);
+
+  try {
+    const result = await getClaudeSessionTokenUsage(sessionId, {
+      getSessionById: () => ({ jsonl_path: filePath, project_path: '/home/jkready' }),
+      resolveJsonlPath: async () => filePath,
+      readContextWindowOverride: () => null,
+    });
+
+    assert.deepEqual(result.breakdown, { input: 300, cacheCreation: 0, cacheRead: 1_200 });
+    assert.equal(result.used, 1_500, 'must report the smaller post-compaction reading, not the pre-compaction 199,500');
+  } finally {
+    await cleanup();
+  }
+});
+
+test('getClaudeSessionTokenUsage never mixes in a co-located subagent transcript', async () => {
+  // Subagent (Task tool) transcripts live in a `<session>/subagents/*.jsonl`
+  // sibling directory next to the main transcript file, and can carry a much
+  // larger usage than the main thread's own. Resolving usage for the main
+  // session must read only its own jsonl_path.
+  const sessionId = 'main0000-0001-0001-0001-000000000001';
+  const { filePath, cleanup } = await createSandboxJsonl(sessionId, [
+    JSON.stringify({
+      type: 'assistant',
+      message: { id: 'msg_main', usage: { input_tokens: 50, cache_creation_input_tokens: 0, cache_read_input_tokens: 950 } },
+    }),
+  ]);
+
+  try {
+    const subagentDir = path.join(path.dirname(filePath), sessionId, 'subagents');
+    await fsp.mkdir(subagentDir, { recursive: true });
+    await fsp.writeFile(
+      path.join(subagentDir, 'agent-large.jsonl'),
+      `${JSON.stringify({
+        type: 'assistant',
+        message: { id: 'msg_sub', usage: { input_tokens: 5_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 195_000 } },
+      })}\n`,
+    );
+
+    const result = await getClaudeSessionTokenUsage(sessionId, {
+      getSessionById: () => ({ jsonl_path: filePath, project_path: '/home/jkready' }),
+      resolveJsonlPath: async () => filePath,
+      readContextWindowOverride: () => null,
+    });
+
+    assert.deepEqual(result.breakdown, { input: 50, cacheCreation: 0, cacheRead: 950 });
+    assert.equal(result.used, 1_000, 'must report the main thread reading, not the 200,000-token subagent one');
+  } finally {
+    await cleanup();
+  }
+});

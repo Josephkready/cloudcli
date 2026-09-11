@@ -485,9 +485,38 @@ function buildTokenBudget({ inputTokens, outputTokens, cacheReadTokens, cacheCre
 }
 
 /**
+ * Whether an SDK stream message belongs to the main conversation thread, as
+ * opposed to a subagent (Task tool) turn.
+ *
+ * The Claude Agent SDK streams a subagent's own assistant/tool events inline
+ * on the same async generator as the main thread, tagged with
+ * `parent_tool_use_id` (see `transformMessage` above, which reads the same
+ * field for UI grouping). Each subagent turn carries `message.usage` for its
+ * OWN independent conversation — a fresh, much smaller context that has
+ * nothing to do with how large the *session's* context actually is.
+ *
+ * Token-budget extraction must skip these: treating a subagent's usage as the
+ * session's live budget is exactly what made the widget swing between the
+ * real session size (e.g. ~200k) and a subagent's tiny one (e.g. ~50k) within
+ * a single turn whenever the turn called the Task tool.
+ *
+ * @param {Object} sdkMessage - SDK stream message
+ * @returns {boolean}
+ */
+function isMainThreadMessage(sdkMessage) {
+  return Boolean(sdkMessage) && !sdkMessage.parent_tool_use_id;
+}
+
+/**
  * Extracts token usage from SDK messages.
  * Prefers per-step `message.usage` (Claude message payload), then falls back
  * to result-level usage/modelUsage for compatibility across SDK versions.
+ *
+ * Callers must skip subagent messages before calling this — see
+ * `isMainThreadMessage`. This function has no way to tell a subagent's usage
+ * apart from the main thread's on its own; `sdkMessage.usage`/`modelUsage`
+ * look identical either way.
+ *
  * @param {Object} sdkMessage - SDK stream message
  * @returns {Object|null} Token budget object or null
  */
@@ -914,8 +943,9 @@ async function queryClaudeSDK(command, options = {}, ws) {
           ws.send(msg);
         }
 
-        // Extract and send token budget updates from assistant/result usage payloads
-        const tokenBudgetData = extractTokenBudget(message);
+        // Extract and send token budget updates from assistant/result usage
+        // payloads. Subagent turns are excluded — see `isMainThreadMessage`.
+        const tokenBudgetData = isMainThreadMessage(message) ? extractTokenBudget(message) : null;
         if (tokenBudgetData) {
           ws.send(createNormalizedMessage({ kind: 'status', text: 'token_budget', tokenBudget: tokenBudgetData, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
         }
@@ -1113,6 +1143,7 @@ export {
   isSpawnRaceError,
   parseMsEnv,
   extractTokenBudget,
+  isMainThreadMessage,
   mapCliOptionsToSDK,
   findStaleToolApprovals,
   reapStaleToolApprovals,

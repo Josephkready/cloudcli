@@ -257,6 +257,16 @@ export function useChatRealtimeHandlers({
     pendingPermissionRequestsRef.current = pendingPermissionRequests;
   }, [pendingPermissionRequests]);
 
+  // Highest `seq` a `token_budget` frame has been applied at, per session.
+  // `seq` is assigned per-run by the server's chat-run registry (starting
+  // fresh at each new run), so a frame whose seq does not exceed what is
+  // already applied is either a duplicate or arrived out of order — ignoring
+  // it is what makes the live update "monotonic per message" instead of a
+  // plain last-write-wins clobber. Cleared on the run's terminal `complete`
+  // event so the next run's frames (whose seq restarts) are never mistaken
+  // for stale ones.
+  const tokenBudgetSeqRef = useRef<Map<string, number>>(new Map());
+
   useEffect(() => {
     const handleEvent = (msg: ServerEvent) => {
       if (!msg.kind) {
@@ -425,6 +435,13 @@ export function useChatRealtimeHandlers({
       // --- UI side effects for specific kinds ---
       switch (msg.kind) {
         case 'complete': {
+          // A run's terminal event — the next run for this session starts its
+          // own `seq` count from scratch, so the token-budget staleness guard
+          // must not compare a future run's low seq against this one's high one.
+          if (sid) {
+            tokenBudgetSeqRef.current.delete(sid);
+          }
+
           // Flush any remaining streaming state
           if (sid) {
             const streamingState = streamingStatesRef.current.get(sid);
@@ -527,7 +544,19 @@ export function useChatRealtimeHandlers({
 
         case 'status': {
           if (msg.text === 'token_budget' && msg.tokenBudget) {
-            setTokenBudget(msg.tokenBudget as Record<string, unknown>);
+            // Scoped to the viewed session: a background session's run must
+            // never clobber the number the user is currently looking at.
+            if (sid && sid === activeViewSessionId) {
+              const incomingSeq = typeof msg.seq === 'number' ? msg.seq : null;
+              const appliedSeq = tokenBudgetSeqRef.current.get(sid);
+              const isStale = incomingSeq !== null && appliedSeq !== undefined && incomingSeq <= appliedSeq;
+              if (!isStale) {
+                if (incomingSeq !== null) {
+                  tokenBudgetSeqRef.current.set(sid, incomingSeq);
+                }
+                setTokenBudget(msg.tokenBudget as Record<string, unknown>);
+              }
+            }
           } else if (msg.text && sid) {
             onSessionProcessing?.(sid, {
               statusText: msg.text as string,

@@ -2,11 +2,34 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { CLAUDE_FALLBACK_MODELS } from './modules/providers/list/claude/claude-models.provider.js';
-import { extractTokenBudget, mapCliOptionsToSDK } from './claude-sdk.js';
+import { extractTokenBudget, isMainThreadMessage, mapCliOptionsToSDK } from './claude-sdk.js';
 
 // Pure-function coverage for the two option/usage mappers the SDK bridge runs on
 // every turn (#104). Both take plain objects, so they are exercised here without
 // spawning the Claude CLI.
+
+// ---------------------------------------------------------------------------
+// isMainThreadMessage
+// ---------------------------------------------------------------------------
+
+test('isMainThreadMessage is true for a plain SDK message with no parent tool', () => {
+  assert.equal(isMainThreadMessage({ type: 'assistant', message: { usage: {} } }), true);
+});
+
+test('isMainThreadMessage is false once a message carries parent_tool_use_id', () => {
+  // Set on every event a subagent (Task tool) emits inline on the same async
+  // generator as the main thread — see `transformMessage`, which reads the
+  // same field for UI grouping.
+  assert.equal(
+    isMainThreadMessage({ type: 'assistant', parent_tool_use_id: 'toolu_123', message: { usage: {} } }),
+    false,
+  );
+});
+
+test('isMainThreadMessage is false for null/undefined rather than throwing', () => {
+  assert.equal(isMainThreadMessage(null), false);
+  assert.equal(isMainThreadMessage(undefined), false);
+});
 
 // ---------------------------------------------------------------------------
 // extractTokenBudget
