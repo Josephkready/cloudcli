@@ -312,13 +312,14 @@ export function useChatSessionState({
     } else {
       derived = all;
     }
-    // `normalizedToChatMessages` mints brand-new ChatMessage objects on every
-    // store update, so an active run's per-delta `notify` would hand a fresh
-    // identity to every message each streaming tick — defeating
-    // `React.memo(MessageComponent)` and re-rendering the whole visible list
-    // (choppy scrolling while an agent works). Reuse the previous render's
-    // object refs for messages whose value is unchanged so only the message
-    // that actually changed re-renders.
+    // `normalizedToChatMessages` reuses output for rows whose underlying
+    // message is unchanged, but any cache miss (a `tool_use` row whose result
+    // just arrived, a fresh session load, …) still mints a new object —
+    // defeating `React.memo(MessageComponent)` for that message and
+    // re-rendering the whole visible list if left alone (choppy scrolling
+    // while an agent works). Reuse the previous render's object refs for
+    // messages whose value is unchanged so only the message that actually
+    // changed re-renders.
     return stabilizeMessageIdentities(previousChatMessagesRef.current, derived);
   }, [storeMessages, viewHiddenCount, pendingUserMessage]);
 
