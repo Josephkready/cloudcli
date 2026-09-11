@@ -59,13 +59,15 @@ const NULL_KEY = 'no-intrinsic-key';
  * Preserve object identity for unchanged chat messages across store-driven
  * re-derivations.
  *
- * `normalizedToChatMessages` allocates brand-new ChatMessage objects on every
- * store update, so during an active run the store's per-delta `notify` mints a
- * fresh identity for *every* message each streaming tick. `MessageComponent`
- * is `React.memo`'d on those props, so new identities defeat the memo and the
- * entire visible list re-renders on every delta — the CPU churn that makes
- * scrolling choppy while an agent is working (and pointlessly re-parses
- * markdown/diffs for messages that did not change).
+ * `normalizedToChatMessages` reuses its previous output for rows whose
+ * underlying `NormalizedMessage` is unchanged (a per-row cache — see that
+ * function), but a cache miss — first render, a transcript replace/compaction,
+ * or a `tool_use` row whose resolved result changed — still mints a fresh
+ * object. `MessageComponent` is `React.memo`'d on those props, so any of those
+ * fresh identities would defeat the memo and re-render the whole visible list
+ * on every delta — the CPU churn that makes scrolling choppy while an agent is
+ * working (and pointlessly re-parses markdown/diffs for messages that did not
+ * change) — if this pass didn't paper back over them.
  *
  * This pass rewrites `next` so that any message whose value is unchanged reuses
  * the `previous` render's object reference. Only genuinely changed messages

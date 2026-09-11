@@ -200,3 +200,27 @@ test('a standalone tool_result arriving on a later call updates the earlier, unc
   const third = toolUses(normalizedToChatMessages([toolUse, resultRow]));
   assert.equal(third[0], second[0], 'stable inputs -> cached output reused');
 });
+
+test('a multi-file patch owner Edit arriving later still leaves its unrelated siblings correct (inlineResultToolIds membership can flip after they were cached)', () => {
+  // Mirrors #119's shape, but with the shared-result-carrying "owner" Edit
+  // appended on a LATER call than its siblings, so inlineResultToolIds gains a
+  // member (call-1) after the siblings were already cached without it. This is
+  // allowed to force a cache miss on those siblings (their resultRef read
+  // through `inlineResultToolIds`), but their rendered output must stay
+  // correct regardless.
+  const siblingA = edit('call-1', 'src/a.ts');
+  const siblingB = edit('call-1', 'src/b.ts');
+
+  const first = toolUses(normalizedToChatMessages([siblingA, siblingB]));
+  assert.equal(first.length, 2);
+  assert.equal(first[0].toolResult, null);
+  assert.equal(first[1].toolResult, null);
+
+  const owner = edit('call-1', 'src/c.ts', { content: 'Success. Updated 3 files', isError: false });
+  const second = toolUses(normalizedToChatMessages([siblingA, siblingB, owner]));
+
+  assert.equal(second.length, 3);
+  assert.equal(second[0].toolResult, null, 'sibling A must still show no result once the owner appears');
+  assert.equal(second[1].toolResult, null, 'sibling B must still show no result once the owner appears');
+  assert.equal(second[2].toolResult?.content, 'Success. Updated 3 files', 'the owner Edit carries the result');
+});

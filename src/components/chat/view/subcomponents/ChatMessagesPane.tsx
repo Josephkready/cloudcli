@@ -121,8 +121,9 @@ function ChatMessagesPane({
 
   // Stable, deterministic keys for the messages rendered this pass.
   //
-  // `normalizedToChatMessages` rebuilds fresh ChatMessage objects on every store
-  // update, so caching keys by object identity (or via a cross-render allocation
+  // `normalizedToChatMessages` only *sometimes* reuses a row's previous object
+  // (a per-row cache hit) — a miss still mints a fresh one, and unevenly at
+  // that — so caching keys by object identity (or via a cross-render allocation
   // Set) minted a brand-new key for the *same* logical message on each prepend —
   // remounting the whole list, which disconnects the scroll-restore anchor and
   // reflows heights, jumping the viewport to the bottom. Deriving keys purely

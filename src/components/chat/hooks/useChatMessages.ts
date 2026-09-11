@@ -98,6 +98,15 @@ function resolveToolUseResult(
  * cross-row lookups built once per `normalizedToChatMessages` call — never on
  * iteration order or on any other row's *output* — so it is safe to cache per
  * row (see `normalizedToChatMessages`).
+ *
+ * `tool_use` is the only case whose result actually varies with those
+ * cross-row lookups today (via `resolveToolUseResult`), which is why it's the
+ * only row kind `normalizedToChatMessages` fingerprints beyond the row's own
+ * reference. The `tool_result` case also reads `toolUseIds`, but both of its
+ * branches return `[]` whenever `msg.toolId` is truthy, so its output does
+ * not currently depend on `toolUseIds`'s contents — if that ever changes,
+ * `normalizedToChatMessages`'s cache key for `tool_result` rows must be
+ * extended to match, the same way it already is for `tool_use`.
  */
 function convertOneMessage(
   msg: NormalizedMessage,
@@ -344,6 +353,12 @@ function convertOneMessage(
  * A `WeakMap` needs no eviction: once the store drops a row (pagination
  * trimming, a fresh transcript replacing the array), nothing else references
  * it and the entry is collected with it.
+ *
+ * Only the fallback (standalone `tool_result` row) branch of
+ * `resolveToolUseResult` needs `resultRef` at all — the inline branch
+ * (`msg.toolResult` set directly on the row) is already covered by the row's
+ * own reference, because the store never attaches an inline result to an
+ * existing row object; it always replaces it with a new one.
  */
 const derivationCache = new WeakMap<NormalizedMessage, { resultRef: unknown; output: ChatMessage[] }>();
 
