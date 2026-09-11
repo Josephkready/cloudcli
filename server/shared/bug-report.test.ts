@@ -6,6 +6,7 @@ import {
   MAX_DESCRIPTION_LENGTH,
   MAX_METADATA_VALUE_LENGTH,
   MAX_TITLE_LENGTH,
+  SCREENSHOTS_TOKEN,
   buildIssueBody,
   buildIssueTitle,
   describeDescriptionRejection,
@@ -108,6 +109,26 @@ test('describeDescriptionRejection tells a long paste apart from an empty one', 
 
 test('buildIssueBody omits the details section when there is no metadata', () => {
   const body = buildIssueBody('plain report', {});
+  assert.ok(!body.includes('### Session details'));
+});
+
+// --- screenshots (dante-config skills/bug-report-button/SKILL.md §9) --------
+
+test('buildIssueBody never carries the screenshots token by default', () => {
+  assert.ok(!buildIssueBody('just this', {}).includes(SCREENSHOTS_TOKEN));
+  assert.ok(!buildIssueBody('x', { provider: 'claude' }).includes(SCREENSHOTS_TOKEN));
+});
+
+test('buildIssueBody places the screenshots token between the report and Session details', () => {
+  const body = buildIssueBody('It broke', { provider: 'claude' }, { hasAttachments: true });
+  assert.ok(body.includes(SCREENSHOTS_TOKEN));
+  assert.ok(body.indexOf(SCREENSHOTS_TOKEN) > body.indexOf('It broke'));
+  assert.ok(body.indexOf(SCREENSHOTS_TOKEN) < body.indexOf('### Session details'));
+});
+
+test('buildIssueBody with attachments and no metadata still carries the token', () => {
+  const body = buildIssueBody('It broke', {}, { hasAttachments: true });
+  assert.ok(body.includes(SCREENSHOTS_TOKEN));
   assert.ok(!body.includes('### Session details'));
 });
 

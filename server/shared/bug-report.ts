@@ -53,6 +53,20 @@ export type BugReportMetadataKey = (typeof METADATA_FIELDS)[number][0];
 export type BugReportMetadata = Partial<Record<BugReportMetadataKey, unknown>>;
 
 /**
+ * Marks where `issue-queue`'s worker splices a rendered `### Screenshots`
+ * section once every attachment has an uploaded (or tailnet-fallback) URL
+ * (dante-config skills/bug-report-button/SKILL.md §9). Must match the literal
+ * string `issue-queue` itself replaces — see `issue_queue.github.SCREENSHOTS_TOKEN`.
+ *
+ * `buildIssueBody` inserts this ONLY when the report actually has attachments
+ * — an image-free report never carries it, so its body stays byte-identical
+ * to before this existed. `issue-queue` would also strip a token with nothing
+ * to splice in if it ever received one, but this app never sends one in that
+ * case.
+ */
+export const SCREENSHOTS_TOKEN = '<!-- issue-queue:screenshots -->';
+
+/**
  * Trims and length-checks the free-text description.
  *
  * @returns the normalized description, or `null` when it is missing/blank/oversized.
@@ -150,11 +164,28 @@ export function formatMetadataTable(metadata: BugReportMetadata): string {
 }
 
 /**
- * Assembles the full issue body: the user's report verbatim, then the session
- * metadata, then a marker so triage can tell in-app reports from hand-filed ones.
+ * Assembles the full issue body: the user's report verbatim, then (when
+ * screenshots were attached) the `SCREENSHOTS_TOKEN` placeholder, then the
+ * session metadata, then a marker so triage can tell in-app reports from
+ * hand-filed ones.
+ *
+ * `hasAttachments` inserts the token right after the report and before the
+ * collapsed "Session details" block, so screenshots land ABOVE the fold once
+ * `issue-queue` splices them in — never inside the metadata table, which is
+ * for structured host facts a triager opens on demand, not user-attached
+ * content they should see without expanding anything. Omitted (the default)
+ * when there is nothing attached, so a plain report's body is unchanged.
  */
-export function buildIssueBody(description: string, metadata: BugReportMetadata): string {
+export function buildIssueBody(
+  description: string,
+  metadata: BugReportMetadata,
+  options: { hasAttachments?: boolean } = {},
+): string {
   const sections = ['### What happened', '', description];
+
+  if (options.hasAttachments) {
+    sections.push('', SCREENSHOTS_TOKEN);
+  }
 
   const table = formatMetadataTable(metadata);
   if (table) {

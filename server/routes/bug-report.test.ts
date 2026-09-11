@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import express from 'express';
 
+import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES } from '../shared/bug-report-attachments.js';
+import { SCREENSHOTS_TOKEN } from '../shared/bug-report.js';
 import { AppError } from '../shared/utils.js';
 
 import {
@@ -73,6 +76,62 @@ function request(
   });
 }
 
+const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.from('jpeg-bytes')]);
+
+type MultipartFile = { field: string; filename: string; contentType: string; data: Buffer };
+
+function buildMultipartBody(
+  fields: Record<string, string>,
+  files: MultipartFile[],
+): { body: Buffer; boundary: string } {
+  const boundary = `cloudcliTestBoundary${Math.random().toString(16).slice(2)}`;
+  const parts: Buffer[] = [];
+  for (const [name, value] of Object.entries(fields)) {
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
+  }
+  for (const file of files) {
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${file.field}"; filename="${file.filename}"\r\n` +
+      `Content-Type: ${file.contentType}\r\n\r\n`,
+    ));
+    parts.push(file.data);
+    parts.push(Buffer.from('\r\n'));
+  }
+  parts.push(Buffer.from(`--${boundary}--\r\n`));
+  return { body: Buffer.concat(parts), boundary };
+}
+
+function requestMultipart(
+  port: number,
+  route: string,
+  fields: Record<string, string>,
+  files: MultipartFile[],
+): Promise<{ status: number; json: any }> {
+  const { body, boundary } = buildMultipartBody(fields, files);
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      host: '127.0.0.1', port, path: route, method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': body.length,
+      },
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk) => chunks.push(chunk as Buffer));
+      response.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        resolve({ status: response.statusCode ?? 0, json: text ? JSON.parse(text) : null });
+      });
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+function screenshotField(filename = 'shot.jpg', data: Buffer = JPEG): MultipartFile {
+  return { field: 'attachments', filename, contentType: 'image/jpeg', data };
+}
+
 test('POST / durably queues the issue body over stdin and returns 202', async () => {
   const calls: Array<{ args: string[]; input?: string }> = [];
   const server = await startServer(async (args, input) => {
@@ -137,6 +196,154 @@ test('POST / rejects empty and oversized descriptions before queueing', async ()
     assert.equal(long.status, 400);
     assert.match(long.json.error.message, /too long/);
     assert.equal(calls, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+// --- screenshots (dante-config skills/bug-report-button/SKILL.md §9) --------
+
+test('POST / with a multipart attachment writes a manifest and marks the body', async () => {
+  const calls: Array<{ args: string[]; input?: string }> = [];
+  const server = await startServer(async (args, input) => {
+    calls.push({ args, input });
+    return result({ status: 'queued', id: JOB_ID });
+  });
+
+  try {
+    const response = await requestMultipart(
+      server.port,
+      '/api/bug-report',
+      { description: 'see the attached screenshot', metadata: JSON.stringify({ sessionId: 's1' }) },
+      [screenshotField()],
+    );
+
+    assert.equal(response.status, 202);
+    assert.equal(response.json.data.status, 'queued');
+    const [{ args, input }] = calls;
+    const manifestIndex = args.indexOf('--attachments-manifest');
+    assert.ok(manifestIndex >= 0, 'expected --attachments-manifest in argv');
+    const manifestPath = args[manifestIndex + 1];
+    assert.ok(manifestPath, 'expected a manifest path');
+    assert.match(input ?? '', new RegExp(SCREENSHOTS_TOKEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(input ?? '', /\| Session ID \| `s1` \|/);
+    // Durable before the response returns: the runner (playing issue-queue's role) can still
+    // read the manifest and the file it names WHILE this call is in flight.
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST / with no attachments in a multipart request behaves like the JSON path', async () => {
+  const calls: Array<{ args: string[]; input?: string }> = [];
+  const server = await startServer(async (args, input) => {
+    calls.push({ args, input });
+    return result({ status: 'queued', id: JOB_ID });
+  });
+
+  try {
+    const response = await requestMultipart(
+      server.port,
+      '/api/bug-report',
+      { description: 'no screenshot needed for this one' },
+      [],
+    );
+    assert.equal(response.status, 202);
+    const [{ args, input }] = calls;
+    assert.ok(!args.includes('--attachments-manifest'));
+    assert.ok(!(input ?? '').includes(SCREENSHOTS_TOKEN));
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST / rejects more than MAX_ATTACHMENTS screenshots with 413', async () => {
+  let called = false;
+  const server = await startServer(async () => {
+    called = true;
+    return result({ status: 'queued', id: JOB_ID });
+  });
+
+  try {
+    const files = Array.from({ length: MAX_ATTACHMENTS + 1 }, (_, i) => screenshotField(`${i}.jpg`));
+    const response = await requestMultipart(server.port, '/api/bug-report', { description: 'too many' }, files);
+    assert.equal(response.status, 413);
+    assert.equal(response.json.error.code, 'BUG_REPORT_ATTACHMENT_COUNT');
+    assert.equal(called, false);
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST / rejects an oversized attachment with 413, measured on received bytes', async () => {
+  let called = false;
+  const server = await startServer(async () => {
+    called = true;
+    return result({ status: 'queued', id: JOB_ID });
+  });
+
+  try {
+    const oversized = Buffer.concat([JPEG, Buffer.alloc(MAX_ATTACHMENT_BYTES)]);
+    const response = await requestMultipart(
+      server.port,
+      '/api/bug-report',
+      { description: 'huge image' },
+      [screenshotField('big.jpg', oversized)],
+    );
+    assert.equal(response.status, 413);
+    assert.equal(response.json.error.code, 'BUG_REPORT_ATTACHMENT_TOO_LARGE');
+    assert.equal(called, false);
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST / rejects a non-image attachment with 415, regardless of the claimed content-type', async () => {
+  let called = false;
+  const server = await startServer(async () => {
+    called = true;
+    return result({ status: 'queued', id: JOB_ID });
+  });
+
+  try {
+    const response = await requestMultipart(
+      server.port,
+      '/api/bug-report',
+      { description: 'not really an image' },
+      [{ field: 'attachments', filename: 'shot.jpg', contentType: 'image/jpeg', data: Buffer.from('not an image') }],
+    );
+    assert.equal(response.status, 415);
+    assert.equal(response.json.error.code, 'BUG_REPORT_ATTACHMENT_TYPE');
+    assert.equal(called, false);
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST / removes its attachment temp files once the response has been sent', async () => {
+  const seenPaths: string[] = [];
+  const existedDuringCall: boolean[] = [];
+  const server = await startServer(async (args) => {
+    const manifestIndex = args.indexOf('--attachments-manifest');
+    const manifestPath = args[manifestIndex + 1];
+    seenPaths.push(manifestPath);
+    // The manifest — and every file it names — must still exist WHILE the queue
+    // command runs; only after this returns does the route clean them up.
+    existedDuringCall.push(existsSync(manifestPath));
+    return result({ status: 'queued', id: JOB_ID });
+  });
+
+  try {
+    const response = await requestMultipart(
+      server.port,
+      '/api/bug-report',
+      { description: 'cleans up after itself' },
+      [screenshotField()],
+    );
+    assert.equal(response.status, 202);
+    assert.deepEqual(existedDuringCall, [true]);
+    assert.equal(seenPaths.length, 1);
+    assert.equal(existsSync(seenPaths[0]), false);
   } finally {
     await server.close();
   }
