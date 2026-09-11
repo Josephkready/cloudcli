@@ -44,6 +44,37 @@ test('withAttachmentsManifest writes a manifest naming a real temp file per atta
   assert.equal(existsSync(seen.manifestPath), false);
 });
 
+test('withAttachmentsManifest lists every attachment, with distinct paths and bytes, in a multi-attachment batch', async () => {
+  const shots = [
+    attachment({ name: 'a.jpg', bytes: Buffer.from('bytes-a') }),
+    attachment({ name: 'b.jpg', bytes: Buffer.from('bytes-b') }),
+    attachment({ name: 'c.jpg', bytes: Buffer.from('bytes-c') }),
+  ];
+
+  const seen: { manifest: Array<{ path: string; name: string }>; fileBytes: string[] } = {
+    manifest: [],
+    fileBytes: [],
+  };
+  await withAttachmentsManifest(shots, async (manifestPath) => {
+    const manifest = JSON.parse(await readFile(manifestPath as string, 'utf8'));
+    seen.manifest = manifest;
+    seen.fileBytes = await Promise.all(
+      manifest.map((entry: { path: string }) => readFile(entry.path, 'utf8')),
+    );
+    return null;
+  });
+
+  assert.equal(seen.manifest.length, 3);
+  assert.deepEqual(seen.manifest.map((entry) => entry.name), ['a.jpg', 'b.jpg', 'c.jpg']);
+  assert.deepEqual(seen.fileBytes, ['bytes-a', 'bytes-b', 'bytes-c']);
+  // Every attachment gets its OWN temp file, not one shared/overwritten path.
+  assert.equal(new Set(seen.manifest.map((entry) => entry.path)).size, 3);
+  // All cleaned up after the call returns.
+  for (const entry of seen.manifest) {
+    assert.equal(existsSync(entry.path), false);
+  }
+});
+
 test('withAttachmentsManifest writes the exact bytes handed to it', async () => {
   const bytes = Buffer.from('exact jpeg bytes');
   let seenBytes: Buffer | null = null;

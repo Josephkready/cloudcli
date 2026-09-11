@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import BugReportDialog from './BugReportDialog';
+import { MAX_ATTACHMENT_BYTES, rejectionMessage } from './attachments';
 
 import type { Project, ProjectSession } from '@/types/app';
 
@@ -396,6 +397,43 @@ describe('BugReportDialog', () => {
 
       expect(await screen.findAllByTestId('bug-report-attachment-thumbnail')).toHaveLength(3);
       expect(screen.getByText(/Up to 3 screenshots per report/)).toBeInTheDocument();
+    });
+
+    it('rejects a source the browser cannot decode, with a visible hint', async () => {
+      compressImageMock.mockRejectedValueOnce(new Error(rejectionMessage('unsupported')));
+      renderDialog();
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.change(input, { target: { files: [pngFile('unreadable.heic')] } });
+        await Promise.resolve();
+      });
+
+      expect(screen.queryByTestId('bug-report-attachment-thumbnail')).toBeNull();
+      expect(await screen.findByText(/format isn.t supported/i)).toBeInTheDocument();
+    });
+
+    it('rejects a compressed blob still over the size cap, and revokes its discarded preview', async () => {
+      const revokeSpy = vi.spyOn(URL, 'revokeObjectURL');
+      compressImageMock.mockResolvedValueOnce({
+        name: 'huge.png',
+        mime: 'image/webp',
+        size: MAX_ATTACHMENT_BYTES + 1,
+        blob: new Blob(['oversized'], { type: 'image/webp' }),
+      });
+      renderDialog();
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.change(input, { target: { files: [pngFile('huge.png')] } });
+        await Promise.resolve();
+      });
+
+      expect(screen.queryByTestId('bug-report-attachment-thumbnail')).toBeNull();
+      expect(await screen.findByText(rejectionMessage('too-large'))).toBeInTheDocument();
+      // The rejected candidate's own preview URL — created to build the
+      // staging entry before the size check ran — must not leak.
+      expect(revokeSpy).toHaveBeenCalled();
     });
 
     it('pasting an image stages it without swallowing typed text', async () => {

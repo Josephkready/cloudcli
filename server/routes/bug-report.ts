@@ -60,9 +60,24 @@ type RequestWithUploads = express.Request & { files?: MulterUpload[] };
  */
 const MULTER_FILE_SIZE_CEILING_BYTES = 8 * 1024 * 1024;
 
+/**
+ * The request carries exactly two non-file fields today (`description`,
+ * `metadata`); a small margin over that, rather than multer's Infinity
+ * default, keeps an authenticated request from padding the multipart body
+ * with an unbounded number of extra text parts ahead of the file parts this
+ * route actually cares about.
+ */
+const MULTER_MAX_FIELDS = 4;
+const MULTER_MAX_PARTS = MAX_ATTACHMENTS + MULTER_MAX_FIELDS;
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MULTER_FILE_SIZE_CEILING_BYTES, files: MAX_ATTACHMENTS },
+  limits: {
+    fileSize: MULTER_FILE_SIZE_CEILING_BYTES,
+    files: MAX_ATTACHMENTS,
+    fields: MULTER_MAX_FIELDS,
+    parts: MULTER_MAX_PARTS,
+  },
 });
 
 /** Runs multer's `attachments` array parser, mapping its errors onto the app's AppError shape. */

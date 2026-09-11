@@ -457,9 +457,16 @@ export default function BugReportDialog({
                     data-testid="bug-report-file-input"
                     onChange={handleFileInputChange}
                   />
-                  {attachmentHint && (
+                  {attachmentHint ? (
                     <span className="flex-1 text-xs text-muted-foreground" aria-live="polite">
                       {attachmentHint}
+                    </span>
+                  ) : (
+                    // Desktop-only affordance the standard also calls for
+                    // (§9: "plus paste-from-clipboard on desktop"); yields the
+                    // slot to a rejection hint the moment there is one.
+                    <span className="flex-1 text-xs text-muted-foreground">
+                      {t('bugReport.attachmentsHint')}
                     </span>
                   )}
                 </div>

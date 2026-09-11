@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -314,6 +314,94 @@ test('POST / rejects a non-image attachment with 415, regardless of the claimed 
     );
     assert.equal(response.status, 415);
     assert.equal(response.json.error.code, 'BUG_REPORT_ATTACHMENT_TYPE');
+    assert.equal(called, false);
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST / accepts exactly MAX_ATTACHMENTS screenshots with a full manifest', async () => {
+  let manifestLength = -1;
+  const server = await startServer(async (args) => {
+    // Read the manifest WHILE it still exists — the route unlinks it in a
+    // `finally` immediately after this runner call returns.
+    const manifestPath = args[args.indexOf('--attachments-manifest') + 1];
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    manifestLength = manifest.length;
+    return result({ status: 'queued', id: JOB_ID });
+  });
+
+  try {
+    const files = Array.from({ length: MAX_ATTACHMENTS }, (_, i) => screenshotField(`${i}.jpg`));
+    const response = await requestMultipart(
+      server.port,
+      '/api/bug-report',
+      { description: 'exactly at the cap' },
+      files,
+    );
+    assert.equal(response.status, 202);
+    assert.equal(manifestLength, MAX_ATTACHMENTS);
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST / rejects a single part over the multer size ceiling with 413', async () => {
+  // Distinct from the ~2MB `prepareAttachments` cap exercised above: this
+  // part is large enough to trip multer's own coarser safety-net ceiling
+  // (server/routes/bug-report.ts's MULTER_FILE_SIZE_CEILING_BYTES) before
+  // the request body is even fully buffered into `prepareAttachments`.
+  let called = false;
+  const server = await startServer(async () => {
+    called = true;
+    return result({ status: 'queued', id: JOB_ID });
+  });
+
+  try {
+    const wayOversized = Buffer.concat([JPEG, Buffer.alloc(9 * 1024 * 1024)]);
+    const response = await requestMultipart(
+      server.port,
+      '/api/bug-report',
+      { description: 'far too large' },
+      [screenshotField('huge.jpg', wayOversized)],
+    );
+    assert.equal(response.status, 413);
+    assert.equal(response.json.error.code, 'BUG_REPORT_ATTACHMENT_TOO_LARGE');
+    assert.equal(called, false);
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST / falls back to a plain 400 on a malformed multipart body', async () => {
+  let called = false;
+  const server = await startServer(async () => {
+    called = true;
+    return result({ status: 'queued', id: JOB_ID });
+  });
+
+  try {
+    const garbage = Buffer.from('this is not a multipart body at all');
+    const response = await new Promise<{ status: number; json: any }>((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1', port: server.port, path: '/api/bug-report', method: 'POST',
+        headers: {
+          'Content-Type': 'multipart/form-data; boundary=doesNotMatchTheBodyBelow',
+          'Content-Length': garbage.length,
+        },
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(chunk as Buffer));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          resolve({ status: res.statusCode ?? 0, json: text ? JSON.parse(text) : null });
+        });
+      });
+      req.on('error', reject);
+      req.end(garbage);
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.json.error.code, 'BUG_REPORT_ATTACHMENT_UPLOAD_FAILED');
     assert.equal(called, false);
   } finally {
     await server.close();
