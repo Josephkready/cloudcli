@@ -59,14 +59,14 @@ it is noted as residual risk, not as the cause investigated here.
 main...upstream/main`):
 
 - `origin` = `Josephkready/cloudcli`, `upstream` = `siteboon/claudecodeui`.
-- Local `main` is **242 commits ahead** of the merge-base with upstream (real
+- Local `main` is **244 commits ahead** of the merge-base with upstream (real
   feature/bugfix work, including most of the chat-perf hardening cited below)
   and **41 commits behind** `upstream/main` (not the ~20 estimated in the
   project's own todos).
 - Local `package.json` version is `1.36.3`; upstream's latest tag is `v1.37.3`.
 
 This matters for the rewrite-vs-fix decision in §4: a rewrite forfeits the
-ability to keep merging upstream, and 242 commits is a large amount of
+ability to keep merging upstream, and 244 commits is a large amount of
 already-paid-for hardening to walk away from.
 
 ---
@@ -146,7 +146,7 @@ number suggests.
 
 **The key isolating comparison:** `chat_turn` and `chat_turn_in_large_conversation`
 send the **identical** mock reply content (`fillComposer(..., `echo:${ECHOED_REPLY}`)`
-in both flow definitions, `bench/flows.ts:551,565`). The only difference between
+in both flow definitions, `bench/flows.ts:550,572`). The only difference between
 the two flows is how much conversation already exists when the turn is sent.
 Blocked time goes from **0ms** (empty conversation, both before and after
 commits) to **533–1009ms** (2,511-row conversation, across all measurements in
@@ -166,7 +166,7 @@ between the two flows.
 ### 4.1 The team has already found and fixed this exact bug class twice — and documented it
 
 `src/stores/useSessionStore.pure.ts`, the doc-comment on `isSameServerTranscript`
-(≈L509-520), states the mechanism in the team's own words:
+(L492-508), states the mechanism in the team's own words:
 
 > "Assigning [a re-fetched but identical transcript] re-renders the whole
 > transcript for no visible change: on a page of code-heavy messages that is
@@ -308,7 +308,7 @@ fully-rendered `MessageComponent` — no `react-window`/`react-virtuoso`/
 the *tail* of the array (`useChatSessionState.ts:878-881`) — good for bounding
 the common case, but "Load all" (used for in-conversation search, and
 available to the user directly) sets `visibleMessageCount` to `Infinity`
-(`useChatSessionState.ts:791,796`), after which every one of a 2,500+-row
+(`useChatSessionState.ts:789,798`), after which every one of a 2,500+-row
 conversation is a live DOM subtree with its own React state, markdown AST, and
 (for code-heavy messages) syntax highlighter output.
 
@@ -430,7 +430,7 @@ assessment.
 What it would cost: rebuilding the entire `src/` tree (604 TS/TSX files),
 including the terminal (xterm), code editor (CodeMirror), git panel, settings,
 PWA, voice, and bug-reporter surfaces that share this shell — not just the
-chat view. What it would lose: the 242 commits of hardening ahead of upstream
+chat view. What it would lose: the 244 commits of hardening ahead of upstream
 (a meaningful share of which is exactly the chat/streaming/scroll bug-fix work
 cited throughout §4), the ability to keep merging `siteboon/claudecodeui`
 upstream at all, the existing Playwright e2e suite (13 spec files) and the
