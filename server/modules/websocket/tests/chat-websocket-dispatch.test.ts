@@ -939,8 +939,8 @@ test('chat.subscribe does not replay a completed run (REST history is authoritat
     // Assert on the ack directly and on the absence of any replayed
     // (seq-bearing) event instead of a raw frame count.
     const ack = reloaded.framesOfKind('chat_subscribed')[0] as Record<string, unknown>;
-    assert.equal(ack?.isProcessing, false);
-    assert.equal(ack?.lastSeq, 2, 'the completed run head is still reported');
+    assert.equal(ack.isProcessing, false);
+    assert.equal(ack.lastSeq, 2, 'the completed run head is still reported');
     assert.equal(
       reloaded.frames.some((frame) => typeof frame.seq === 'number'),
       false,
