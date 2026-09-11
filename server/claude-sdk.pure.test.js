@@ -2,11 +2,34 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { CLAUDE_FALLBACK_MODELS } from './modules/providers/list/claude/claude-models.provider.js';
-import { extractTokenBudget, mapCliOptionsToSDK } from './claude-sdk.js';
+import { extractTokenBudget, isMainThreadMessage, mapCliOptionsToSDK } from './claude-sdk.js';
 
 // Pure-function coverage for the two option/usage mappers the SDK bridge runs on
 // every turn (#104). Both take plain objects, so they are exercised here without
 // spawning the Claude CLI.
+
+// ---------------------------------------------------------------------------
+// isMainThreadMessage
+// ---------------------------------------------------------------------------
+
+test('isMainThreadMessage is true for a plain SDK message with no parent tool', () => {
+  assert.equal(isMainThreadMessage({ type: 'assistant', message: { usage: {} } }), true);
+});
+
+test('isMainThreadMessage is false once a message carries parent_tool_use_id', () => {
+  // Set on every event a subagent (Task tool) emits inline on the same async
+  // generator as the main thread — see `transformMessage`, which reads the
+  // same field for UI grouping.
+  assert.equal(
+    isMainThreadMessage({ type: 'assistant', parent_tool_use_id: 'toolu_123', message: { usage: {} } }),
+    false,
+  );
+});
+
+test('isMainThreadMessage is false for null/undefined rather than throwing', () => {
+  assert.equal(isMainThreadMessage(null), false);
+  assert.equal(isMainThreadMessage(undefined), false);
+});
 
 // ---------------------------------------------------------------------------
 // extractTokenBudget
@@ -45,7 +68,7 @@ test('extractTokenBudget sums cache tokens into inputTokens without double count
   assert.equal(budget.cacheCreationTokens, 2_000);
   assert.equal(budget.cacheReadTokens, 30_000);
   assert.equal(budget.cacheTokens, 32_000);
-  assert.equal(budget.used, 32_600);
+  assert.equal(budget.used, 32_100, 'used is context size only: input+cache, never +output');
   assert.deepEqual(budget.breakdown, { input: 32_100, output: 500 });
 });
 
@@ -57,7 +80,7 @@ test('extractTokenBudget reads result-level usage when there is no nested messag
 
   assert.equal(budget.inputTokens, 10);
   assert.equal(budget.outputTokens, 7);
-  assert.equal(budget.used, 17);
+  assert.equal(budget.used, 10, 'used excludes output_tokens');
   assert.equal(budget.cacheTokens, 0);
 });
 
@@ -122,7 +145,7 @@ test('extractTokenBudget falls back to modelUsage when no usage payload exists',
 
   assert.equal(budget.inputTokens, 120);
   assert.equal(budget.outputTokens, 40);
-  assert.equal(budget.used, 160);
+  assert.equal(budget.used, 120, 'used excludes output_tokens');
 });
 
 test('extractTokenBudget prefers cumulative modelUsage counters', () => {
@@ -160,7 +183,7 @@ test('extractTokenBudget folds cache tokens into the modelUsage branch too', () 
   assert.equal(budget.cacheReadTokens, 30_000);
   assert.equal(budget.cacheTokens, 32_000);
   assert.equal(budget.inputTokens, 32_100);
-  assert.equal(budget.used, 32_600);
+  assert.equal(budget.used, 32_100, 'used is context size only: input+cache, never +output');
 });
 
 test('extractTokenBudget reports identical totals for the usage and modelUsage branches', () => {
@@ -199,7 +222,7 @@ test('extractTokenBudget sums every model in modelUsage, not just the first', ()
 
   assert.equal(budget.inputTokens, 4_010);
   assert.equal(budget.outputTokens, 1_005);
-  assert.equal(budget.used, 5_015);
+  assert.equal(budget.used, 4_010, 'used excludes output_tokens');
 });
 
 test('extractTokenBudget skips malformed modelUsage entries but keeps the valid ones', () => {
