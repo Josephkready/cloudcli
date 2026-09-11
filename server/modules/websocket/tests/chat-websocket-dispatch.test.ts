@@ -897,7 +897,13 @@ test('chat.subscribe on a running session acks isProcessing=true and replays onl
     assert.equal(ack.isProcessing, true);
     assert.equal(ack.lastSeq, 3, 'the ack reports the run head so the client can detect gaps');
 
-    const replayed = reconnected.frames.slice(1);
+    // Positional slicing is unsafe here: `sendChat` above also schedules a
+    // deferred `session_upserted` broadcast for the session's derived opening
+    // name (#368), which fans out to every connected socket — including this
+    // one — on its own timing and carries no `seq`. Filtering by `kind`
+    // (exactly how a real client discriminates frames on this socket) is what
+    // keeps this assertion deterministic instead of racing that broadcast.
+    const replayed = reconnected.frames.filter((frame) => frame.kind === 'assistant');
     assert.deepEqual(replayed.map((frame) => frame.seq), [2, 3], 'strictly after lastSeq, in order');
     assert.deepEqual(replayed.map((frame) => frame.content), ['two', 'three']);
     assert.equal(replayed.every((frame) => frame.sessionId === 'live-session'), true);
@@ -926,9 +932,20 @@ test('chat.subscribe does not replay a completed run (REST history is authoritat
     emit(reloaded, { type: 'chat.subscribe', sessions: [{ sessionId: 'done-session', lastSeq: 0 }] });
     await settle();
 
-    assert.equal(reloaded.frames.length, 1, 'ack only — replaying would duplicate the history fetch');
-    assert.equal(reloaded.frames[0]?.isProcessing, false);
-    assert.equal(reloaded.frames[0]?.lastSeq, 2, 'the completed run head is still reported');
+    // `frames.length === 1` would be flaky here for the same reason as the
+    // "running session" replay test above: the opening-name broadcast (#368)
+    // triggered by `sendChat` can land on this socket at any time, adding an
+    // un-seq'd `session_upserted` frame unrelated to what this test asserts.
+    // Assert on the ack directly and on the absence of any replayed
+    // (seq-bearing) event instead of a raw frame count.
+    const ack = reloaded.framesOfKind('chat_subscribed')[0] as Record<string, unknown>;
+    assert.equal(ack?.isProcessing, false);
+    assert.equal(ack?.lastSeq, 2, 'the completed run head is still reported');
+    assert.equal(
+      reloaded.frames.some((frame) => typeof frame.seq === 'number'),
+      false,
+      'replaying would duplicate the history fetch',
+    );
   });
 });
 
@@ -1043,7 +1060,15 @@ test('chat.subscribe coerces a hostile lastSeq instead of trusting it', async ()
       emit(socket, { type: 'chat.subscribe', sessions: [{ sessionId: 'seq-session', lastSeq }] });
       await settle(1);
 
-      const replayed = socket.frames.slice(1).map((frame) => frame.seq);
+      // Filter by `kind` rather than slicing by position: `sendChat` above
+      // schedules a deferred `session_upserted` broadcast for the session's
+      // derived opening name (#368) that fans out to every connected socket
+      // — including each socket created in this loop — on its own timing and
+      // carries no `seq`. Positional slicing raced that broadcast landing
+      // between the ack and the assertion; filtering does not.
+      const replayed = socket.frames
+        .filter((frame) => frame.kind === 'assistant')
+        .map((frame) => frame.seq);
       if (index === 1) {
         assert.deepEqual(replayed, [2], 'a fractional lastSeq floors to 1');
       } else {
