@@ -67,14 +67,26 @@ export const DRAFT_INPUT_PREFIX = 'draft_input_';
  * Whether any project has unsent composer text, by scanning localStorage for the
  * per-project draft keys the composer writes on every change and removes on send.
  * A non-empty value under any such key means reloading would lose it.
+ *
+ * Wrapped like this codebase's `safeLocalStorage` (`src/components/chat/utils/chatStorage.ts`,
+ * whose `getItem` logs and returns `null` on a thrown read): raw storage access can throw
+ * (Safari private mode, a storage-disabled sandboxed context, a browser extension), and this
+ * runs synchronously inside the resume-time auto-reload decision. An uncaught exception there
+ * would break the whole idle check instead of degrading the same way the rest of this
+ * codebase's storage access does — logged, and treated as "nothing found".
  */
 export const hasUnsentComposerDraft = (storage: Storage | null): boolean => {
   if (!storage) return false;
-  for (let i = 0; i < storage.length; i += 1) {
-    const key = storage.key(i);
-    if (!key || !key.startsWith(DRAFT_INPUT_PREFIX)) continue;
-    const value = storage.getItem(key);
-    if (typeof value === 'string' && value.trim().length > 0) return true;
+  try {
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (!key || !key.startsWith(DRAFT_INPUT_PREFIX)) continue;
+      const value = storage.getItem(key);
+      if (typeof value === 'string' && value.trim().length > 0) return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('[hasUnsentComposerDraft] localStorage scan failed:', error);
+    return false;
   }
-  return false;
 };

@@ -16,7 +16,7 @@ import { useQueuedMessageAutoSend } from '../../hooks/useQueuedMessageAutoSend';
 import { useRunningSessionsPoll } from '../../hooks/useRunningSessionsPoll';
 import { useArchiveSession } from '../../hooks/useArchiveSession';
 import { useVersionCheck } from '../../hooks/useVersionCheck';
-import { hasUnsentComposerDraft } from '../../hooks/buildVersion';
+import { hasUnsentComposerDraft, isAppIdle } from '../../hooks/buildVersion';
 import { api } from '../../utils/api';
 import { useLaunchIntent } from '../../pwa/useLaunchIntent';
 
@@ -37,7 +37,7 @@ function AppContentInner() {
   const { t } = useTranslation('common');
   const { isMobile } = useDeviceSettings({ trackPWA: false });
   const { ws, sendMessage, subscribe, isConnected } = useWebSocket();
-  const { newBuildAvailable } = useVersionCheck();
+  const { newBuildAvailable, checkNow } = useVersionCheck();
 
   // Shell and the code editor moved out of the entry chunk (#267); pull them
   // back in once the page is idle so the first click on either is still instant.
@@ -186,8 +186,12 @@ function AppContentInner() {
           return-from-hidden while the app is idle. */}
       <NewVersionBanner
         newBuildAvailable={newBuildAvailable}
+        checkNow={checkNow}
         isIdle={() =>
-          processingSessions.size === 0 && !hasUnsentComposerDraft(typeof window === 'undefined' ? null : window.localStorage)
+          isAppIdle({
+            hasInFlightStream: processingSessions.size > 0,
+            hasUnsentComposerText: hasUnsentComposerDraft(typeof window === 'undefined' ? null : window.localStorage),
+          })
         }
       />
       {!isMobile ? (

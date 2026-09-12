@@ -7,7 +7,10 @@ import { shouldAutoReload } from '../../hooks/buildVersion';
 interface NewVersionBannerProps {
   /**
    * A newer build is deployed than the one this tab is running (see useVersionCheck).
-   * Latched once true — an old bundle can never become current again.
+   * Latched once true — an old bundle can never become current again. Drives whether the
+   * banner RENDERS; the resume-time auto-reload decision uses `checkNow` instead (see
+   * below), because this prop can only reflect a fetch already in flight before the resume
+   * event and would otherwise miss a build that landed while the tab was backgrounded.
    */
   newBuildAvailable: boolean;
   /**
@@ -17,6 +20,16 @@ interface NewVersionBannerProps {
    * leave a stale "idle" answer that lets reload eat the draft.
    */
   isIdle: () => boolean;
+  /**
+   * Re-checks `/health` right now and resolves with the fresh `newBuildAvailable` answer
+   * (see `useVersionCheck`). Called on the hidden->visible resume transition instead of
+   * trusting the `newBuildAvailable` prop, which cannot have caught up yet: a build that
+   * landed while the tab was backgrounded is only ever discovered BY a fetch, and the
+   * `visibilitychange` dispatch that fires this handler cannot wait for one of this hook's
+   * own async fetches to resolve first. This IS that fetch — the exact case the whole
+   * feature exists for (a phone PWA reopened after a deploy).
+   */
+  checkNow: () => Promise<boolean>;
 }
 
 /**
@@ -30,13 +43,13 @@ interface NewVersionBannerProps {
  * The banner is `pointer-events-none` so it never blocks the UI beneath it; only the
  * toast itself is interactive.
  */
-export default function NewVersionBanner({ newBuildAvailable, isIdle }: NewVersionBannerProps) {
+export default function NewVersionBanner({ newBuildAvailable, isIdle, checkNow }: NewVersionBannerProps) {
   const { t } = useTranslation('common');
   const [dismissed, setDismissed] = useState(false);
   const reloadedRef = useRef(false);
   const wasHiddenRef = useRef(false);
-  const latestRef = useRef({ newBuildAvailable, isIdle });
-  latestRef.current = { newBuildAvailable, isIdle };
+  const latestRef = useRef({ isIdle, checkNow });
+  latestRef.current = { isIdle, checkNow };
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -54,11 +67,16 @@ export default function NewVersionBanner({ newBuildAvailable, isIdle }: NewVersi
       wasHiddenRef.current = false;
       if (reloadedRef.current) return;
 
-      const { newBuildAvailable: available, isIdle: idleNow } = latestRef.current;
-      if (shouldAutoReload({ newBuildAvailable: available, isIdle: idleNow(), becameVisibleAfterHidden: true })) {
-        reloadedRef.current = true;
-        window.location.reload();
-      }
+      const { isIdle: idleNow, checkNow: checkFresh } = latestRef.current;
+      void checkFresh().then((available) => {
+        // Re-read after the await: a second resume, a dismiss, or an already-fired
+        // auto-reload could all have happened while this fetch was in flight.
+        if (reloadedRef.current) return;
+        if (shouldAutoReload({ newBuildAvailable: available, isIdle: idleNow(), becameVisibleAfterHidden: true })) {
+          reloadedRef.current = true;
+          window.location.reload();
+        }
+      });
     };
 
     document.addEventListener('visibilitychange', onVisibilityChange);

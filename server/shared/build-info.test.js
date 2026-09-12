@@ -84,6 +84,27 @@ test('readBuildInfo returns null when the file is missing, malformed, or empty o
     }
 });
 
+test('readBuildInfo returns a partial identity rather than nulling it out entirely', async () => {
+    // The `!sha && !builtAt` guard only rejects a FULLY empty identity — one present field
+    // is enough for useVersionCheck's SHA comparison to work, so it must survive.
+    const { root, cleanup } = await withAppRoot();
+    try {
+        await writeFile(
+            path.join(root, 'dist', 'build-info.json'),
+            JSON.stringify({ sha: 'abc1234', built_at: '' }),
+        );
+        assert.deepEqual(readBuildInfo(root), { sha: 'abc1234', built_at: null });
+
+        await writeFile(
+            path.join(root, 'dist', 'build-info.json'),
+            JSON.stringify({ sha: '', built_at: '2026-09-11T00:00:00.000Z' }),
+        );
+        assert.deepEqual(readBuildInfo(root), { sha: null, built_at: '2026-09-11T00:00:00.000Z' });
+    } finally {
+        await cleanup();
+    }
+});
+
 test('/health includes build when build info exists', async () => {
     const server = await startServer(SAMPLE_INFO);
     try {

@@ -88,6 +88,29 @@ test('an absent server version never prompts', () => {
   );
 });
 
+test('an empty-string serverSha is treated the same as a missing one, falling back to semver', () => {
+  // The guard is `embeddedSha && serverSha`, so a falsy '' must fall back exactly like
+  // `null`/`undefined` — not be compared as a (wrongly) mismatching SHA.
+  assert.equal(
+    resolveNewBuildAvailable({
+      embeddedSha: 'abc1234',
+      embeddedVersion: '1.36.3',
+      serverSha: '',
+      serverVersion: '1.36.3',
+    }),
+    false,
+  );
+  assert.equal(
+    resolveNewBuildAvailable({
+      embeddedSha: 'abc1234',
+      embeddedVersion: '1.36.3',
+      serverSha: '',
+      serverVersion: '1.36.4',
+    }),
+    true,
+  );
+});
+
 // --- Idle predicate -------------------------------------------------------------
 
 test('idle only when neither a stream nor unsent composer text is present', () => {
@@ -168,4 +191,22 @@ test('a draft cleared after send no longer blocks idle', () => {
   storage.setItem('draft_input_p1', 'sent text');
   storage.setItem('draft_input_p1', '');
   assert.equal(hasUnsentComposerDraft(storage), false);
+});
+
+test('a storage access that throws is treated as no draft, not a crash', () => {
+  // Safari private mode, a storage-disabled sandboxed context, or a browser extension can
+  // all make `length`/`key`/`getItem` throw. This runs inside the resume-time auto-reload
+  // decision, so it must degrade like the rest of this codebase's storage access rather
+  // than propagate.
+  const throwing: Storage = {
+    get length(): number {
+      throw new Error('storage disabled');
+    },
+    key: () => null,
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {},
+  };
+  assert.equal(hasUnsentComposerDraft(throwing), false);
 });
