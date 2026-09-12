@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { memo, useCallback, useMemo } from 'react';
 import type { RefObject } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 import type { ChatMessage } from '../../types/types';
 import type {
@@ -11,12 +12,37 @@ import type {
 } from '../../../../types/app';
 import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import { resolveMessagesPaneView } from '../../utils/messagesPaneView';
-import { groupConsecutiveTools, isToolGroupItem } from '../../utils/toolGrouping';
+import { groupConsecutiveTools, isToolGroupItem, type MessageListItem } from '../../utils/toolGrouping';
 
 import MessageComponent from './MessageComponent';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
 import ToolGroupContainer from './ToolGroupContainer';
 import LoadAllMessagesOverlay from './LoadAllMessagesOverlay';
+
+// A row's real height is unknown until it mounts and reports itself via
+// `measureElement` (markdown/Prism/Mermaid/images all vary a message's height
+// wildly) — this is only the guess the virtualizer uses to decide the initial
+// visible range before that measurement lands. It does not need to be
+// accurate, only in the right order of magnitude so the first paint doesn't
+// under- or over-render.
+const VIRTUAL_ROW_ESTIMATE_PX = 96;
+// Rendered a little beyond the viewport in each direction so a small scroll or
+// a keyboard-driven scroll-into-view doesn't show a blank frame while the next
+// row mounts.
+const VIRTUAL_OVERSCAN = 8;
+
+// A stable (module-level, never-changing) reference. `useVirtualizer` keys an
+// internal measurement memo on this function's *identity*, not its return
+// value (`@tanstack/virtual-core`'s `getMeasurementOptions`/`getMeasurements`
+// memo chain, index.js ~592-720) — a fresh closure here on every render would
+// invalidate that memo every render and force a full O(n) re-scan of every
+// row's position on every scroll-driven re-render, exactly the cost this PR
+// exists to remove. It takes no arguments that vary, so there is nothing to
+// memoize away by hooking it; a plain top-level function is the stable
+// reference.
+function estimateVirtualRowSize(): number {
+  return VIRTUAL_ROW_ESTIMATE_PX;
+}
 
 interface ChatMessagesPaneProps {
   scrollContainerRef: RefObject<HTMLDivElement>;
@@ -155,6 +181,135 @@ function ChatMessagesPane({
     [messageKeyMap],
   );
 
+  // Same key a row would get in the flat (`renderFlat`) render below —
+  // shared so the virtualizer's internal measurement cache is keyed by the
+  // same identity as everything else keys rows by, including across a prepend
+  // (`getItemKey` is what lets react-virtual keep a row's already-measured
+  // height when older messages are prepended and its index shifts).
+  const getRowKey = useCallback(
+    (item: MessageListItem) =>
+      isToolGroupItem(item) ? `tool-group-${getMessageKey(item.messages[0])}` : getMessageKey(item),
+    [getMessageKey],
+  );
+
+  // `prevMessage`/`groupPrevMessage` (grouping/avatar-continuity context) used
+  // to come from a running variable threaded through one sequential `.map()`.
+  // A virtualized list only renders a window of rows, not a contiguous prefix,
+  // so a row's predecessor is looked up directly from the full (in-memory,
+  // always-available regardless of what's mounted) `groupedVisibleMessages`
+  // array instead.
+  const prevMessageForRow = useCallback(
+    (index: number): ChatMessage | null => {
+      if (index <= 0) return null;
+      const prevItem = groupedVisibleMessages[index - 1];
+      return isToolGroupItem(prevItem) ? (prevItem.messages[prevItem.messages.length - 1] ?? null) : prevItem;
+    },
+    [groupedVisibleMessages],
+  );
+
+  const renderRow = useCallback(
+    (item: MessageListItem, index: number) => {
+      const prevMessage = prevMessageForRow(index);
+      if (isToolGroupItem(item)) {
+        return (
+          <ToolGroupContainer
+            key={getRowKey(item)}
+            group={item}
+            prevMessage={prevMessage}
+            createDiff={createDiff}
+            getMessageKey={getMessageKey}
+            onFileOpen={onFileOpen}
+            onShowSettings={onShowSettings}
+            onGrantToolPermission={onGrantToolPermission}
+            showRawParameters={showRawParameters}
+            showThinking={showThinking}
+            selectedProject={selectedProject}
+            provider={provider}
+          />
+        );
+      }
+
+      return (
+        <MessageComponent
+          key={getRowKey(item)}
+          message={item}
+          prevMessage={prevMessage}
+          createDiff={createDiff}
+          onFileOpen={onFileOpen}
+          onShowSettings={onShowSettings}
+          onGrantToolPermission={onGrantToolPermission}
+          showRawParameters={showRawParameters}
+          showThinking={showThinking}
+          selectedProject={selectedProject}
+          provider={provider}
+        />
+      );
+    },
+    [
+      prevMessageForRow,
+      getRowKey,
+      createDiff,
+      getMessageKey,
+      onFileOpen,
+      onShowSettings,
+      onGrantToolPermission,
+      showRawParameters,
+      showThinking,
+      selectedProject,
+      provider,
+    ],
+  );
+
+  // Virtualized for every windowed view. Only an explicit "show the whole
+  // thread" request — `visibleMessageCount === Infinity`, which is what "Load
+  // all" and the in-conversation search-to-message jump both set — keeps the
+  // flat, fully-mounted render below unchanged: the search flow finds its
+  // target with a real DOM text/timestamp query over every message
+  // (`useChatSessionState.ts`'s `searchTarget` effect), which depends on every
+  // row actually being mounted. Scoping virtualization out of that one flow
+  // avoids having to redesign it in this pass — see the PR description for the
+  // tradeoff this leaves for a future phase.
+  //
+  // Deliberately NOT keyed on `allMessagesLoaded`: that flag also flips true
+  // when incremental scroll-paging simply reaches the start of history
+  // (`loadOlderMessages` → `!slot.hasMore`), while `visibleMessageCount` stays
+  // finite. A reader who scrolled all the way back is exactly who has the most
+  // rows loaded and benefits most from staying virtualized — and nothing in
+  // that path needs every row in the DOM.
+  const renderFlat = !Number.isFinite(visibleMessageCount);
+
+  // `scrollContainerRef` itself never changes identity across renders (it's
+  // the same ref object handed in by the parent), so this closure can be
+  // memoized with no dependencies at all — same reasoning as
+  // `estimateVirtualRowSize` above: a stable reference here keeps
+  // `useVirtualizer`'s internal measurement memo from invalidating on every
+  // render that isn't actually a scroll or resize.
+  const getVirtualScrollElement = useCallback(
+    () => scrollContainerRef.current,
+    [scrollContainerRef],
+  );
+
+  // Unlike the two above, this one's dependencies are real: the key a row
+  // gets genuinely must change when the underlying message list changes
+  // (a new message, a reorder, a prepend). `useCallback` here means it ONLY
+  // changes reference when `groupedVisibleMessages`/`getRowKey` actually did —
+  // not on every incidental re-render (e.g. a scroll-driven one where the
+  // data hasn't moved) — which is what keeps the memo chain above cheap on
+  // the hot (scroll) path instead of defeating it the same way an inline
+  // arrow here would.
+  const getVirtualItemKey = useCallback(
+    (index: number) => getRowKey(groupedVisibleMessages[index]),
+    [getRowKey, groupedVisibleMessages],
+  );
+
+  const rowVirtualizer = useVirtualizer({
+    count: renderFlat ? 0 : groupedVisibleMessages.length,
+    getScrollElement: getVirtualScrollElement,
+    estimateSize: estimateVirtualRowSize,
+    overscan: VIRTUAL_OVERSCAN,
+    getItemKey: getVirtualItemKey,
+  });
+
   return (
     <div
       ref={scrollContainerRef}
@@ -267,52 +422,37 @@ function ChatMessagesPane({
             </div>
           )}
 
-          {(() => {
-            let prevMessage: ChatMessage | null = null;
-
-            return groupedVisibleMessages.map((item) => {
-              if (isToolGroupItem(item)) {
-                const groupPrevMessage = prevMessage;
-                prevMessage = item.messages[item.messages.length - 1] || prevMessage;
-
-                return (
-                  <ToolGroupContainer
-                    key={`tool-group-${getMessageKey(item.messages[0])}`}
-                    group={item}
-                    prevMessage={groupPrevMessage}
-                    createDiff={createDiff}
-                    getMessageKey={getMessageKey}
-                    onFileOpen={onFileOpen}
-                    onShowSettings={onShowSettings}
-                    onGrantToolPermission={onGrantToolPermission}
-                    showRawParameters={showRawParameters}
-                    showThinking={showThinking}
-                    selectedProject={selectedProject}
-                    provider={provider}
-                  />
-                );
-              }
-
-              const messagePrevMessage = prevMessage;
-              prevMessage = item;
-
-              return (
-                <MessageComponent
-                  key={getMessageKey(item)}
-                  message={item}
-                  prevMessage={messagePrevMessage}
-                  createDiff={createDiff}
-                  onFileOpen={onFileOpen}
-                  onShowSettings={onShowSettings}
-                  onGrantToolPermission={onGrantToolPermission}
-                  showRawParameters={showRawParameters}
-                  showThinking={showThinking}
-                  selectedProject={selectedProject}
-                  provider={provider}
-                />
-              );
-            });
-          })()}
+          {renderFlat ? (
+            groupedVisibleMessages.map((item, index) => renderRow(item, index))
+          ) : (
+            <div
+              data-testid="virtual-row-viewport"
+              style={{ position: 'relative', width: '100%', height: rowVirtualizer.getTotalSize() }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => (
+                <div
+                  key={virtualRow.key}
+                  data-index={virtualRow.index}
+                  ref={rowVirtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  {/* Bakes the `space-y-3`/`space-y-4` inter-row gap into each
+                      row instead of relying on adjacent-sibling margins, which
+                      have no effect once rows are taken out of flow for
+                      absolute positioning. */}
+                  <div className="pb-3 sm:pb-4">
+                    {renderRow(groupedVisibleMessages[virtualRow.index], virtualRow.index)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
       </div>

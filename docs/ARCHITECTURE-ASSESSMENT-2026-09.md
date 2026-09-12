@@ -299,6 +299,13 @@ for the re-render §4.2 measured) is the natural next diagnostic step, now that
 
 ### 4.4 No DOM virtualization for the transcript
 
+> **Update 2026-09-11:** addressed in #489 (`@tanstack/react-virtual`,
+> pinned `3.14.12`), landed as phase 2 of this assessment's plan — see that
+> PR for the measurements. The dependency-inventory claim below is from this
+> doc's original point-in-time assessment and is intentionally left as
+> written rather than rewritten after the fact; read it as "true when this
+> was measured," not as a currently-accurate statement of `package.json`.
+
 `ChatMessagesPane` (`src/components/chat/view/subcomponents/ChatMessagesPane.tsx:260-305`)
 `.map()`s every item in `groupedVisibleMessages` into a fully-mounted,
 fully-rendered `MessageComponent` — no `react-window`/`react-virtuoso`/
