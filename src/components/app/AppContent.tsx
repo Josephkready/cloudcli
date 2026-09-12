@@ -15,10 +15,13 @@ import { useProjectsState } from '../../hooks/useProjectsState';
 import { useQueuedMessageAutoSend } from '../../hooks/useQueuedMessageAutoSend';
 import { useRunningSessionsPoll } from '../../hooks/useRunningSessionsPoll';
 import { useArchiveSession } from '../../hooks/useArchiveSession';
+import { useVersionCheck } from '../../hooks/useVersionCheck';
+import { hasUnsentComposerDraft, isAppIdle } from '../../hooks/buildVersion';
 import { api } from '../../utils/api';
 import { useLaunchIntent } from '../../pwa/useLaunchIntent';
 
 import { installKeyboardViewportSync, keyboardAwareBottomStyle } from './keyboardViewport';
+import NewVersionBanner from './NewVersionBanner';
 
 export default function AppContent() {
   return (
@@ -34,6 +37,7 @@ function AppContentInner() {
   const { t } = useTranslation('common');
   const { isMobile } = useDeviceSettings({ trackPWA: false });
   const { ws, sendMessage, subscribe, isConnected } = useWebSocket();
+  const { newBuildAvailable, checkNow } = useVersionCheck();
 
   // Shell and the code editor moved out of the entry chunk (#267); pull them
   // back in once the page is idle so the first click on either is still instant.
@@ -178,6 +182,18 @@ function AppContentInner() {
 
   return (
     <div className="fixed inset-0 flex bg-background" style={keyboardAwareBottomStyle()}>
+      {/* Stale-tab reload affordance (#458): never blocks the UI, auto-reloads only on a
+          return-from-hidden while the app is idle. */}
+      <NewVersionBanner
+        newBuildAvailable={newBuildAvailable}
+        checkNow={checkNow}
+        isIdle={() =>
+          isAppIdle({
+            hasInFlightStream: processingSessions.size > 0,
+            hasUnsentComposerText: hasUnsentComposerDraft(typeof window === 'undefined' ? null : window.localStorage),
+          })
+        }
+      />
       {!isMobile ? (
         <div className="h-full flex-shrink-0 border-r border-border/50">
           <Sidebar {...sidebarSharedProps} />

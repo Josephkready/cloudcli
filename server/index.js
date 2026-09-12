@@ -81,6 +81,7 @@ import {
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM, AUTH_DISABLED } from './constants/config.js';
 import { resolveInstallMode } from './shared/self-update.js';
+import { createHealthRouter, readBuildInfo } from './shared/build-info.js';
 import { c } from './utils/colors.js';
 
 const __dirname = getModuleDir(import.meta.url);
@@ -101,6 +102,12 @@ const RUNNING_VERSION = (() => {
         return null;
     }
 })();
+// Per-deploy build identity (#458): the git SHA + build time stamped by
+// scripts/dante-build.sh into dist/build-info.json and inlined into the client bundle.
+// Captured once at startup like RUNNING_VERSION — the served bundle is fixed for this
+// process's lifetime too. Absent on a plain `npm run build` or a pre-#458 tree; /health
+// then omits `build` and the frontend falls back to the semver comparison.
+const BUILD_INFO = readBuildInfo(APP_ROOT);
 const MAX_FILE_UPLOAD_SIZE_MB = 200;
 const MAX_FILE_UPLOAD_SIZE_BYTES = MAX_FILE_UPLOAD_SIZE_MB * 1024 * 1024;
 const MAX_FILE_UPLOAD_COUNT = 20;
@@ -198,15 +205,13 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Public health check endpoint (no authentication required)
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        installMode,
-        version: RUNNING_VERSION
-    });
-});
+// Public health check endpoint (no authentication required). Includes the build
+// identity (sha + built_at) stamped at build time when present (#458).
+app.use(createHealthRouter({
+    installMode,
+    version: RUNNING_VERSION,
+    build: BUILD_INFO,
+}));
 
 // Optional API key validation (if configured)
 app.use('/api', validateApiKey);
