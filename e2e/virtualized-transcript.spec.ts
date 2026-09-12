@@ -144,12 +144,19 @@ test('auto-follows a streamed reply into an already-long conversation', async ({
   // Pinned to the bottom, not just "the new text exists somewhere in the DOM".
   // Polled rather than read once: the virtualizer's dynamic remeasurement of
   // the just-streamed reply can land a frame or two after the text itself
-  // becomes visible.
+  // becomes visible. 20s, not this file's usual 5s default: the mechanism
+  // being asserted here (a ResizeObserver callback + a 50ms setTimeout, see
+  // `useChatSessionState.ts`) runs on the browser's own timer/rAF queue, and
+  // a shared, heavily-loaded CI host can starve those for several seconds at
+  // a time (the gate run that caught this was 20+ minutes into the sibling
+  // `tests` lane at the moment this ran) — every other assertion in this file
+  // was already widened for exactly that reason (see the file-level
+  // `test.setTimeout`); this one was missed the first time.
   const container = page.locator('.chat-messages-pane');
   await expect.poll(async () => {
     const m = await scrollMetrics(container);
     return m.scrollHeight - m.scrollTop - m.clientHeight;
-  }, { timeout: 5_000 }).toBeLessThan(40);
+  }, { timeout: 20_000 }).toBeLessThan(40);
 
   // The scroll-to-bottom affordance only shows once the reader has scrolled
   // away from the tail — its absence here is the app's own signal that
