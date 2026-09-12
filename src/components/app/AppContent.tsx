@@ -18,7 +18,11 @@ import { useArchiveSession } from '../../hooks/useArchiveSession';
 import { api } from '../../utils/api';
 import { useLaunchIntent } from '../../pwa/useLaunchIntent';
 
-import { installKeyboardViewportSync, keyboardAwareBottomStyle } from './keyboardViewport';
+import {
+  installKeyboardViewportSync,
+  keyboardAwareBottomStyle,
+  viewportShellStyle,
+} from './keyboardViewport';
 
 export default function AppContent() {
   return (
@@ -177,7 +181,13 @@ function AppContentInner() {
   useEffect(() => installKeyboardViewportSync(window, document), []);
 
   return (
-    <div className="fixed inset-0 flex bg-background" style={keyboardAwareBottomStyle()}>
+    // `viewportShellStyle`, not `inset-0`: the shell is the element
+    // `--keyboard-height` is computed for, and that number counts from the layout
+    // viewport's origin. `body.pwa-mode .fixed.inset-0` would move this box down
+    // by the header safe area in the installed PWA — and only there — leaving the
+    // shell driven by a measurement from a coordinate space it no longer occupies.
+    // `.pwa-shell-safe` keeps the safe-area clearance as padding instead.
+    <div className="pwa-shell-safe fixed flex bg-background" style={viewportShellStyle()}>
       {!isMobile ? (
         <div className="h-full flex-shrink-0 border-r border-border/50">
           <Sidebar {...sidebarSharedProps} />
