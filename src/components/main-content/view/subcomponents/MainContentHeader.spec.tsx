@@ -16,6 +16,19 @@ vi.mock('@/contexts/PluginsContext', () => ({
   usePlugins: () => ({ plugins: [], loading: false, pluginsError: null, refreshPlugins: () => {} }),
 }));
 
+// This spec exercises the header's archive action, not the stale-tab version check. The
+// header always mounts BugReportDialog (closed), which reads the shared version state; mock
+// it so these tests neither need a VersionCheckProvider nor hit the network.
+vi.mock('@/hooks/useVersionCheck', () => ({
+  useVersionCheck: () => ({
+    currentVersion: '1.36.3',
+    installMode: 'git',
+    runningVersion: '1.36.3',
+    restartRequired: false,
+    newBuildAvailable: false,
+  }),
+}));
+
 const project = {
   projectId: 'p1',
   projectPath: '/repos/p1',

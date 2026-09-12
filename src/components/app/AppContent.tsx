@@ -15,7 +15,7 @@ import { useProjectsState } from '../../hooks/useProjectsState';
 import { useQueuedMessageAutoSend } from '../../hooks/useQueuedMessageAutoSend';
 import { useRunningSessionsPoll } from '../../hooks/useRunningSessionsPoll';
 import { useArchiveSession } from '../../hooks/useArchiveSession';
-import { useVersionCheck } from '../../hooks/useVersionCheck';
+import { useVersionCheck, VersionCheckProvider } from '../../hooks/useVersionCheck';
 import { hasUnsentComposerDraft, isAppIdle } from '../../hooks/buildVersion';
 import { api } from '../../utils/api';
 import { useLaunchIntent } from '../../pwa/useLaunchIntent';
@@ -25,9 +25,11 @@ import NewVersionBanner from './NewVersionBanner';
 
 export default function AppContent() {
   return (
-    <PaletteOpsProvider>
-      <AppContentInner />
-    </PaletteOpsProvider>
+    <VersionCheckProvider>
+      <PaletteOpsProvider>
+        <AppContentInner />
+      </PaletteOpsProvider>
+    </VersionCheckProvider>
   );
 }
 

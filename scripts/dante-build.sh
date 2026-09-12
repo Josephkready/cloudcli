@@ -101,10 +101,10 @@ npx vite build --outDir "$STAGE/dist" --emptyOutDir
 log "writing build identity (sha=${VITE_BUILD_SHA}) -> staging"
 # The same SHA the client bundle inlined via Vite `define`. The server reads this at
 # startup and serves it from /health so an already-open tab can detect a new deploy
-# (#458). Written after vite so --emptyOutDir cannot delete it.
-cat > "$STAGE/dist/build-info.json" <<EOF
-{"sha":"${VITE_BUILD_SHA}","built_at":"${VITE_BUILT_AT}"}
-EOF
+# (#458). Written after vite so --emptyOutDir cannot delete it. The values are JSON-encoded
+# by the helper (not interpolated into a heredoc) so a quote/backslash can never produce
+# malformed JSON or inject content into the file the server serves.
+"$ROOT/scripts/write-build-info.sh" "$VITE_BUILD_SHA" "$VITE_BUILT_AT" "$STAGE/dist/build-info.json"
 
 log "precompressing client assets -> staging"
 # `npm run build:client` chains vite -> build:precompress, but the vite step above is
