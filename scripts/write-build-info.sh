@@ -17,4 +17,11 @@ if [ "$#" -ne 3 ]; then
   exit 2
 fi
 
-python3 -c 'import json,sys; json.dump({"sha": sys.argv[1], "built_at": sys.argv[2]}, sys.stdout)' "$1" "$2" > "$3"
+if command -v node >/dev/null 2>&1; then
+  node -e 'process.stdout.write(JSON.stringify({ sha: process.argv[1], built_at: process.argv[2] }))' "$1" "$2" > "$3"
+elif command -v python3 >/dev/null 2>&1; then
+  python3 -c 'import json,sys; json.dump({"sha": sys.argv[1], "built_at": sys.argv[2]}, sys.stdout)' "$1" "$2" > "$3"
+else
+  printf 'ERROR: write-build-info.sh requires node or python3\n' >&2
+  exit 1
+fi

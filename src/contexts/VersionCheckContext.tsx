@@ -88,50 +88,63 @@ export function VersionCheckProvider({ children }: { children: ReactNode }) {
     unmountedRef.current = true;
   }, []);
 
+  const inFlightPromiseRef = useRef<Promise<boolean> | null>(null);
+
   const checkNow = useCallback(async (): Promise<boolean> => {
-    try {
-      const response = await fetch('/health');
-      const data = await response.json();
-      if (unmountedRef.current) return newBuildAvailableRef.current;
-
-      if (data.installMode === 'npm' || data.installMode === 'git') {
-        setInstallMode(data.installMode);
-      }
-
-      const serverVersion: string | null = typeof data.version === 'string' && data.version.length > 0
-        ? data.version
-        : null;
-      if (serverVersion) {
-        setRunningVersion(serverVersion);
-        setRestartRequired(serverVersion !== version);
-      }
-
-      const build =
-        data.build && typeof data.build === 'object'
-          ? {
-              sha: typeof data.build.sha === 'string' && data.build.sha ? data.build.sha : null,
-              built_at:
-                typeof data.build.built_at === 'string' && data.build.built_at ? data.build.built_at : null,
-            }
-          : null;
-      setServerBuild((prev) => {
-        if (prev?.sha === build?.sha && prev?.built_at === build?.built_at) return prev;
-        return build;
-      });
-
-      const isNew = newBuildAvailableRef.current || resolveNewBuildAvailable({
-        embeddedSha: BUILD_SHA,
-        embeddedVersion: version,
-        serverSha: build?.sha,
-        serverVersion,
-      });
-      newBuildAvailableRef.current = isNew;
-      setNewBuildAvailable(isNew);
-      return isNew;
-    } catch (error) {
-      console.error('[useVersionCheck] Failed to check /health:', error);
-      return newBuildAvailableRef.current;
+    if (inFlightPromiseRef.current) {
+      return inFlightPromiseRef.current;
     }
+
+    const promise = (async () => {
+      try {
+        const response = await fetch('/health');
+        const data = await response.json();
+        if (unmountedRef.current) return newBuildAvailableRef.current;
+
+        if (data.installMode === 'npm' || data.installMode === 'git') {
+          setInstallMode(data.installMode);
+        }
+
+        const serverVersion: string | null = typeof data.version === 'string' && data.version.length > 0
+          ? data.version
+          : null;
+        if (serverVersion) {
+          setRunningVersion(serverVersion);
+          setRestartRequired(serverVersion !== version);
+        }
+
+        const build =
+          data.build && typeof data.build === 'object'
+            ? {
+                sha: typeof data.build.sha === 'string' && data.build.sha ? data.build.sha : null,
+                built_at:
+                  typeof data.build.built_at === 'string' && data.build.built_at ? data.build.built_at : null,
+              }
+            : null;
+        setServerBuild((prev) => {
+          if (prev?.sha === build?.sha && prev?.built_at === build?.built_at) return prev;
+          return build;
+        });
+
+        const isNew = newBuildAvailableRef.current || resolveNewBuildAvailable({
+          embeddedSha: BUILD_SHA,
+          embeddedVersion: version,
+          serverSha: build?.sha,
+          serverVersion,
+        });
+        newBuildAvailableRef.current = isNew;
+        setNewBuildAvailable(isNew);
+        return isNew;
+      } catch (error) {
+        console.error('[useVersionCheck] Failed to check /health:', error);
+        return newBuildAvailableRef.current;
+      } finally {
+        inFlightPromiseRef.current = null;
+      }
+    })();
+
+    inFlightPromiseRef.current = promise;
+    return promise;
   }, []);
 
   useEffect(() => {

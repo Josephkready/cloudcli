@@ -63,6 +63,14 @@ describe('write-build-info.sh — always emits valid JSON (#458 follow-up)', () 
     assert.deepEqual(Object.keys(parsed).sort(), ['built_at', 'sha']);
   });
 
+  it('safely round-trips hostile strings with non-ASCII, emojis, control chars, and JSON injection attempts', () => {
+    const hostileSha = 'rev-"491"\\test\r\n\t</script><script>alert("xss")</script> 🚀 café ñ 日本語';
+    const hostileBuiltAt = '{"fake_key": "override", "injected": [1, 2, 3]}\\\\ \'" \n\t ⚡';
+    const parsed = writeInfo(hostileSha, hostileBuiltAt) as { sha: string; built_at: string };
+    assert.deepEqual(parsed, { sha: hostileSha, built_at: hostileBuiltAt });
+    assert.deepEqual(Object.keys(parsed).sort(), ['built_at', 'sha']);
+  });
+
   it('fails loudly when given the wrong number of arguments', () => {
     const dir = mkdtempSync(join(tmpdir(), 'build-info-'));
     try {

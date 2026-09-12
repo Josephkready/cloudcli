@@ -205,6 +205,38 @@ describe('useVersionCheck — polling and resume wiring (#458)', () => {
 
       expect(result.current.newBuildAvailable).toBe(true);
     });
+
+    it('deduplicates concurrent in-flight requests into a single /health fetch', async () => {
+      let resolveFetch!: (res: Response) => void;
+      const fetchPromise = new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      });
+      vi.mocked(fetch).mockResolvedValueOnce(respondWith({ installMode: 'git', version: '1.36.3' }));
+      const { result } = renderVersionCheckHook();
+      await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+
+      vi.mocked(fetch).mockImplementation(() => fetchPromise);
+
+      let p1!: Promise<boolean>;
+      let p2!: Promise<boolean>;
+      act(() => {
+        p1 = result.current.checkNow();
+        p2 = result.current.checkNow();
+      });
+
+      expect(fetch).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        resolveFetch(
+          respondWith({ installMode: 'git', version: '1.36.3', build: { sha: 'server-sha', built_at: 't' } }),
+        );
+      });
+
+      const [res1, res2] = await Promise.all([p1, p2]);
+      expect(res1).toBe(true);
+      expect(res2).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
   });
 });
 
