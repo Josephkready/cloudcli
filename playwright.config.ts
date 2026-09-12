@@ -60,7 +60,13 @@ export default defineConfig({
   // run in parallel safely. Specs within a file run serially.
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
-  retries: process.env.CI ? 1 : 0,
+  // 2, not 1: this repo's `.local-ci.toml` e2e lane runs in Docker on a host that also
+  // runs a dozen-plus other concurrent CI containers, and the two WebKit soft-keyboard
+  // specs occasionally hit a `locator.click` timeout mid-run purely from that Docker
+  // scheduling noise (confirmed by running them directly on the host with no container at
+  // all, where they pass in 3-4s every time under the same load) — one retry was not
+  // always enough headroom to absorb a single stalled click.
+  retries: process.env.CI ? 2 : 0,
   workers: 2,
   reporter: process.env.CI
     ? [['list'], ['html', { open: 'never' }]]
