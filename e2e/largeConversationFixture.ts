@@ -53,6 +53,14 @@ export interface LargeConversationHandles {
   lastMessageText: string;
   /** Text of the message immediately after the mermaid one, used as a stable resize-anchor reference. */
   afterMermaidMessageText: string;
+  /**
+   * Text of a plain (non-tool-use, non-mermaid) message buried deep enough in
+   * the middle of the transcript that it is never inside the initial fetch,
+   * the visible window, or any of this file's other named handles — used to
+   * drive a real cross-conversation search-to-message jump without it
+   * accidentally matching a row another test already asserts on.
+   */
+  searchTargetMessageText: string;
 }
 
 /**
@@ -101,7 +109,30 @@ export function seedLargeConversation(
 
   const messageText = (index: number): string => `virtualized-fixture message #${index} of ${rowCount}`;
 
+  // Index 201: not a multiple of 5 (so it's a plain text row, not the
+  // tool_use/tool_result pair those indices emit), and well clear of the
+  // mermaid row and the first/last handles below. Every test in this spec
+  // file seeds a fresh session with the SAME rowCount, so the plain
+  // `messageText(searchTargetIndex)` string is identical across every one of
+  // them — a cross-conversation search for it would match every session this
+  // worker has ever seeded, not just this one. The session id is folded into
+  // the row's actual content (not just the label returned below) so the
+  // search-driven test can find *this* session's row unambiguously.
+  const searchTargetIndex = 201;
+  const searchTargetMessageText = `${messageText(searchTargetIndex)} (session ${sessionId.slice(0, 8)})`;
+
   for (let i = 0; i < rowCount; i++) {
+    if (i === searchTargetIndex) {
+      push({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: searchTargetMessageText }],
+        },
+      });
+      continue;
+    }
+
     if (i === mermaidIndex) {
       push({
         type: 'assistant',
@@ -160,5 +191,6 @@ export function seedLargeConversation(
     firstMessageText: messageText(0),
     lastMessageText: messageText(rowCount - 1),
     afterMermaidMessageText: messageText(mermaidIndex + 1),
+    searchTargetMessageText,
   };
 }

@@ -244,3 +244,35 @@ test('"Load all" still mounts every message, preserving the search-to-message af
   const mountedAfterLoadAll = (await scrollMetrics(container)).mounted;
   expect(mountedAfterLoadAll).toBeGreaterThan(400);
 });
+
+test('a cross-conversation search jump lands on and highlights the target message', async ({ page }) => {
+  // Deliberately starts at the app root, not the session directly: a search
+  // jump has to work from anywhere, and this is the one path in the app that
+  // still finds a message via a real DOM query
+  // (`useChatSessionState.ts`'s `searchTarget` effect) rather than the
+  // virtualized window — the thing the review of this PR flagged the earlier
+  // version of this file as claiming to cover without actually exercising.
+  await page.goto('/');
+
+  await expect(page.getByRole('button', { name: /search chats/i })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: /search chats/i }).click();
+
+  const searchInput = page.getByPlaceholder(/search in conversations/i).and(page.locator(':visible'));
+  await expect(searchInput).toBeFocused();
+  await searchInput.fill(fixture.searchTargetMessageText);
+
+  const resultButton = page.getByRole('button').filter({ hasText: fixture.searchTargetMessageText });
+  await expect(resultButton).toBeVisible({ timeout: 30_000 });
+  await resultButton.click();
+
+  // Landing here forces the pre-existing flat "Load all" fetch+render (the
+  // search flow cannot know in advance whether the target row sits inside
+  // the paginated window) — this is the same code path the previous test's
+  // scroll-driven "Load all" exercises, just reached by search instead of a
+  // manual scroll. What is new here is the actual jump-and-highlight this
+  // test title promises: the target row must both render and carry the
+  // `search-highlight-flash` class the app applies for ~4s once it locates
+  // the match by DOM query.
+  const target = page.locator('.chat-message', { hasText: fixture.searchTargetMessageText });
+  await expect(target).toHaveClass(/search-highlight-flash/, { timeout: 60_000 });
+});

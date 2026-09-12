@@ -31,6 +31,19 @@ const VIRTUAL_ROW_ESTIMATE_PX = 96;
 // row mounts.
 const VIRTUAL_OVERSCAN = 8;
 
+// A stable (module-level, never-changing) reference. `useVirtualizer` keys an
+// internal measurement memo on this function's *identity*, not its return
+// value (`@tanstack/virtual-core`'s `getMeasurementOptions`/`getMeasurements`
+// memo chain, index.js ~592-720) — a fresh closure here on every render would
+// invalidate that memo every render and force a full O(n) re-scan of every
+// row's position on every scroll-driven re-render, exactly the cost this PR
+// exists to remove. It takes no arguments that vary, so there is nothing to
+// memoize away by hooking it; a plain top-level function is the stable
+// reference.
+function estimateVirtualRowSize(): number {
+  return VIRTUAL_ROW_ESTIMATE_PX;
+}
+
 interface ChatMessagesPaneProps {
   scrollContainerRef: RefObject<HTMLDivElement>;
   onWheel: () => void;
@@ -264,12 +277,37 @@ function ChatMessagesPane({
   // rows loaded and benefits most from staying virtualized — and nothing in
   // that path needs every row in the DOM.
   const renderFlat = !Number.isFinite(visibleMessageCount);
+
+  // `scrollContainerRef` itself never changes identity across renders (it's
+  // the same ref object handed in by the parent), so this closure can be
+  // memoized with no dependencies at all — same reasoning as
+  // `estimateVirtualRowSize` above: a stable reference here keeps
+  // `useVirtualizer`'s internal measurement memo from invalidating on every
+  // render that isn't actually a scroll or resize.
+  const getVirtualScrollElement = useCallback(
+    () => scrollContainerRef.current,
+    [scrollContainerRef],
+  );
+
+  // Unlike the two above, this one's dependencies are real: the key a row
+  // gets genuinely must change when the underlying message list changes
+  // (a new message, a reorder, a prepend). `useCallback` here means it ONLY
+  // changes reference when `groupedVisibleMessages`/`getRowKey` actually did —
+  // not on every incidental re-render (e.g. a scroll-driven one where the
+  // data hasn't moved) — which is what keeps the memo chain above cheap on
+  // the hot (scroll) path instead of defeating it the same way an inline
+  // arrow here would.
+  const getVirtualItemKey = useCallback(
+    (index: number) => getRowKey(groupedVisibleMessages[index]),
+    [getRowKey, groupedVisibleMessages],
+  );
+
   const rowVirtualizer = useVirtualizer({
     count: renderFlat ? 0 : groupedVisibleMessages.length,
-    getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => VIRTUAL_ROW_ESTIMATE_PX,
+    getScrollElement: getVirtualScrollElement,
+    estimateSize: estimateVirtualRowSize,
     overscan: VIRTUAL_OVERSCAN,
-    getItemKey: (index) => getRowKey(groupedVisibleMessages[index]),
+    getItemKey: getVirtualItemKey,
   });
 
   return (
