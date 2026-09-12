@@ -83,11 +83,23 @@ run      = "npm run build:client && npm run test:server:coverage && npm run test
 # `npm run test:e2e` builds the client itself (VITE_AUTH_DISABLED baked in) via the
 # Playwright global-setup, then boots a per-worker server against the deterministic
 # in-process mock provider, so no real CLI/SDK, network or credentials are needed.
+#
+# `CI=1` is load-bearing, not decoration. `playwright.config.ts` sets
+# `retries: process.env.CI ? 1 : 0` specifically so a single transient timeout under a
+# loaded CI host gets one automatic retry instead of failing the lane outright — but this
+# runner never set `CI`, so that safety net was silently off in exactly the harness that
+# needs it (a shared host running a dozen concurrent Docker CI containers). Confirmed by
+# running the two WebKit specs that flake here (composer-focus, bug-report-capture)
+# directly on the host with no Docker involved at all — outside the container they pass in
+# 2-4s every time even under the same host load, so the timeout is a Docker-vs-webkit
+# startup-latency issue, not an app or browser-version regression. `forbidOnly` (also
+# `process.env.CI`-gated) is a welcome side effect: a stray `test.only` now fails the gate
+# instead of silently skipping the rest of the suite.
 name     = "e2e"
 image    = "mcr.microsoft.com/playwright:v1.63.0-noble"
 bake     = "apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 make g++ >/dev/null && rm -rf /var/lib/apt/lists/* && npm ci --no-audit --no-fund && mkdir -p /deps && mv node_modules /deps/node_modules"
 bake_key = ["package-lock.json", "package.json"]
 setup    = "ln -sfn /deps/node_modules node_modules"
-run      = "npm run test:e2e"
+run      = "CI=1 npm run test:e2e"
 # Chromium crashes in confusing ways on Docker's default 64MB /dev/shm.
 shm      = "1g"
