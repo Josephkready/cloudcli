@@ -57,8 +57,20 @@ export default defineConfig(({ mode }) => {
   // TODO: Remove support for legacy PORT variables in all locations in a future major release, leaving only SERVER_PORT.
   const serverPort = env.SERVER_PORT || env.PORT || 3001
 
+  // Build identity (#458): scripts/dante-build.sh exports VITE_BUILD_SHA/VITE_BUILT_AT
+  // (falling back to empty for plain `npm run dev` / `npm run build`), and Vite inlines
+  // them into every bundle here. useVersionCheck compares the embedded SHA against the
+  // one the server reports from /health; because the dante fork ships by ansible-pull
+  // with no version bumps, the SHA is the only thing that actually changes per deploy.
+  const buildSha = process.env.VITE_BUILD_SHA || env.VITE_BUILD_SHA || ''
+  const buildTime = process.env.VITE_BUILT_AT || env.VITE_BUILT_AT || ''
+
   return {
     plugins: [react()],
+    define: {
+      __CLOUDCLI_BUILD_SHA__: JSON.stringify(buildSha),
+      __CLOUDCLI_BUILT_AT__: JSON.stringify(buildTime),
+    },
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url))

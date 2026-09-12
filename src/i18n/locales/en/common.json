@@ -279,6 +279,11 @@
     "ariaLabels": {
       "showSidebar": "Show sidebar",
       "closeSidebar": "Close sidebar"
+    },
+    "newBuild": {
+      "message": "New version available",
+      "reload": "Reload",
+      "dismiss": "Dismiss"
     }
   },
   "notFound": {

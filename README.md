@@ -125,6 +125,15 @@ issue. The server and worker must share `ISSUE_QUEUE_DB`. Reports go to
 
 Production runs on `dante` and is reconciled by `ansible-pull` against `origin/main`. The build (`scripts/dante-build.sh`: `npm ci` + `vite build` + asset precompression + `tsc`/`tsc-alias`, atomic swap) and the `systemd` unit that runs `node dist-server/server/index.js` are owned by the deploy repo — **ship changes by merging to `origin/main`, not by SSH+rsync.** See the mind design doc `cloudcli-dante-deploy` and the `dante-sync` / `dante-live` skills for the full workflow.
 
+### Build identity and the stale-tab reload
+
+Because deploys ship by `ansible-pull` with no version bumps, `package.json`'s semver is identical across deploys and an open tab can never tell a new build landed from the version string alone. Every dante build therefore stamps a **build identity** — the git SHA it was built from plus a UTC build timestamp — and embeds it twice from the same source:
+
+- `scripts/dante-build.sh` exports `VITE_BUILD_SHA` / `VITE_BUILT_AT` (falling back to `unknown` + build time when git is unavailable), which `vite.config.js` inlines into the client bundle via Vite `define`, and
+- the same values are written to `dist/build-info.json`, which the server reads at startup and reports from `/health` under `build: {sha, built_at}`.
+
+`useVersionCheck` polls `/health` (every minute, and on tab resume) and compares the bundle's embedded SHA against the server's. A mismatch means the tab is running old JavaScript against a patched server, and the app shows a small non-blocking "New version available — Reload" banner (`NewVersionBanner`). It never reloads mid-conversation: auto-reload only fires when the tab returns from hidden to visible **and** the app is idle (no in-flight stream, no unsent composer text) — which is when a phone PWA typically comes back. When build identity is absent on either side (plain `npm run dev`/`npm run build`, or a pre-change server), the historical semver comparison remains as a fallback. The manual reload button is always available regardless of idleness.
+
 ## License
 
 GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later) — see [LICENSE](LICENSE) for the full text, including additional terms under Section 7, and [NOTICE](NOTICE) for attribution.

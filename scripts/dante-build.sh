@@ -70,6 +70,18 @@ mkdir -p "$STAGE"
 # restored.
 export VITE_AUTH_DISABLED="${VITE_AUTH_DISABLED:-true}"
 
+# Build identity (#458): this fork ships by ansible-pull with NO version bumps, so the
+# semver in package.json (1.36.3 across dozens of deploys) cannot tell an open tab that a
+# new build landed. Every deploy instead gets a unique identity — the git SHA it was
+# built from plus a build timestamp. It is stamped twice, from the SAME variables:
+#   1. Inlined into the client bundle via Vite `define` (see vite.config.js), so each
+#      bundle knows the SHA it was built from.
+#   2. Written to dist/build-info.json (below), which the server reads at startup and
+#      reports from /health. useVersionCheck compares the two; a mismatch means the tab
+#      is running an old bundle against a new server and gets a reload banner.
+export VITE_BUILD_SHA="${VITE_BUILD_SHA:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+export VITE_BUILT_AT="${VITE_BUILT_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+
 log "installing dependencies (npm ci)"
 # devDependencies are required: vite, typescript and tsc-alias all live there.
 #
@@ -85,6 +97,14 @@ npm ci --no-audit --no-fund
 
 log "building client -> staging (VITE_AUTH_DISABLED=${VITE_AUTH_DISABLED})"
 npx vite build --outDir "$STAGE/dist" --emptyOutDir
+
+log "writing build identity (sha=${VITE_BUILD_SHA}) -> staging"
+# The same SHA the client bundle inlined via Vite `define`. The server reads this at
+# startup and serves it from /health so an already-open tab can detect a new deploy
+# (#458). Written after vite so --emptyOutDir cannot delete it.
+cat > "$STAGE/dist/build-info.json" <<EOF
+{"sha":"${VITE_BUILD_SHA}","built_at":"${VITE_BUILT_AT}"}
+EOF
 
 log "precompressing client assets -> staging"
 # `npm run build:client` chains vite -> build:precompress, but the vite step above is
@@ -115,6 +135,7 @@ npx tsc-alias -p server/tsconfig.json --outDir "$STAGE/dist-server"
 # the repo-level shared/, which land side by side under dist-server/).
 for artifact in \
   "$STAGE/dist/index.html" \
+  "$STAGE/dist/build-info.json" \
   "$STAGE/dist-server/server/index.js" \
   "$STAGE/dist-server/server/shared/utils.js" \
   "$STAGE/dist-server/shared/networkHosts.js"
