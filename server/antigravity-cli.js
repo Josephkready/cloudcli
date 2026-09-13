@@ -86,6 +86,26 @@ export function resolveAntigravityPermissionArgs(permissionMode) {
   }
 }
 
+/**
+ * The effort tier to pass to `agy --effort`, or `undefined` to let `agy` decide.
+ *
+ * `agy` rejects an effort the chosen model does not offer, so the requested tier
+ * is only accepted when the model's catalog entry lists it. Mirrors
+ * `resolveClaudeEffort`/codex: the synthetic `'default'` and any unknown tier
+ * fall through to `undefined`.
+ *
+ * @param {string} model - the resolved base model (e.g. `gemini-3.8-flash`)
+ * @param {unknown} effort - the requested tier
+ * @param {{ OPTIONS?: Array<{ value: string, effort?: { values?: Array<{ value: string }> } }> }} modelsDefinition
+ */
+export function resolveAntigravityEffort(model, effort, modelsDefinition) {
+  const selectedModel = modelsDefinition?.OPTIONS?.find((option) => option.value === model) || null;
+  const allowedEfforts = selectedModel?.effort?.values?.map((value) => value.value) || [];
+  return typeof effort === 'string' && effort !== 'default' && allowedEfforts.includes(effort)
+    ? effort
+    : undefined;
+}
+
 function readString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
@@ -147,6 +167,7 @@ export async function spawnAntigravity(command, options = {}, writer) {
     projectPath,
     cwd,
     model,
+    effort,
     sessionSummary,
     permissionMode = 'default',
   } = options;
@@ -158,12 +179,27 @@ export async function spawnAntigravity(command, options = {}, writer) {
     model,
   );
 
+  // `agy` takes model and effort as separate flags but is strict: it rejects an
+  // effort tier the chosen model does not offer (e.g. `gemini-3.1-pro --effort
+  // medium`). So gate the requested tier against the model's catalog entry, the
+  // same way claude/codex do — an unsupported or 'default' tier is omitted and
+  // `agy` applies its own default. Only fetch the catalog when a real tier was
+  // requested, so ordinary sends don't pay for it.
+  let resolvedEffort;
+  if (typeof effort === 'string' && effort !== 'default' && effort.length > 0) {
+    const catalog = (await providerModelsService.getProviderModels('antigravity')).models;
+    resolvedEffort = resolveAntigravityEffort(resolvedModel, effort, catalog);
+  }
+
   const args = [];
   if (resumeConversationId) {
     args.push('--conversation', resumeConversationId);
   }
   if (resolvedModel) {
     args.push('--model', resolvedModel);
+  }
+  if (resolvedEffort) {
+    args.push('--effort', resolvedEffort);
   }
   args.push(...resolveAntigravityPermissionArgs(permissionMode));
   // `--print` consumes the following argument as its prompt, so every other
