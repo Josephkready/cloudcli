@@ -536,7 +536,8 @@ class SSEStreamWriter {
  * @param {string} effort - (Optional) Reasoning effort for providers/models that support it.
  *                          Claude supports: 'low', 'medium', 'high', 'xhigh', 'max' depending on model.
  *                          Codex supports: 'low', 'medium', 'high', 'xhigh'.
- *                          Antigravity does not expose a reasoning-effort option.
+ *                          Antigravity supports: 'low', 'medium', 'high' depending on model
+ *                          (Gemini families; Claude-on-Antigravity models take no effort).
  *                          'default' or omission lets the provider decide.
  *
  * @param {boolean} cleanup - (Optional) Auto-cleanup project directory after completion.
@@ -891,6 +892,7 @@ router.post('/', validateExternalApiKey, async (req, res) => {
         cwd: finalProjectPath,
         sessionId: sessionId || null,
         model: model || antigravityModels.DEFAULT,
+        effort,
         permissionMode: 'bypassPermissions'
       }, writer);
     } else if (provider === 'mock') {

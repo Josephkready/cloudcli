@@ -25,7 +25,7 @@ const modelDefinitions = {
   antigravity: {
     DEFAULT: 'gemini-test',
     OPTIONS: [
-      { value: 'gemini-test', label: 'Gemini Test' },
+      { value: 'gemini-test', label: 'Gemini Test', effort: { default: 'medium', values: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }] } },
       { value: 'gemini-alt', label: 'Gemini Alt' },
     ],
   },
@@ -58,7 +58,7 @@ async function providerApi(input: string, init?: RequestInit): Promise<Response>
         providers: [
           { provider: 'claude', permissionModes: ['default'], defaultPermissionMode: 'default', supportsEffort: true },
           { provider: 'codex', permissionModes: ['default'], defaultPermissionMode: 'default', supportsEffort: true },
-          { provider: 'antigravity', permissionModes: ['default', 'plan'], defaultPermissionMode: 'default', supportsEffort: false },
+          { provider: 'antigravity', permissionModes: ['default', 'plan'], defaultPermissionMode: 'default', supportsEffort: true },
         ],
       },
     });
@@ -305,7 +305,7 @@ describe('useChatProviderState — provider model catalog resilience', () => {
 });
 
 describe('useChatProviderState — Antigravity selectors', () => {
-  it('resets stale effort and exposes no effort options for Antigravity', async () => {
+  it('exposes effort options for Antigravity and preserves a supported stored effort', async () => {
     localStorage.setItem('antigravity-effort', 'high');
     const { result } = renderHook(() => useChatProviderState({
       selectedSession: null,
@@ -313,14 +313,29 @@ describe('useChatProviderState — Antigravity selectors', () => {
     }));
 
     await waitFor(() => expect(result.current.providerModelsLoading).toBe(false));
-    await waitFor(() => expect(localStorage.getItem('antigravity-effort')).toBe('default'));
 
     expect(result.current.provider).toBe('antigravity');
-    expect(result.current.currentProviderEffort).toBe('default');
-    expect(result.current.currentProviderEffortOptions).toEqual([]);
+    // The default model (gemini-test) supports low/medium/high, so the effort
+    // selector is populated and the valid stored tier is kept (#492).
+    expect(result.current.currentProviderEffortOptions).toEqual([{ value: 'low' }, { value: 'medium' }, { value: 'high' }]);
+    expect(result.current.currentProviderEffort).toBe('high');
+    expect(localStorage.getItem('antigravity-effort')).toBe('high');
   });
 
-  it('keeps effort disabled when provider capabilities cannot be loaded', async () => {
+  it('snaps a stored Antigravity effort the model does not support back to default', async () => {
+    localStorage.setItem('antigravity-effort', 'xhigh');
+    const { result } = renderHook(() => useChatProviderState({
+      selectedSession: null,
+      selectedProject: null,
+    }));
+
+    await waitFor(() => expect(result.current.providerModelsLoading).toBe(false));
+    // 'xhigh' isn't in gemini-test's tiers, so it reconciles to 'default'.
+    await waitFor(() => expect(localStorage.getItem('antigravity-effort')).toBe('default'));
+    expect(result.current.currentProviderEffort).toBe('default');
+  });
+
+  it('still offers Antigravity effort via the fallback tiers when capabilities cannot be loaded', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     localStorage.setItem('antigravity-effort', 'high');
     authenticatedFetch.mockImplementation(async (input: string, init?: RequestInit) => {
@@ -336,10 +351,12 @@ describe('useChatProviderState — Antigravity selectors', () => {
     }));
 
     await waitFor(() => expect(result.current.providerModelsLoading).toBe(false));
-    await waitFor(() => expect(localStorage.getItem('antigravity-effort')).toBe('default'));
 
-    expect(result.current.currentProviderEffort).toBe('default');
-    expect(result.current.currentProviderEffortOptions).toEqual([]);
+    // With capabilities unavailable, FALLBACK_PROVIDER_EFFORT_VALUES.antigravity
+    // keeps the effort selector working, and the loaded model's tiers drive the
+    // options, so a valid stored tier survives.
+    expect(result.current.currentProviderEffortOptions).toEqual([{ value: 'low' }, { value: 'medium' }, { value: 'high' }]);
+    expect(result.current.currentProviderEffort).toBe('high');
     expect(consoleError).toHaveBeenCalledWith(
       'Error loading provider capabilities:',
       expect.any(Error),
