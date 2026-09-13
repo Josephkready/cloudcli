@@ -20,7 +20,7 @@ import {
 const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
   claude: 'default',
   codex: 'gpt-5.4',
-  antigravity: 'gemini-3.6-flash-medium',
+  antigravity: 'gemini-3.8-flash-medium',
 };
 
 const PROVIDERS: LLMProvider[] = ['claude', 'codex', 'antigravity'];
