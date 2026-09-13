@@ -12,6 +12,22 @@ import {
   spawnAntigravity,
   terminateAntigravityChild,
 } from './antigravity-cli.js';
+import { providerModelsService } from './modules/providers/services/provider-models.service.js';
+
+// Drive spawnAntigravity's effort path with a deterministic catalog instead of
+// the real ~/.cloudcli-cached one, so the model/effort gating is hermetic.
+async function withStubbedAntigravityCatalog(models, fn) {
+  const origGetModels = providerModelsService.getProviderModels;
+  const origResolveModel = providerModelsService.resolveResumeModel;
+  providerModelsService.getProviderModels = async () => ({ models });
+  providerModelsService.resolveResumeModel = async (_provider, _sessionId, requested) => requested;
+  try {
+    await fn();
+  } finally {
+    providerModelsService.getProviderModels = origGetModels;
+    providerModelsService.resolveResumeModel = origResolveModel;
+  }
+}
 
 const findEnvKey = (name) =>
   Object.keys(process.env).find((key) => key.toLowerCase() === name.toLowerCase()) || name;
@@ -161,6 +177,64 @@ test('resolveAntigravityEffort only passes a tier the model actually supports', 
   assert.equal(resolveAntigravityEffort('gemini-3.8-flash', 'default', catalog), undefined);
   assert.equal(resolveAntigravityEffort('model-not-in-catalog', 'high', catalog), undefined);
   assert.equal(resolveAntigravityEffort('gemini-3.8-flash', undefined, catalog), undefined);
+});
+
+test('spawnAntigravity appends --effort for a tier the selected model supports', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    await withStubbedAntigravityCatalog(
+      {
+        OPTIONS: [{ value: 'gemini-x', label: 'Gemini X', effort: { default: 'medium', values: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }] } }],
+        DEFAULT: 'gemini-x',
+      },
+      async () => {
+        const capturePath = path.join(tempRoot, 'args.json');
+        process.env.AGY_ARGS_CAPTURE = capturePath;
+        const writer = createWriter();
+
+        await spawnAntigravity('Hi there', {
+          cwd: tempRoot,
+          model: 'gemini-x',
+          effort: 'high',
+          permissionMode: 'default',
+        }, writer);
+
+        const capture = JSON.parse(await readFile(capturePath, 'utf8'));
+        const modelIndex = capture.args.indexOf('--model');
+        assert.equal(capture.args[modelIndex + 1], 'gemini-x');
+        const effortIndex = capture.args.indexOf('--effort');
+        assert.notEqual(effortIndex, -1);
+        assert.equal(capture.args[effortIndex + 1], 'high');
+      },
+    );
+  });
+});
+
+test('spawnAntigravity drops --effort for a tier the selected model does not offer', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    await withStubbedAntigravityCatalog(
+      {
+        // gemini-x supports only low/high — requesting medium must not reach agy,
+        // which rejects an unsupported tier.
+        OPTIONS: [{ value: 'gemini-x', label: 'Gemini X', effort: { default: 'high', values: [{ value: 'low' }, { value: 'high' }] } }],
+        DEFAULT: 'gemini-x',
+      },
+      async () => {
+        const capturePath = path.join(tempRoot, 'args.json');
+        process.env.AGY_ARGS_CAPTURE = capturePath;
+        const writer = createWriter();
+
+        await spawnAntigravity('Hi there', {
+          cwd: tempRoot,
+          model: 'gemini-x',
+          effort: 'medium',
+          permissionMode: 'default',
+        }, writer);
+
+        const capture = JSON.parse(await readFile(capturePath, 'utf8'));
+        assert.equal(capture.args.includes('--effort'), false);
+      },
+    );
+  });
 });
 
 test('Antigravity abort escalates to SIGKILL when a child ignores SIGTERM', (t) => {

@@ -23,6 +23,16 @@ function withEnv(value: string | undefined, fn: () => void) {
   }
 }
 
+test('every provider reports reasoning-effort support (antigravity included, #492)', () => {
+  for (const provider of ['claude', 'codex', 'antigravity'] as const) {
+    assert.equal(
+      providerCapabilitiesService.getProviderCapabilities(provider).supportsEffort,
+      true,
+      `${provider} should report supportsEffort: true`,
+    );
+  }
+});
+
 test('defaults to the baked-in mode when the override env is unset', () => {
   withEnv(undefined, () => {
     assert.equal(
