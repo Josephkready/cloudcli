@@ -276,4 +276,14 @@ test('a cross-conversation search jump lands on and highlights the target messag
   // the match by DOM query.
   const target = page.locator('.chat-message', { hasText: fixture.searchTargetMessageText });
   await expect(target).toHaveClass(/search-highlight-flash/, { timeout: 60_000 });
+
+  // And that the render really did go flat, not merely wide enough to reach
+  // this particular row. Finding row 201 of 520 only proves a window of ~319+,
+  // so a regression that set some large-but-finite `visibleMessageCount`
+  // instead of `Infinity` would satisfy the highlight assertion above and
+  // nothing else. The deleted "Load all" test used to pin this with its own
+  // `mounted > 400`; since this is now the only path that requests the flat
+  // render, that assertion has to live here or nowhere.
+  const mounted = (await scrollMetrics(page.locator('.chat-messages-pane'))).mounted;
+  expect(mounted).toBeGreaterThan(400);
 });

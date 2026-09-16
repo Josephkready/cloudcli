@@ -305,6 +305,19 @@ for the re-render §4.2 measured) is the natural next diagnostic step, now that
 > doc's original point-in-time assessment and is intentionally left as
 > written rather than rewritten after the fact; read it as "true when this
 > was measured," not as a currently-accurate statement of `package.json`.
+>
+> **Update 2026-09-16:** #510 (cloudcli#495) removed the user-facing "Load
+> all" control entirely, along with the "Showing N of M" banner and the "Load
+> earlier messages" link — older messages now arrive only by scrolling. The
+> `visibleMessageCount = Infinity` flat render described below still exists,
+> but the in-conversation search jump is now its only trigger, so read "and
+> available to the user directly" as no longer true and the cited line numbers
+> as stale (that PR removed ~130 lines from `useChatSessionState.ts`). The
+> same PR also removed `content-visibility: auto` from `.chat-message`: it
+> collapsed off-screen rows to a fixed placeholder height and re-expanded them
+> on re-entry, which resized the content above a reader mid-scroll and was the
+> whole of #495 on iOS Safari (WebKit has no CSS scroll anchoring to absorb
+> it, unlike Chromium).
 
 `ChatMessagesPane` (`src/components/chat/view/subcomponents/ChatMessagesPane.tsx:260-305`)
 `.map()`s every item in `groupedVisibleMessages` into a fully-mounted,
@@ -421,7 +434,7 @@ bounded to the turn in progress and the messages actually on screen.
 | A1 | Stop `PrismCodeBlock` re-highlighting when its `code`/`language`/`isDarkMode` props haven't changed (`React.memo`, all-primitive props — no custom comparator needed). | `src/shared/markdown/PrismCodeBlock.tsx` | Directly targets §4.2, the largest single measured cost (27% of sampled CPU time in this assessment's profile, ~6x the next-largest app-code contributor) | **XS** — one component, three primitive props, default shallow memo is exactly correct |
 | A2 | Make `normalizedToChatMessages` incremental: memoize the conversion per source `NormalizedMessage` (id-keyed cache) so only messages whose underlying row actually changed get reconverted, instead of rebuilding the whole array every tick. | `src/components/chat/hooks/useChatMessages.ts` | Reduces how often *any* message's props look "new" to React — the likely reason §4.2's re-renders happen as often as they do | M — touches a function with real cross-cutting correctness rules (multi-file-patch tool grouping, pagination-boundary tool-result attachment, subagent containers) that must be preserved incrementally, not just fast |
 | A3 | Once A2 returns stable identities for unchanged messages, shrink `stabilizeMessageIdentities`'s job to a cheap no-op check (`===`) instead of a full recursive `valuesEqual` walk. | `src/components/chat/utils/messageIdentity.ts` | Removes the second O(n) pass in §4.3 | S, once A2 lands |
-| A4 | Virtualize the transcript (windowing library or a hand-rolled variable-height virtualizer) so off-screen messages are unmounted, particularly for "Load all" sessions. | `src/components/chat/view/subcomponents/ChatMessagesPane.tsx` | Bounds §4.4's DOM/layout cost as conversations grow past hundreds of rows | M-L — interacts with existing scroll-restore math (`scrollRestore.ts`) and pagination, which currently assume real DOM heights |
+| A4 | Virtualize the transcript (windowing library or a hand-rolled variable-height virtualizer) so off-screen messages are unmounted, particularly for the full-thread render a search jump triggers (the user-facing "Load all" control was removed in #510). | `src/components/chat/view/subcomponents/ChatMessagesPane.tsx` | Bounds §4.4's DOM/layout cost as conversations grow past hundreds of rows | M-L — interacts with existing scroll-restore math (`scrollRestore.ts`) and pagination, which currently assume real DOM heights |
 | A5 | Bound the streaming message's markdown re-parse cost for very long single replies (e.g., render the settled prefix as static HTML/plain text and only re-parse the growing tail), instead of re-parsing the full accumulated string every tick. | `src/components/chat/view/subcomponents/Markdown.tsx` | Prevents the *reply's own* growth from becoming quadratic, independent of §4.2-4.3 | L — correctness-sensitive (mid-fence code blocks, tables); the file already has a working pattern to borrow from in `createMermaidFenceGate`/`isFenceComplete` |
 | A6 | Add rendering-behavior tests (render-count / re-render assertions, including "a code block does not re-highlight when its message is unchanged") for `MessageComponent`, `PrismCodeBlock`, and `ChatMessagesPane`, alongside A2-A4, given §4.7's coverage gap. | `src/components/chat/**`, `src/shared/markdown/**` | Lowers regression risk on the exact area being changed | S-M |
 

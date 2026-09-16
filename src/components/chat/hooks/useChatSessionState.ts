@@ -385,6 +385,13 @@ export function useChatSessionState({
       if (!hasMoreMessages || !selectedSession || !selectedProject) return false;
 
       isLoadingMoreRef.current = true;
+      // The ref guards re-entrancy; this state is what the transcript renders
+      // the "loading older messages" indicator from. The setter was never
+      // called, so the flag sat at `false` for the life of the session and the
+      // indicator could not appear no matter how long a page took — leaving a
+      // scroll that had silently reached the network looking identical to one
+      // that had simply stopped (cloudcli#510 review).
+      setIsLoadingMoreMessages(true);
       const previousScrollHeight = container.scrollHeight;
       const previousScrollTop = container.scrollTop;
 
@@ -392,6 +399,10 @@ export function useChatSessionState({
         const slot = await sessionStore.fetchMore(selectedSession.id, {
           limit: MESSAGES_PER_PAGE,
         });
+        // Also the failure path: `fetchMore` returns null when the request
+        // threw. Returning false here leaves `hasMoreMessages`, the visible
+        // window and the caller's top-load lock untouched, so the next scroll
+        // retries instead of the pane concluding it has reached the top.
         if (!slot) return false;
         if (slot.serverMessages.length === 0) {
           if (!slot.hasMore) {
@@ -418,6 +429,7 @@ export function useChatSessionState({
         return true;
       } finally {
         isLoadingMoreRef.current = false;
+        setIsLoadingMoreMessages(false);
       }
     },
     [hasMoreMessages, isLoadingMoreMessages, selectedProject, selectedSession, sessionStore],
@@ -980,6 +992,13 @@ export function useChatSessionState({
     sessionLoadFailed,
     retryLoadSession,
     isLoadingMoreMessages,
+    // `hasMoreMessages` and `totalMessages` are still maintained, and both
+    // currently have no consumer: the "Showing N of M messages" banner that
+    // read them was removed with the rest of the manual load controls
+    // (cloudcli#495). Kept rather than deleted because they are plain facts
+    // about the session the hook already tracks for its own paging decisions —
+    // `hasMoreMessages` gates `loadOlderMessages` — and re-deriving them later
+    // would mean re-threading seven call sites.
     hasMoreMessages,
     totalMessages,
     isUserScrolledUp,

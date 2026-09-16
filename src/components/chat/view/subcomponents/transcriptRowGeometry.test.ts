@@ -29,6 +29,18 @@ import assert from 'node:assert/strict';
  * under a thumb on a real phone. `e2e/transcript-scroll-stability.spec.ts`
  * measures the behaviour itself; this names the cause so the next reader does
  * not have to re-derive it.
+ *
+ * What it does NOT cover, deliberately, because it reads one authored
+ * stylesheet as text:
+ *   - an inline `style={{ contentVisibility: 'auto' }}` on the row element,
+ *   - a Tailwind arbitrary-value utility (`[content-visibility:auto]`), which
+ *     is authored in a `className` and never appears in this file,
+ *   - a rule in some second stylesheet, since the path below is hardcoded.
+ * All three are low-probability today — the repo has exactly one CSS file and
+ * this rule was authored here — but a reader treating a green run as proof
+ * that the property is absent from the transcript should know the limits.
+ * The e2e measurement is what catches those; this catches the cheap case
+ * early and explains why it matters.
  */
 test('.chat-message does not make its height depend on visibility', () => {
   const cssPath = path.join(process.cwd(), 'src', 'index.css');

@@ -53,7 +53,6 @@ vi.mock('./ToolGroupContainer', () => ({
   ),
 }));
 
-vi.mock('./LoadAllMessagesOverlay', () => ({ default: () => null }));
 vi.mock('./ProviderSelectionEmptyState', () => ({ default: () => null }));
 
 const project = { projectId: 'p1', displayName: 'proj', fullPath: '/tmp/proj' } as unknown as Project;
@@ -269,5 +268,57 @@ describe('ChatMessagesPane virtualization (cloudcli#483 phase 2)', () => {
     // `keep-1`'s prevMessage is now `older-2`, not null — proves the reorder
     // recomputed prevMessage by position rather than caching the original.
     expect(rows[2]).toHaveAttribute('data-prev-id', 'older-2');
+  });
+
+  /*
+   * The "loading older messages" indicator must never change the scrolled
+   * content's height (cloudcli#495).
+   *
+   * It is the last thing left at the top of the transcript, and its
+   * predecessors — a "Load all messages" pill, a "Showing N of M" banner, a
+   * "Load earlier" link — were removed precisely because they mounted and
+   * unmounted mid-scroll and shoved the transcript by ~40px while the reader
+   * was reading it. This indicator avoids that by being *always mounted* and
+   * `h-0`: only its contents and `aria-hidden` change.
+   *
+   * Asserted structurally because the regression has no other symptom. Wrap
+   * the wrapper in a conditional again and the indicator still looks and
+   * behaves correctly in every screenshot — the cost only appears as the
+   * transcript lurching under a thumb on a real phone.
+   */
+  describe('loading-older-messages indicator', () => {
+    const renderPane = (props: { isLoadingMoreMessages: boolean; allMessagesLoaded: boolean }) => {
+      const messages = [makeMessage('m1'), makeMessage('m2')];
+      return render(
+        <ChatMessagesPane
+          {...baseProps}
+          scrollContainerRef={createRef<HTMLDivElement>()}
+          chatMessages={messages}
+          visibleMessages={messages}
+          visibleMessageCount={Infinity}
+          {...props}
+        />,
+      );
+    };
+
+    /** The always-mounted sticky wrapper, whatever it currently contains. */
+    const wrapper = (container: HTMLElement) => container.querySelector('.sticky');
+
+    for (const isLoadingMoreMessages of [false, true]) {
+      for (const allMessagesLoaded of [false, true]) {
+        it(`reserves no height and stays mounted (loading=${isLoadingMoreMessages}, allLoaded=${allMessagesLoaded})`, () => {
+          const { container } = renderPane({ isLoadingMoreMessages, allMessagesLoaded });
+
+          const element = wrapper(container);
+          expect(element).not.toBeNull();
+          expect(element?.className).toContain('h-0');
+
+          // Visible only while a page is genuinely in flight.
+          const shouldShow = isLoadingMoreMessages && !allMessagesLoaded;
+          expect(element?.getAttribute('aria-hidden')).toBe(String(!shouldShow));
+          expect(element?.textContent?.length ? true : false).toBe(shouldShow);
+        });
+      }
+    }
   });
 });

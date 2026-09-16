@@ -185,7 +185,15 @@ export function useSessionStore() {
       return slot;
     } catch (error) {
       console.error(`[SessionStore] fetchMore failed for ${sessionId}:`, error);
-      return slot;
+      // `null`, not the slot. Returning the slot made a failed page look exactly
+      // like a successful one — same object, same `hasMore`, just no new
+      // messages — so the caller advanced its window and latched its
+      // "already paged here" lock as though history had arrived, and the
+      // reader's scroll silently stopped producing older messages with no
+      // error and nothing to retry. `null` is the caller's existing signal for
+      // "no page", which it already handles by leaving all of that untouched,
+      // so the next scroll tries again (cloudcli#510 review).
+      return null;
     }
   }, [getSlot, notify]);
 
