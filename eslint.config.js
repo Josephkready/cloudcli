@@ -160,6 +160,7 @@ export default tseslint.config(
           pattern: [
             "server/shared/utils.{js,ts}",
             "server/shared/frontmatter.ts",
+            "server/shared/jsonl.ts",
             "server/shared/claude-cli-path.ts",
             "server/shared/project-exclude.ts",
             "server/shared/router-basename.ts",

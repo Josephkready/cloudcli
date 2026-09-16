@@ -1,9 +1,8 @@
 import fsp from 'node:fs/promises';
-import readline from 'node:readline';
-import fs from 'node:fs';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import { resolveClaudeJsonlPath } from '@/modules/providers/list/claude/claude-sessions.provider.js';
+import { iterateJsonlLines, streamJsonlEntries } from '@/shared/jsonl.js';
 import { readFileTail } from '@/shared/utils.js';
 
 /**
@@ -96,18 +95,9 @@ const USAGE_SCAN_TAIL_BYTES = 256 * 1024;
 function findLatestAssistantUsage(lines: string[]): AssistantUsage | null {
   // Backwards: the newest usage record wins, so the first hit from the end is
   // the answer and there is no reason to parse the rest.
-  for (let index = lines.length - 1; index >= 0; index--) {
-    const line = lines[index];
-    if (!line.trim()) {
-      continue;
-    }
-    try {
-      const entry = JSON.parse(line);
-      if (entry?.type === 'assistant' && entry.message?.usage) {
-        return entry.message.usage as AssistantUsage;
-      }
-    } catch {
-      // Skip malformed lines that can happen during concurrent writes.
+  for (const entry of iterateJsonlLines(lines, { fromEnd: true })) {
+    if (entry?.type === 'assistant' && entry.message?.usage) {
+      return entry.message.usage as AssistantUsage;
     }
   }
   return null;
@@ -164,22 +154,12 @@ async function readLatestAssistantUsage(filePath: string): Promise<AssistantUsag
     );
   }
 
-  const fileStream = fs.createReadStream(filePath);
-  const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-
   let latestUsage: AssistantUsage | null = null;
-  for await (const line of rl) {
-    if (!line.trim()) {
-      continue;
-    }
-
-    try {
-      const entry = JSON.parse(line);
-      if (entry?.type === 'assistant' && entry.message?.usage) {
-        latestUsage = entry.message.usage as AssistantUsage;
-      }
-    } catch {
-      // Skip malformed lines that can happen during concurrent writes.
+  // No body-level catch here: the only work is two optional-chained reads, which
+  // cannot throw for any value 'JSON.parse' can produce.
+  for await (const entry of streamJsonlEntries(filePath)) {
+    if (entry?.type === 'assistant' && entry.message?.usage) {
+      latestUsage = entry.message.usage as AssistantUsage;
     }
   }
 

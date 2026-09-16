@@ -1,6 +1,5 @@
 import fsSync, { promises as fsPromises } from 'node:fs';
 import path from 'node:path';
-import readline from 'node:readline';
 
 import { spawn } from 'cross-spawn';
 import { rgPath } from '@vscode/ripgrep';
@@ -21,6 +20,7 @@ import {
   parseClaudeLocalCommandPayload,
   stripAnsiFormatting,
 } from '@/modules/providers/shared/transcript/transcript-text.js';
+import { streamJsonlEntries } from '@/shared/jsonl.js';
 import { mapWithConcurrency } from '@/shared/utils.js';
 
 type AnyRecord = Record<string, any>;
@@ -907,23 +907,11 @@ async function parseClaudeSessionMatches(
     let currentSessionId: string | null = null;
 
     try {
-      const fileStream = fsSync.createReadStream(session.jsonl_path);
-      const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+      const entries = streamJsonlEntries<AnyRecord>(session.jsonl_path, {
+        shouldStop: () => runtime.totalMatches >= runtime.limit || runtime.isAborted(),
+      });
 
-      for await (const line of rl) {
-        if (runtime.totalMatches >= runtime.limit || runtime.isAborted()) {
-          break;
-        }
-        if (!line.trim()) {
-          continue;
-        }
-
-        let entry: AnyRecord;
-        try {
-          entry = JSON.parse(line) as AnyRecord;
-        } catch {
-          continue;
-        }
+      for await (const entry of entries) {
 
         if (entry.sessionId) {
           currentSessionId = String(entry.sessionId);
@@ -1028,23 +1016,11 @@ async function parseCodexSessionMatches(
   const seenMessageFingerprints = new Set<string>();
 
   try {
-    const fileStream = fsSync.createReadStream(session.jsonl_path);
-    const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+    const entries = streamJsonlEntries<AnyRecord>(session.jsonl_path, {
+      shouldStop: () => runtime.totalMatches >= runtime.limit || runtime.isAborted(),
+    });
 
-    for await (const line of rl) {
-      if (runtime.totalMatches >= runtime.limit || runtime.isAborted()) {
-        break;
-      }
-      if (!line.trim()) {
-        continue;
-      }
-
-      let entry: AnyRecord;
-      try {
-        entry = JSON.parse(line) as AnyRecord;
-      } catch {
-        continue;
-      }
+    for await (const entry of entries) {
 
       let text: string | null = null;
       let role: 'user' | 'assistant' | null = null;
@@ -1135,23 +1111,11 @@ async function parseAntigravitySessionMatches(
   let latestUserMessageText: string | null = null;
 
   try {
-    const fileStream = fsSync.createReadStream(session.jsonl_path);
-    const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+    const entries = streamJsonlEntries<AnyRecord>(session.jsonl_path, {
+      shouldStop: () => runtime.totalMatches >= runtime.limit || runtime.isAborted(),
+    });
 
-    for await (const line of rl) {
-      if (runtime.totalMatches >= runtime.limit || runtime.isAborted()) {
-        break;
-      }
-      if (!line.trim()) {
-        continue;
-      }
-
-      let entry: AnyRecord;
-      try {
-        entry = JSON.parse(line) as AnyRecord;
-      } catch {
-        continue;
-      }
+    for await (const entry of entries) {
 
       const source = typeof entry.source === 'string' ? entry.source : '';
       const type = typeof entry.type === 'string' ? entry.type : '';
