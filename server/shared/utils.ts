@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import fs from 'node:fs';
 import type { Dirent } from 'node:fs';
 import {
   access,
@@ -15,11 +14,11 @@ import {
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import readline from 'node:readline';
 
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
 import { parseFrontMatter } from '@/shared/frontmatter.js';
+import { streamJsonlEntries } from '@/shared/jsonl.js';
 import type {
   AnyRecord,
   ApiSuccessShape,
@@ -1590,21 +1589,7 @@ export async function buildLookupMap(
   const lookup = new Map<string, string>();
 
   try {
-    const fileStream = fs.createReadStream(filePath);
-    const lineReader = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-
-    for await (const line of lineReader) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        continue;
-      }
-
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(trimmed) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
+    for await (const parsed of streamJsonlEntries<Record<string, unknown>>(filePath)) {
       const key = parsed[keyField];
       const value = parsed[valueField];
 
@@ -1631,24 +1616,19 @@ export async function extractFirstValidJsonlData<T>(
   extractor: (parsedJson: unknown) => T | null | undefined
 ): Promise<T | null> {
   try {
-    const fileStream = fs.createReadStream(filePath);
-    const lineReader = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-
-    for await (const line of lineReader) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        continue;
-      }
-
+    for await (const parsed of streamJsonlEntries(filePath)) {
       let extracted: T | null | undefined;
       try {
-        extracted = extractor(JSON.parse(trimmed));
+        extracted = extractor(parsed);
       } catch {
+        // A caller-supplied extractor that throws on one row must not abort
+        // the scan -- the pre-extraction loop swallowed this the same way.
         continue;
       }
       if (extracted) {
-        lineReader.close();
-        fileStream.close();
+        // Returning out of the loop runs the generator finally, which closes
+        // the reader and destroys the stream. That replaces the manual
+        // close/close pair this used to need.
         return extracted;
       }
     }

@@ -1,6 +1,3 @@
-import fsSync from 'node:fs';
-import readline from 'node:readline';
-
 import { sessionsDb } from '@/modules/database/index.js';
 import { toImageAttachments } from '@/shared/image-attachments.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
@@ -15,6 +12,7 @@ import {
   sliceTailPage,
 } from '@/shared/utils.js';
 import { isVisibleCodexUserMessage } from '@/modules/providers/shared/transcript/transcript-text.js';
+import { streamJsonlEntries } from '@/shared/jsonl.js';
 
 import { parseApplyPatch } from './apply-patch.js';
 
@@ -158,20 +156,9 @@ async function getCodexSessionMessages(
         }
       }
     };
-    const fileStream = fsSync.createReadStream(sessionFilePath);
-    const rl = readline.createInterface({
-      input: fileStream,
-      crlfDelay: Infinity,
-    });
-
-    for await (const line of rl) {
-      if (!line.trim()) {
-        continue;
-      }
-
+    for await (const entry of streamJsonlEntries<AnyRecord>(sessionFilePath)) {
+      // Keeps the body half of the original per-line catch.
       try {
-        const entry = JSON.parse(line) as AnyRecord;
-
         if (entry.type === 'event_msg' && entry.payload?.type === 'token_count' && entry.payload?.info) {
           const info = entry.payload.info as AnyRecord;
           if (info.total_token_usage) {

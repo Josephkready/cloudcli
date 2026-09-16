@@ -1,3 +1,5 @@
+import { iterateJsonlLines } from '@/shared/jsonl.js';
+
 // Pure session-title selection logic, kept DB-free so it unit-tests without the
 // database/native-module import chain. The Claude session synchronizer reads a
 // transcript file and defers both the scan and the choice to this module.
@@ -27,20 +29,7 @@ export function extractTitleCandidatesFromLines(
 ): SessionTitleCandidates {
   const candidates: SessionTitleCandidates = {};
 
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index]?.trim();
-    if (!line) {
-      continue;
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
-
-    const data = parsed as Record<string, unknown>;
+  for (const data of iterateJsonlLines<Record<string, unknown>>(lines, { fromEnd: true })) {
     if (data.sessionId !== sessionId) {
       continue;
     }

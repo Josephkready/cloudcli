@@ -3,6 +3,7 @@ import path from 'node:path';
 import { stat } from 'node:fs/promises';
 
 import { sessionsDb } from '@/modules/database/index.js';
+import { iterateJsonlLines } from '@/shared/jsonl.js';
 import { shouldExcludeProjectPath } from '@/shared/project-exclude.js';
 import {
   buildLookupMap,
@@ -239,20 +240,7 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
    * never mistaken for the user's prompt.
   */
   private extractFirstUserMessageFromStart(content: string): string | undefined {
-    for (const rawLine of content.split(/\r?\n/)) {
-      const line = rawLine.trim();
-      if (!line) {
-        continue;
-      }
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        continue;
-      }
-
-      const data = parsed as Record<string, unknown>;
+    for (const data of iterateJsonlLines<Record<string, unknown>>(content.split(/\r?\n/))) {
       const eventType = typeof data.type === 'string' ? data.type : undefined;
       const payload = data.payload as Record<string, unknown> | undefined;
       const payloadType = typeof payload?.type === 'string' ? payload.type : undefined;
@@ -268,20 +256,7 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
   private extractLastAgentMessageFromEnd(content: string): string | undefined {
     const lines = content.split(/\r?\n/);
 
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      const line = lines[index]?.trim();
-      if (!line) {
-        continue;
-      }
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        continue;
-      }
-
-      const data = parsed as Record<string, unknown>;
+    for (const data of iterateJsonlLines<Record<string, unknown>>(lines, { fromEnd: true })) {
       const eventType = typeof data.type === 'string' ? data.type : undefined;
       const payload = data.payload as Record<string, unknown> | undefined;
       const payloadType = typeof payload?.type === 'string' ? payload.type : undefined;

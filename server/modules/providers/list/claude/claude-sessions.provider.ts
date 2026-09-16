@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import readline from 'node:readline';
 
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
@@ -16,6 +15,7 @@ import {
   sliceTailPage,
 } from '@/shared/utils.js';
 import { sessionsDb } from '@/modules/database/index.js';
+import { streamJsonlEntries } from '@/shared/jsonl.js';
 import {
   buildClaudeLocalCommandDisplayText,
   extractTaggedContent,
@@ -109,20 +109,10 @@ async function parseAgentTools(filePath: string): Promise<AnyRecord[]> {
   const tools: AnyRecord[] = [];
 
   try {
-    const fileStream = fs.createReadStream(filePath);
-    const rl = readline.createInterface({
-      input: fileStream,
-      crlfDelay: Infinity,
-    });
-
-    for await (const line of rl) {
-      if (!line.trim()) {
-        continue;
-      }
-
+    for await (const entry of streamJsonlEntries<AnyRecord>(filePath)) {
+      // The pre-extraction loop caught parse *and* body errors per line. The
+      // generator handles the parse, so this keeps the body half of that.
       try {
-        const entry = JSON.parse(line) as AnyRecord;
-
         if (entry.message?.role === 'assistant' && Array.isArray(entry.message?.content)) {
           for (const part of entry.message.content as AnyRecord[]) {
             if (part.type === 'tool_use') {
@@ -201,19 +191,10 @@ async function getSessionMessages(
     });
     let visibleTotal = 0;
 
-    const fileStream = fs.createReadStream(jsonLPath);
-    const rl = readline.createInterface({
-      input: fileStream,
-      crlfDelay: Infinity,
-    });
-
-    for await (const line of rl) {
-      if (!line.trim()) {
-        continue;
-      }
-
+    for await (const entry of streamJsonlEntries<AnyRecord>(jsonLPath)) {
+      // Keeps the body half of the original per-line catch: `normalize` is
+      // provider-supplied, so one bad row must not abort the whole history.
       try {
-        const entry = JSON.parse(line) as AnyRecord;
         if (entry.sessionId === providerSessionId) {
           for (const message of normalize(entry)) {
             collector.add(message);

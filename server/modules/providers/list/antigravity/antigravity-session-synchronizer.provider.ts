@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
+import { iterateJsonlLines } from '@/shared/jsonl.js';
 import { shouldExcludeProjectPath } from '@/shared/project-exclude.js';
 import {
   findFilesRecursivelyModifiedAfter,
@@ -158,18 +159,10 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
   ): Promise<{ projectPath?: string; sessionName?: string } | null> {
     try {
       const lines = (await readFile(this.historyPath, 'utf8')).split(/\r?\n/);
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const line = lines[index]?.trim();
-        if (!line) {
-          continue;
-        }
-        let entry: Record<string, unknown> | null;
-        try {
-          entry = readObjectRecord(JSON.parse(line));
-        } catch {
-          // The history can be observed while agy is appending a partial line.
-          continue;
-        }
+      // The history can be observed while agy is appending a partial line;
+      // iterateJsonlLines skips those.
+      for (const parsed of iterateJsonlLines(lines, { fromEnd: true })) {
+        const entry = readObjectRecord(parsed);
         if (readOptionalString(entry?.conversationId) !== sessionId) {
           continue;
         }
