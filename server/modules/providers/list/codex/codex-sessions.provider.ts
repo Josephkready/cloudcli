@@ -14,6 +14,7 @@ import {
   readObjectRecord,
   sliceTailPage,
 } from '@/shared/utils.js';
+import { isVisibleCodexUserMessage } from '@/modules/providers/shared/transcript/transcript-text.js';
 
 import { parseApplyPatch } from './apply-patch.js';
 
@@ -66,18 +67,6 @@ type CodexHistoryResult = {
   limit: number | null;
   tokenUsage?: unknown;
 };
-
-function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boolean {
-  if (!payload || payload.type !== 'user_message') {
-    return false;
-  }
-
-  if (payload.kind && payload.kind !== 'plain') {
-    return false;
-  }
-
-  return typeof payload.message === 'string' && payload.message.trim().length > 0;
-}
 
 /**
  * Reads the image attachments Codex records on `user_message` events.

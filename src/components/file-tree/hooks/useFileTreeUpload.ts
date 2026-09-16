@@ -38,7 +38,8 @@ type UploadResponse = {
 const COMPLETE_PROGRESS_CLEAR_DELAY_MS = 1400;
 const ERROR_PROGRESS_CLEAR_DELAY_MS = 3200;
 
-const pluralizeFiles = (count: number) => (count === 1 ? 'file' : 'files');
+/** Shared with the progress banner so the two never disagree on the noun. */
+export const pluralizeFiles = (count: number) => (count === 1 ? 'file' : 'files');
 
 const getRelativePath = (file: File) => {
   const fileWithRelativePath = file as File & { webkitRelativePath?: string };

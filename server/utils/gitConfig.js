@@ -1,18 +1,4 @@
-// cross-spawn: drop-in spawn with Windows .cmd/PATHEXT resolution.
-import spawn from 'cross-spawn';
-
-function spawnAsync(command, args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { shell: false });
-    let stdout = '';
-    child.stdout.on('data', (data) => { stdout += data.toString(); });
-    child.on('error', (error) => { reject(error); });
-    child.on('close', (code) => {
-      if (code === 0) { resolve({ stdout }); return; }
-      reject(new Error(`Command failed with code ${code}`));
-    });
-  });
-}
+import { spawnAsync } from './spawnAsync.js';
 
 /**
  * Read git configuration from system's global git config

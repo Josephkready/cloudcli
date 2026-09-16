@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 
 import { cn } from '../../../lib/utils';
 import { recordFeatureUse } from '../../../utils/featureUsage';
+import { formatFileSize } from '../../../utils/formatBytes';
 import {
   Badge,
   Button,
@@ -93,18 +94,6 @@ const groupSkillsByScope = (skills: ProviderSkill[]): Array<{ scope: SkillsScope
     .map((scope) => ({ scope, skills: skills.filter((skill) => skill.scope === scope) }))
     .filter((group) => group.skills.length > 0)
 );
-
-const formatFileSize = (size: number): string => {
-  if (size < 1024) {
-    return `${size} B`;
-  }
-
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-};
 
 const getBrowserRelativePath = (file: File): string => {
   const fileWithRelativePath = file as File & {

@@ -8,7 +8,9 @@ import { WebSocket, type RawData } from 'ws';
 import { isReservedDotOnlyId } from '@/shared/session-id-guards.js';
 import {
   buildProviderCliEnv,
+  getPathEnvKey,
   parseIncomingJsonObject,
+  readEnvValue,
   resolveProviderCliExecutable,
 } from '@/shared/utils.js';
 
@@ -218,15 +220,6 @@ export function buildShellCommand(
     return `claude --resume "${resumeSessionId}" || claude`;
   }
   return command;
-}
-
-function readEnvValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
-  const resolvedKey = Object.keys(env).find((envKey) => envKey.toLowerCase() === key.toLowerCase());
-  return resolvedKey ? env[resolvedKey] : undefined;
-}
-
-function getPathEnvKey(env: NodeJS.ProcessEnv): string {
-  return Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH';
 }
 
 function prioritizeUserNpmGlobalBin(env: NodeJS.ProcessEnv): { key: string; value: string | undefined } {

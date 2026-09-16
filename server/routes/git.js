@@ -1,51 +1,13 @@
 import express from 'express';
-// cross-spawn: drop-in spawn with Windows .cmd/PATHEXT resolution.
-import spawn from 'cross-spawn';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { projectsDb } from '../modules/database/index.js';
 import { queryClaudeSDK } from '../claude-sdk.js';
+import { spawnAsync } from '../utils/spawnAsync.js';
 import { ResponseCollector } from './response-collector.js';
 
 const router = express.Router();
 const COMMIT_DIFF_CHARACTER_LIMIT = 500_000;
-
-function spawnAsync(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      ...options,
-      shell: false,
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    child.on('error', (error) => {
-      reject(error);
-    });
-
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-        return;
-      }
-
-      const error = new Error(`Command failed: ${command} ${args.join(' ')}`);
-      error.code = code;
-      error.stdout = stdout;
-      error.stderr = stderr;
-      reject(error);
-    });
-  });
-}
 
 // Input validation helpers (defense-in-depth)
 function validateCommitRef(commit) {

@@ -137,3 +137,64 @@ test('the search overlay prompts for input before running a full-text search', (
     'expected the full-text search prompt',
   );
 });
+
+/*
+ * The archived rows used to compute their age from a live `Date.now()` inside a
+ * local helper. They now go through the shared `formatCompactAgeFromDate` and
+ * read `projectListProps.currentTime` — the same 60s-ticked clock every other
+ * sidebar row already used — so the whole list advances together.
+ *
+ * `currentTime` here is pinned to a fixed instant far from wall-clock: if the
+ * row ever went back to reading the real clock, the rendered age would be the
+ * years between then and now, never "3hr".
+ */
+test('archived session ages come from the injected clock, not the wall clock', () => {
+  const currentTime = new Date('2026-07-16T12:00:00Z');
+  const markup = render({
+    sidebarOverlay: 'archived',
+    archivedSessions: [
+      {
+        sessionId: 'archived-1',
+        provider: 'claude',
+        projectId: 'proj-1',
+        projectPath: '/tmp/proj-1',
+        projectDisplayName: 'proj-1',
+        sessionTitle: 'An archived conversation',
+        createdAt: '2026-07-16T06:00:00Z',
+        updatedAt: '2026-07-16T09:00:00Z',
+        lastActivity: '2026-07-16T09:00:00Z',
+        isProjectArchived: false,
+      },
+    ],
+    archivedSessionsCount: 1,
+    projectListProps: { ...projectListProps, currentTime },
+  });
+
+  assert.ok(markup.includes('An archived conversation'), 'expected the archived row to render');
+  assert.ok(markup.includes('>3hr<'), 'expected the age measured against the injected currentTime');
+});
+
+test('an archived session with no lastActivity renders no age instead of a blank badge', () => {
+  const markup = render({
+    sidebarOverlay: 'archived',
+    archivedSessions: [
+      {
+        sessionId: 'archived-2',
+        provider: 'claude',
+        projectId: 'proj-1',
+        projectPath: '/tmp/proj-1',
+        projectDisplayName: 'proj-1',
+        sessionTitle: 'Never active',
+        createdAt: null,
+        updatedAt: null,
+        lastActivity: null,
+        isProjectArchived: false,
+      },
+    ],
+    archivedSessionsCount: 1,
+    projectListProps: { ...projectListProps, currentTime: new Date('2026-07-16T12:00:00Z') },
+  });
+
+  assert.ok(markup.includes('Never active'), 'expected the archived row to render');
+  assert.ok(!markup.includes('>3hr<'), 'no age should be derived from a null lastActivity');
+});

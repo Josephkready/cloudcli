@@ -13,6 +13,14 @@ import {
   isAgentAuthoredUserTurn,
   isInternalContent as isClaudeInternalContent,
 } from '@/modules/providers/list/claude/claude-sessions.provider.js';
+import {
+  buildClaudeLocalCommandDisplayText,
+  escapeRegex,
+  extractTaggedContent,
+  isVisibleCodexUserMessage,
+  parseClaudeLocalCommandPayload,
+  stripAnsiFormatting,
+} from '@/modules/providers/shared/transcript/transcript-text.js';
 import { mapWithConcurrency } from '@/shared/utils.js';
 
 type AnyRecord = Record<string, any>;
@@ -202,10 +210,6 @@ export function isInternalCodexContent(content: string): boolean {
   return CODEX_INTERNAL_CONTENT_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 function createWordMatcher(
   rawQuery: string,
   words: string[],
@@ -334,50 +338,6 @@ function extractClaudeText(content: unknown): string {
     .join(' ');
 }
 
-function extractTaggedContent(content: string, tagName: string): string | null {
-  const escapedTagName = tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = new RegExp(`<${escapedTagName}>([\\s\\S]*?)<\\/${escapedTagName}>`).exec(content);
-  return match ? match[1] : null;
-}
-
-type ClaudeLocalCommandPayload = {
-  commandName: string;
-  commandMessage: string;
-  commandArgs: string;
-};
-
-function parseClaudeLocalCommandPayload(content: string): ClaudeLocalCommandPayload | null {
-  const commandName = extractTaggedContent(content, 'command-name');
-  const commandMessage = extractTaggedContent(content, 'command-message');
-  const commandArgs = extractTaggedContent(content, 'command-args');
-
-  if (commandName === null && commandMessage === null && commandArgs === null) {
-    return null;
-  }
-
-  return {
-    commandName: commandName ?? '',
-    commandMessage: commandMessage ?? '',
-    commandArgs: commandArgs ?? '',
-  };
-}
-
-function buildClaudeLocalCommandDisplayText(payload: ClaudeLocalCommandPayload): string {
-  const commandName = payload.commandName.trim();
-  const commandMessage = payload.commandMessage.trim();
-  const commandArgs = payload.commandArgs.trim();
-  const baseCommand = commandName || commandMessage;
-
-  if (!baseCommand) {
-    return '';
-  }
-
-  return commandArgs ? `${baseCommand} ${commandArgs}` : baseCommand;
-}
-
-function stripAnsiFormatting(text: string): string {
-  return text.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, '');
-}
 
 type ClaudeSearchableMessage = {
   text: string;
@@ -1057,18 +1017,6 @@ async function parseClaudeSessionMatches(
   }
 
   return runtime.claudeFileResultsCache.get(fileKey)?.get(session.session_id) ?? null;
-}
-
-function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boolean {
-  if (!payload || payload.type !== 'user_message') {
-    return false;
-  }
-
-  if (payload.kind && payload.kind !== 'plain') {
-    return false;
-  }
-
-  return typeof payload.message === 'string' && payload.message.trim().length > 0;
 }
 
 async function parseCodexSessionMatches(

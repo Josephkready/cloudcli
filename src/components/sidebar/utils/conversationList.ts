@@ -227,28 +227,3 @@ export function buildConversationList(
   });
 }
 
-/**
- * Compact relative age (<1m, Xm, Xhr, Xd) for a conversation row. Shares the
- * format used by the per-project session rows so the two views read the same.
- * Returns '' for non-finite or non-positive timestamps.
- */
-export function formatCompactAge(activityTime: number, now: Date): string {
-  if (!Number.isFinite(activityTime) || activityTime <= 0) {
-    return '';
-  }
-
-  const diffInMinutes = Math.floor(Math.max(0, now.getTime() - activityTime) / (1000 * 60));
-  if (diffInMinutes < 1) {
-    return '<1m';
-  }
-  if (diffInMinutes < 60) {
-    return `${diffInMinutes}m`;
-  }
-
-  const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24) {
-    return `${diffInHours}hr`;
-  }
-
-  return `${Math.floor(diffInHours / 24)}d`;
-}
