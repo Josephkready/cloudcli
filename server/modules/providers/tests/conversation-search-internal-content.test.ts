@@ -204,3 +204,53 @@ test('multi-term candidate scans read each file once and handle chunk boundaries
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+/*
+ * The local-command path runs entirely on the shared transcript helpers
+ * (`parseClaudeLocalCommandPayload`, `buildClaudeLocalCommandDisplayText`,
+ * `extractTaggedContent`, `stripAnsiFormatting`). `transcript-text.test.ts`
+ * covers those in isolation, but nothing exercised them *through* this call
+ * site, so a swapped argument or an inverted branch here would not be caught.
+ */
+
+test('a slash command is indexed as the command the user typed, not its raw wrapper', () => {
+  assert.deepEqual(
+    extractClaudeSearchableMessage(userRow(
+      '<command-name>/goal</command-name>'
+      + '<command-message>goal</command-message>'
+      + '<command-args>reduce duplicate code</command-args>',
+    )),
+    { text: '/goal reduce duplicate code', role: 'user' },
+  );
+});
+
+test('a slash command with no args indexes the bare command name', () => {
+  assert.deepEqual(
+    extractClaudeSearchableMessage(userRow('<command-name>/review-pr</command-name>')),
+    { text: '/review-pr', role: 'user' },
+  );
+});
+
+test('a command wrapper that yields no display text is dropped rather than indexed blank', () => {
+  assert.equal(
+    extractClaudeSearchableMessage(userRow('<command-args>orphan args</command-args>')),
+    null,
+  );
+});
+
+test('local command stdout is indexed as assistant output with ANSI codes stripped', () => {
+  const ESC = String.fromCharCode(0x1b);
+  const result = extractClaudeSearchableMessage(userRow(
+    `<local-command-stdout>${ESC}[32mBranch is up to date${ESC}[0m</local-command-stdout>`,
+  ));
+
+  assert.deepEqual(result, { text: 'Branch is up to date', role: 'assistant' });
+  assert.ok(!result?.text.includes(ESC), 'ANSI escapes must not reach the search index');
+});
+
+test('empty local command stdout is dropped rather than indexed as a blank assistant turn', () => {
+  assert.equal(
+    extractClaudeSearchableMessage(userRow('<local-command-stdout>   </local-command-stdout>')),
+    null,
+  );
+});
