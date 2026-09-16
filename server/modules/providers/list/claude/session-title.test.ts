@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   extractTitleCandidatesFromLines,
   pickDiscoveredSessionName,
+  readableUserPrompt,
 } from '@/modules/providers/list/claude/session-title.js';
 
 test('a user rename (custom-title) wins over everything', () => {
@@ -107,4 +108,109 @@ test('scan: trims stored values', () => {
 
 test('scan: returns an empty object when there are no title events', () => {
   assert.deepEqual(extractTitleCandidatesFromLines([line({ type: 'user', text: 'hi', sessionId: S })], S), {});
+});
+
+
+/*
+ * A session whose prompts were all slash commands never got a name
+ * (cloudcli#503/#505, reported twice against the same session).
+ *
+ * Claude Code writes a `last-prompt` event for such a turn carrying only
+ * `{ type, leafUuid, sessionId }` — the `lastPrompt` text field is simply
+ * absent — and writes no `ai-title`. An app-created session has no
+ * history.jsonl entry either, so every candidate came up empty and the row sat
+ * at the "Untitled Claude Session" placeholder for good. The shapes below are
+ * taken from the real transcript on the reported session.
+ */
+
+/** The `last-prompt` shape a slash-command turn actually produces. */
+const textlessLastPrompt = (sessionId: string) =>
+  line({ type: 'last-prompt', leafUuid: 'cdbef10d-35cc-4725-89f5-50f2603a00bc', sessionId });
+
+/** A `user` row holding Claude Code's slash-command envelope. */
+const slashCommandUserRow = (sessionId: string, name: string, args: string) =>
+  line({
+    type: 'user',
+    sessionId,
+    message: {
+      role: 'user',
+      content: [{
+        type: 'text',
+        text: `<command-name>${name}</command-name>\n<command-message>${name.replace('/', '')}</command-message>\n<command-args>${args}</command-args>`,
+      }],
+    },
+  });
+
+test('slash-command session: falls back to the opening prompt when every title event is textless', () => {
+  const lines = [
+    line({ type: 'queue-operation', sessionId: S }),
+    slashCommandUserRow(S, '/goal', 'go through this repo and reduce code'),
+    textlessLastPrompt(S),
+    textlessLastPrompt(S),
+  ];
+
+  const candidates = extractTitleCandidatesFromLines(lines, S);
+  assert.equal(candidates.lastPrompt, undefined, 'a textless last-prompt must not claim the slot');
+  assert.equal(candidates.firstUserPrompt, '/goal go through this repo and reduce code');
+  assert.equal(
+    pickDiscoveredSessionName(candidates, undefined),
+    '/goal go through this repo and reduce code',
+  );
+});
+
+test('the opening prompt is the weakest candidate', () => {
+  const candidates = { lastPrompt: 'something typed later', firstUserPrompt: '/goal the opening line' };
+  assert.equal(pickDiscoveredSessionName(candidates, undefined), 'something typed later');
+  assert.equal(pickDiscoveredSessionName(candidates, 'history.jsonl display'), 'history.jsonl display');
+  assert.equal(
+    pickDiscoveredSessionName({ aiTitle: 'A Real Title', firstUserPrompt: '/goal x' }, undefined),
+    'A Real Title',
+  );
+});
+
+test('the opening prompt is not read at all when a title event already answered', () => {
+  // Load-bearing: the scan above runs from the END of the file, and this one
+  // runs from the start. A long transcript must not pay for both.
+  const lines = [
+    slashCommandUserRow(S, '/goal', 'the opening line'),
+    line({ type: 'ai-title', aiTitle: 'A Real Title', sessionId: S }),
+  ];
+  assert.equal(extractTitleCandidatesFromLines(lines, S).firstUserPrompt, undefined);
+});
+
+test('the opening prompt ignores other sessions and non-typed user rows', () => {
+  const lines = [
+    slashCommandUserRow('other-session', '/goal', 'not this one'),
+    // A tool result: user-role, but structured content rather than typed text.
+    line({
+      type: 'user',
+      sessionId: S,
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] },
+    }),
+    slashCommandUserRow(S, '/goal', 'this one'),
+  ];
+  assert.equal(extractTitleCandidatesFromLines(lines, S).firstUserPrompt, '/goal this one');
+});
+
+test('a plain typed prompt survives the fallback unchanged', () => {
+  const lines = [
+    line({ type: 'user', sessionId: S, message: { role: 'user', content: 'just fix the header please' } }),
+  ];
+  assert.equal(extractTitleCandidatesFromLines(lines, S).firstUserPrompt, 'just fix the header please');
+});
+
+test('readableUserPrompt renders the envelope as the typed line', () => {
+  assert.equal(
+    readableUserPrompt('<command-name>/goal</command-name>\n<command-args>reduce code</command-args>'),
+    '/goal reduce code',
+  );
+  // A bare command with no arguments.
+  assert.equal(readableUserPrompt('<command-name>/clear</command-name>'), '/clear');
+  // Claude Code is inconsistent about the leading slash.
+  assert.equal(readableUserPrompt('<command-name>goal</command-name>'), '/goal');
+  // Plain text is untouched...
+  assert.equal(readableUserPrompt('just some words'), 'just some words');
+  // ...and stray markup never reaches the sidebar.
+  assert.equal(readableUserPrompt('<command-message>orphan</command-message>'), 'orphan');
+  assert.equal(readableUserPrompt('   '), '');
 });
