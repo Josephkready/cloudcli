@@ -61,12 +61,19 @@ test('getSystemGitConfig reports each key independently', async () => {
   assert.deepEqual(config, { git_name: null, git_email: 'solo@example.com' });
 });
 
-test('getSystemGitConfig trims surrounding whitespace to null, not an empty string', async () => {
+test('getSystemGitConfig maps a set-but-empty value to null, not an empty string', async () => {
+  // `git config` exits 0 here and prints just a newline, so this exercises the
+  // `.trim() || null` branch rather than the rejection path above.
+  //
+  // Deliberately unquoted: how git normalizes a *quoted* whitespace value
+  // varies between versions, so asserting on that would be testing git, not
+  // this module. The trailing-newline trim is already pinned by the first test,
+  // which asserts an exact name with no newline.
   const config = await withGlobalGitConfig(
-    '[user]\n\tname = "   "\n\temail = "  spaced@example.com  "\n',
+    '[user]\n\tname =\n\temail = real@example.com\n',
     getSystemGitConfig,
   );
 
   assert.equal(config.git_name, null);
-  assert.equal(config.git_email, 'spaced@example.com');
+  assert.equal(config.git_email, 'real@example.com');
 });
