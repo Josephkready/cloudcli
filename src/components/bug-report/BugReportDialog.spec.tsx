@@ -11,8 +11,8 @@ import type { Project, ProjectSession } from '@/types/app';
 /*
  * In-app bug reporter. The dialog's job is to keep a report from being lost:
  * it blocks empty/too-short submissions, shows exactly what metadata rides
- * along, preserves the draft when durable enqueueing fails, and hands back the
- * final link when background filing succeeds.
+ * along, preserves the draft when durable enqueueing fails, and gets out of
+ * the way the moment the server has durably taken the report (cloudcli#504).
  */
 
 const createBugReport = vi.fn();
@@ -121,134 +121,88 @@ describe('BugReportDialog', () => {
     });
   });
 
-  it('shows the filed issue link on success', async () => {
+  it('closes the dialog as soon as the report is durably queued', async () => {
     createBugReport.mockResolvedValue(
       jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
     );
-    renderDialog();
+    const onOpenChange = renderDialog();
 
     await userEvent.type(screen.getByLabelText('What happened?'), 'a real and detailed report');
     await userEvent.click(screen.getByRole('button', { name: 'File issue' }));
 
-    const link = await screen.findByRole('link', { name: /View issue/ });
-    expect(link).toHaveAttribute('href', 'https://github.com/o/r/issues/9');
-    // The form is gone, so the same report cannot be filed twice by accident.
-    expect(screen.queryByRole('button', { name: 'File issue' })).toBeNull();
+    // "Queued" is the success condition: the server owns the report from here,
+    // so there is nothing for the reporter to stay and watch (cloudcli#504).
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
-  it('shows durable ownership while GitHub filing is still pending', async () => {
+  it('does not poll the queue after filing', async () => {
     createBugReport.mockResolvedValue(
       jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
     );
-    getBugReportStatus.mockReturnValue(new Promise(() => {}));
-    renderDialog();
+    const onOpenChange = renderDialog();
 
     await userEvent.type(screen.getByLabelText('What happened?'), 'a real and detailed report');
     await userEvent.click(screen.getByRole('button', { name: 'File issue' }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Bug report saved');
-    expect(screen.getByRole('status')).toHaveTextContent('background');
-    expect(screen.queryByLabelText('What happened?')).toBeNull();
-    expect(getBugReportStatus).toHaveBeenCalledWith('job-1');
+    // The status endpoint existed only to drive the success screen this
+    // dialog no longer shows. Still asserted rather than deleted: a
+    // reintroduced poll would be a timer left running behind a closed dialog.
+    expect(getBugReportStatus).not.toHaveBeenCalled();
   });
 
-  it('stops presentation polling after a minute while the worker continues', async () => {
-    vi.useFakeTimers();
+  it('"File & add another" keeps the dialog open on a cleared form', async () => {
     createBugReport.mockResolvedValue(
       jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
     );
-    getBugReportStatus.mockResolvedValue(
-      jsonResponse(true, { success: true, data: { status: 'pending', id: 'job-1' } }),
+    const onOpenChange = renderDialog();
+
+    const description = screen.getByLabelText('What happened?');
+    await userEvent.type(description, 'the first of several reports');
+    await userEvent.click(screen.getByTestId('bug-report-submit-another'));
+
+    await waitFor(() => expect(createBugReport).toHaveBeenCalledTimes(1));
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    // Ready for the next one, with the previous one acknowledged.
+    await waitFor(() => expect(screen.getByLabelText('What happened?')).toHaveValue(''));
+    expect(screen.getByTestId('bug-report-filed-count')).toHaveTextContent('1 report filed');
+
+    await userEvent.type(screen.getByLabelText('What happened?'), 'and here is the second one');
+    await userEvent.click(screen.getByTestId('bug-report-submit-another'));
+
+    await waitFor(() => expect(createBugReport).toHaveBeenCalledTimes(2));
+    expect(createBugReport.mock.calls[1][0].description).toBe('and here is the second one');
+    await waitFor(() =>
+      expect(screen.getByTestId('bug-report-filed-count')).toHaveTextContent('2 reports filed'),
     );
-
-    try {
-      renderDialog();
-      fireEvent.change(screen.getByLabelText('What happened?'), {
-        target: { value: 'a real and detailed report' },
-      });
-      fireEvent.click(screen.getByRole('button', { name: 'File issue' }));
-      await act(async () => { await Promise.resolve(); });
-      for (let attempt = 1; attempt < 30; attempt += 1) {
-        await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-      }
-
-      expect(screen.getByRole('status')).toHaveTextContent('GitHub confirmation is delayed');
-      expect(getBugReportStatus).toHaveBeenCalledTimes(30);
-      expect(screen.queryByLabelText('What happened?')).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
-  it('retries a transient status-network failure and still shows the filed link', async () => {
-    vi.useFakeTimers();
-    createBugReport.mockResolvedValue(
-      jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
-    );
-    getBugReportStatus
-      .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValueOnce(
-        jsonResponse(true, {
-          success: true,
-          data: { status: 'filed', url: 'https://github.com/o/r/issues/10', number: 10 },
-        }),
-      );
+  it('stays open with the draft intact when the server rejects the enqueue', async () => {
+    createBugReport.mockResolvedValue(jsonResponse(false, { error: 'the queue is unavailable' }));
+    const onOpenChange = renderDialog();
 
-    try {
-      renderDialog();
-      fireEvent.change(screen.getByLabelText('What happened?'), {
-        target: { value: 'a real and detailed report' },
-      });
-      fireEvent.click(screen.getByRole('button', { name: 'File issue' }));
-      await act(async () => { await Promise.resolve(); });
-      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-
-      expect(screen.getByRole('link', { name: /View issue/ })).toHaveAttribute(
-        'href', 'https://github.com/o/r/issues/10',
-      );
-      expect(getBugReportStatus).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('distinguishes a terminal worker failure from an enqueue failure', async () => {
-    createBugReport.mockResolvedValue(
-      jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
-    );
-    getBugReportStatus.mockResolvedValue(
-      jsonResponse(true, {
-        success: true,
-        data: { status: 'failed', id: 'job-1', detail: 'unknown bug label' },
-      }),
-    );
-    renderDialog();
-
-    await userEvent.type(screen.getByLabelText('What happened?'), 'a real and detailed report');
+    await userEvent.type(screen.getByLabelText('What happened?'), 'a report worth not losing');
     await userEvent.click(screen.getByRole('button', { name: 'File issue' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Bug report saved');
-    expect(screen.getByRole('alert')).toHaveTextContent('unknown bug label');
-    expect(screen.queryByLabelText('What happened?')).toBeNull();
+    expect(await screen.findByRole('alert')).toHaveTextContent('the queue is unavailable');
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(screen.getByLabelText('What happened?')).toHaveValue('a report worth not losing');
   });
 
-  it('stops after an explicit local status error', async () => {
+  it('stays open when the response is not a real queued job', async () => {
+    // A 200 that did not durably enqueue anything. Closing on it would drop
+    // the reporter's text on the floor while looking like success.
     createBugReport.mockResolvedValue(
-      jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),
+      jsonResponse(true, { success: true, data: { status: 'accepted' } }),
     );
-    getBugReportStatus.mockResolvedValue(
-      jsonResponse(false, {
-        success: false,
-        error: { code: 'BUG_REPORT_QUEUE_UNAVAILABLE', message: 'Queue status is unavailable' },
-      }),
-    );
-    renderDialog();
+    const onOpenChange = renderDialog();
 
-    await userEvent.type(screen.getByLabelText('What happened?'), 'a real and detailed report');
+    await userEvent.type(screen.getByLabelText('What happened?'), 'a report worth not losing');
     await userEvent.click(screen.getByRole('button', { name: 'File issue' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Queue status is unavailable');
-    expect(getBugReportStatus).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(screen.getByLabelText('What happened?')).toHaveValue('a report worth not losing');
   });
 
   it("surfaces the server's error message and keeps the typed report", async () => {

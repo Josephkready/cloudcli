@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Bug, CheckCircle2, ExternalLink, Loader2, Paperclip, X } from 'lucide-react';
+import { Bug, Loader2, Paperclip, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Button, Dialog, DialogContent, DialogTitle, disabledBusyControlClasses } from '../../shared/view/ui';
@@ -31,10 +31,6 @@ const MAX_DESCRIPTION_LENGTH = 20000;
 /** Long enough to rule out an accidental submit, short enough not to nag. */
 const MIN_DESCRIPTION_LENGTH = 10;
 
-/** Presentation polling only; the worker continues after this dialog stops asking. */
-const POLL_INTERVAL_MS = 2000;
-const MAX_POLL_ATTEMPTS = 30;
-
 type BugReportDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -48,13 +44,19 @@ type BugReportDialogProps = {
   capturedEnvironment?: BrowserEnvironment | null;
 };
 
+/**
+ * Only three states, because filing now ends the dialog (cloudcli#504).
+ *
+ * There used to be four more — `queued`, `submitted`, `delayed`, `savedError` —
+ * driving a success screen this dialog held open while it polled the queue for
+ * the eventual GitHub URL. Reporting several things in a row meant dismissing
+ * that screen every time, and the report is durably queued server-side the
+ * moment the POST is acknowledged, so waiting on it bought the reporter
+ * nothing they had to be present for.
+ */
 type SubmitState =
   | { status: 'idle' }
   | { status: 'submitting' }
-  | { status: 'queued'; jobId: string }
-  | { status: 'submitted'; issueUrl: string }
-  | { status: 'delayed' }
-  | { status: 'savedError'; message: string }
   | { status: 'error'; message: string };
 
 /** One metadata row in the "what gets sent" disclosure. */
@@ -78,7 +80,9 @@ function MetadataRow({ label, value }: { label: string; value: string }) {
  *
  * The user writes what went wrong; the session metadata is collected for them
  * and shown up front (nothing is sent that they can't see first). The server
- * durably queues it, then this dialog polls for the final GitHub link.
+ * durably queues it, and the dialog is done the moment that queueing is
+ * acknowledged — it closes, or clears itself for the next report, rather than
+ * holding a success screen open (cloudcli#504).
  */
 export default function BugReportDialog({
   open,
@@ -93,6 +97,8 @@ export default function BugReportDialog({
   const [description, setDescription] = useState('');
   const [submitState, setSubmitState] = useState<SubmitState>({ status: 'idle' });
   const [showMetadata, setShowMetadata] = useState(false);
+  /** Reports filed via "File & add another" during this opening of the dialog. */
+  const [filedCount, setFiledCount] = useState(0);
 
   // Screenshots (dante-config skills/bug-report-button/SKILL.md §9): staged,
   // previewed, and compressed client-side, but never persisted anywhere — a
@@ -160,6 +166,7 @@ export default function BugReportDialog({
     setSubmitState({ status: 'idle' });
     setShowMetadata(false);
     setAttachmentHint('');
+    setFiledCount(0);
     // Screenshots are session-only (see the note above `stagedAttachments`) —
     // closing the dialog without sending drops them, same as a hard reload
     // would, and every preview URL for them must be revoked right here.
@@ -168,64 +175,6 @@ export default function BugReportDialog({
     }
     setStagedAttachments([]);
   }, [open]);
-
-  useEffect(() => {
-    if (submitState.status !== 'queued') return undefined;
-
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let attempts = 0;
-    const jobId = submitState.jobId;
-
-    const stopWithStatusError = (message: string) => {
-      if (!cancelled) setSubmitState({ status: 'savedError', message });
-    };
-
-    const poll = async () => {
-      attempts += 1;
-      try {
-        const response = await api.getBugReportStatus(jobId);
-        const payload = await response.json().catch(() => null);
-        if (cancelled) return;
-
-        if (!response.ok) {
-          stopWithStatusError(
-            payload?.error?.message || payload?.error || t('bugReport.statusUnavailable'),
-          );
-          return;
-        }
-
-        const status = payload?.data?.status;
-        if (status === 'filed') {
-          const issueUrl = payload?.data?.url;
-          if (typeof issueUrl === 'string') {
-            setSubmitState({ status: 'submitted', issueUrl });
-          } else {
-            stopWithStatusError(t('bugReport.statusUnavailable'));
-          }
-          return;
-        }
-        if (status === 'failed') {
-          stopWithStatusError(payload?.data?.detail || t('bugReport.filingNeedsAttention'));
-          return;
-        }
-      } catch {
-        // A transient browser/network failure says nothing about the durable worker. Retry below.
-      }
-
-      if (attempts >= MAX_POLL_ATTEMPTS) {
-        setSubmitState({ status: 'delayed' });
-        return;
-      }
-      timer = setTimeout(() => { void poll(); }, POLL_INTERVAL_MS);
-    };
-
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) clearTimeout(timer);
-    };
-  }, [submitState, t]);
 
   /**
    * The single entry point for every WIRED capture path — the file input and
@@ -263,10 +212,11 @@ export default function BugReportDialog({
     if (lastRejection) setAttachmentHint(rejectionMessage(lastRejection));
   }, []);
 
-  // File picker: `capture="environment"` (set in the markup) offers the rear
-  // camera on a phone without removing the picker. The input is cleared after
-  // every change so selecting the SAME file twice in a row still fires a
-  // `change` event (which only fires on an actual value change otherwise).
+  // File picker: the input carries no `capture` attribute, so a phone offers
+  // the whole picker — photo library, camera, files (cloudcli#498). The input
+  // is cleared after every change so selecting the SAME file twice in a row
+  // still fires a `change` event (which only fires on an actual value change
+  // otherwise).
   const handleFileInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const files = extractImageEntries(event.target.files);
     event.target.value = '';
@@ -296,7 +246,15 @@ export default function BugReportDialog({
     description.length <= MAX_DESCRIPTION_LENGTH &&
     submitState.status !== 'submitting';
 
-  const handleSubmit = useCallback(async () => {
+  /**
+   * Files the report, then either closes the dialog or clears it for another.
+   *
+   * "Queued" is the success condition, not "filed": the server has taken
+   * durable ownership at that point and the GitHub issue gets created whether
+   * or not anyone is still watching, so there is nothing left for the reporter
+   * to wait on (cloudcli#504).
+   */
+  const handleSubmit = useCallback(async (andAnother: boolean) => {
     if (!canSubmit) return;
 
     setSubmitState({ status: 'submitting' });
@@ -316,8 +274,10 @@ export default function BugReportDialog({
         return;
       }
 
-      const jobId = payload?.data?.id;
-      if (payload?.data?.status !== 'queued' || typeof jobId !== 'string') {
+      // Still validated, even though nothing polls it now: a response that is
+      // not a real queued job means the report was not durably accepted, and
+      // closing the dialog on it would silently drop the reporter's text.
+      if (payload?.data?.status !== 'queued' || typeof payload?.data?.id !== 'string') {
         setSubmitState({ status: 'error', message: t('bugReport.genericError') });
         return;
       }
@@ -333,15 +293,25 @@ export default function BugReportDialog({
       setStagedAttachments([]);
 
       recordFeatureUse('bug_report.submit');
-      setSubmitState({ status: 'queued', jobId });
+      if (andAnother) {
+        // Stay open on a blank form. The counter is the only acknowledgement
+        // there is now, and filing several in a row is exactly the flow this
+        // button exists for, so it has to be visible without being a screen.
+        setDescription('');
+        setShowMetadata(false);
+        setAttachmentHint('');
+        setFiledCount((previous) => previous + 1);
+        setSubmitState({ status: 'idle' });
+        return;
+      }
+      onOpenChange(false);
     } catch {
       setSubmitState({ status: 'error', message: t('bugReport.networkError') });
     }
-  }, [canSubmit, description, metadata, stagedAttachments, t]);
+  }, [canSubmit, description, metadata, onOpenChange, stagedAttachments, t]);
 
   const metadataEntries = Object.entries(metadata);
   const isSubmitting = submitState.status === 'submitting';
-  const showsForm = submitState.status === 'idle' || isSubmitting || submitState.status === 'error';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -372,41 +342,7 @@ export default function BugReportDialog({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
-          {submitState.status === 'submitted' ? (
-            <div className="flex flex-col items-center gap-3 py-8 text-center">
-              <CheckCircle2 className="h-10 w-10 text-emerald-500" />
-              <p className="text-base font-semibold text-foreground">{t('bugReport.successTitle')}</p>
-              <p className="max-w-sm text-sm text-muted-foreground">{t('bugReport.successBody')}</p>
-              <a
-                href={submitState.issueUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-xl border border-border/70 bg-background px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/50"
-              >
-                {t('bugReport.viewIssue')}
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            </div>
-          ) : submitState.status === 'queued' ? (
-            <div className="flex flex-col items-center gap-3 py-8 text-center" role="status">
-              <Loader2 className="h-10 w-10 animate-spin text-primary" />
-              <p className="text-base font-semibold text-foreground">{t('bugReport.queuedTitle')}</p>
-              <p className="max-w-sm text-sm text-muted-foreground">{t('bugReport.queuedBody')}</p>
-            </div>
-          ) : submitState.status === 'delayed' ? (
-            <div className="flex flex-col items-center gap-3 py-8 text-center" role="status">
-              <CheckCircle2 className="h-10 w-10 text-emerald-500" />
-              <p className="text-base font-semibold text-foreground">{t('bugReport.delayedTitle')}</p>
-              <p className="max-w-sm text-sm text-muted-foreground">{t('bugReport.delayedBody')}</p>
-            </div>
-          ) : submitState.status === 'savedError' ? (
-            <div className="flex flex-col items-center gap-3 py-8 text-center" role="alert">
-              <AlertTriangle className="h-10 w-10 text-amber-500" />
-              <p className="text-base font-semibold text-foreground">{t('bugReport.savedErrorTitle')}</p>
-              <p className="max-w-sm text-sm text-muted-foreground">{submitState.message}</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
+          <div className="space-y-4">
               <div className="space-y-1.5">
                 <label htmlFor="bug-report-description" className="text-sm font-medium text-foreground">
                   {t('bugReport.descriptionLabel')}
@@ -427,13 +363,12 @@ export default function BugReportDialog({
               </div>
 
               {/* Screenshots (dante-config skills/bug-report-button/SKILL.md
-                  §9): explicit and user-initiated only — a file picker
-                  (`capture="environment"` offers the camera on a phone
-                  without removing the picker) plus clipboard paste on the
-                  textarea above, wired via `stageFiles`. Never an automatic
-                  snapshot. Excluded entirely from the metadata disclosure
-                  above: screenshots are binary user-attached content, not
-                  allowlisted/sanitized context. */}
+                  §9): explicit and user-initiated only — a file picker (the
+                  full one: library, camera and files alike) plus clipboard
+                  paste on the textarea above, wired via `stageFiles`. Never an
+                  automatic snapshot. Excluded entirely from the metadata
+                  disclosure above: screenshots are binary user-attached
+                  content, not allowlisted/sanitized context. */}
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Button
@@ -447,11 +382,19 @@ export default function BugReportDialog({
                     <Paperclip className="mr-1.5 h-3.5 w-3.5" />
                     {t('bugReport.attachScreenshot')}
                   </Button>
+                  {/* No `capture` attribute, deliberately (cloudcli#498).
+                      `capture="environment"` is a request for a *capture
+                      device*, and iOS honours it by opening the camera
+                      directly — which is the one source a screenshot can
+                      never come from. Without it the same button opens the
+                      full picker, where Photo Library, Take Photo and Choose
+                      File are all available, so the camera is still one tap
+                      away and the screenshot the reporter already took is
+                      reachable at all. */}
                   <input
                     ref={fileInputRef}
                     type="file"
                     accept="image/*"
-                    capture="environment"
                     multiple
                     hidden
                     data-testid="bug-report-file-input"
@@ -528,8 +471,7 @@ export default function BugReportDialog({
                 </div>
               )}
 
-            </div>
-          )}
+          </div>
         </div>
 
         {/* The failure notice lives outside the scroll area: a long report plus
@@ -544,23 +486,43 @@ export default function BugReportDialog({
           </p>
         )}
 
-        {showsForm && (
-          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border/70 bg-muted/20 px-4 py-3 sm:px-6">
-            <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)} className="rounded-xl">
-              {t('bugReport.cancel')}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              className="rounded-xl"
-            >
-              {isSubmitting && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
-              {isSubmitting ? t('bugReport.submitting') : t('bugReport.submit')}
-            </Button>
-          </div>
-        )}
+        {/* Unconditional: idle, submitting and error all render the form now
+            that filing ends the dialog, so there is no longer a state in which
+            the actions should be hidden. */}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border/70 bg-muted/20 px-4 py-3 sm:px-6">
+          {/* The only acknowledgement left that anything was filed, now that
+              the dialog no longer holds a success screen open. Yields the
+              row's left edge so the two actions stay where they were. */}
+          {filedCount > 0 && (
+            <span className="mr-auto text-xs text-muted-foreground" role="status" data-testid="bug-report-filed-count">
+              {t('bugReport.filedCount', { count: filedCount })}
+            </span>
+          )}
+          <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)} className="rounded-xl">
+            {t('bugReport.cancel')}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => { void handleSubmit(true); }}
+            disabled={!canSubmit}
+            className="rounded-xl"
+            data-testid="bug-report-submit-another"
+          >
+            {t('bugReport.submitAndAnother')}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => { void handleSubmit(false); }}
+            disabled={!canSubmit}
+            className="rounded-xl"
+          >
+            {isSubmitting && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+            {isSubmitting ? t('bugReport.submitting') : t('bugReport.submit')}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );
