@@ -410,6 +410,23 @@ describe('BugReportDialog', () => {
       expect(textarea).toHaveValue('a real and detailed report');
     });
 
+    it('pasting an image stages it even when the textarea is not focused (#519)', async () => {
+      // The reporter's screenshot is on the clipboard; they should be able to
+      // just Ctrl/Cmd-V anywhere in the dialog without first clicking into the
+      // description field. The paste is captured at the document level.
+      renderDialog();
+
+      const clipboardData = {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => pngFile('pasted.png') }],
+      };
+      await act(async () => {
+        fireEvent.paste(document, { clipboardData });
+        await Promise.resolve();
+      });
+
+      expect(await screen.findByTestId('bug-report-attachment-thumbnail')).toBeInTheDocument();
+    });
+
     it('pasting text only never stages anything', async () => {
       renderDialog();
       const textarea = screen.getByLabelText('What happened?') as HTMLTextAreaElement;

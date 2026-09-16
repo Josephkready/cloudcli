@@ -223,14 +223,24 @@ export default function BugReportDialog({
     if (files.length) void stageFiles(files);
   }, [stageFiles]);
 
-  // Clipboard paste: never intercepted or blocked. A paste that carries both
-  // a screenshot and typed text must still let the text land in the textarea
-  // via the browser's own default behavior — this only ever ADDS staged
-  // images alongside whatever the paste does normally.
-  const handleDescriptionPaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = extractImageEntries(event.clipboardData);
-    if (files.length) void stageFiles(files);
-  }, [stageFiles]);
+  // Clipboard paste, dialog-wide (#519): the reporter's screenshot is often
+  // already on the clipboard, so Ctrl/Cmd-V should stage it no matter where
+  // focus sits inside the dialog — not only while the description textarea is
+  // focused. We listen at the document level while the dialog is open. Paste is
+  // never intercepted or blocked: we don't preventDefault, so a paste carrying
+  // both a screenshot and typed text still lets the text land normally; this
+  // only ever ADDS staged images alongside the browser's own paste behavior.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handlePaste = (event: ClipboardEvent) => {
+      const files = extractImageEntries(event.clipboardData);
+      if (files.length) void stageFiles(files);
+    };
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [open, stageFiles]);
 
   const handleRemoveAttachment = useCallback((id: string) => {
     const target = stagedAttachmentsRef.current.find((attachment) => attachment.id === id);
@@ -351,7 +361,6 @@ export default function BugReportDialog({
                   id="bug-report-description"
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
-                  onPaste={handleDescriptionPaste}
                   maxLength={MAX_DESCRIPTION_LENGTH}
                   rows={9}
                   autoFocus
