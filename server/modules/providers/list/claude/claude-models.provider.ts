@@ -13,6 +13,7 @@ import {
   buildDefaultProviderCurrentActiveModel,
   writeProviderSessionActiveModelChange,
 } from '@/shared/utils.js';
+import { extractTaggedContent } from '@/modules/providers/shared/transcript/transcript-text.js';
 
 // Mirrors `supportedModels()` on the Claude Code CLI this app spawns. The live
 // lookup stays disabled (see ClaudeProviderModels.getSupportedModels), so this
@@ -238,12 +239,6 @@ const extractClaudeEventModel = (event: ClaudeInitEvent, sessionId: string): str
 };
 
 const stripAnsi = (value: string): string => value.replace(ANSI_PATTERN, '');
-
-const extractTaggedContent = (content: string, tagName: string): string | null => {
-  const escapedTagName = tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = new RegExp(`<${escapedTagName}>([\\s\\S]*?)<\\/${escapedTagName}>`).exec(content);
-  return match ? match[1] : null;
-};
 
 const extractClaudeModelFromTextContent = (content: string): string | null => {
   const localCommandStdout = extractTaggedContent(content, 'local-command-stdout');

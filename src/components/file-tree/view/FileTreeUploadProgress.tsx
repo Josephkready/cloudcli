@@ -2,15 +2,13 @@ import { AlertCircle, CheckCircle2, Upload } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '../../../lib/utils';
-import type { FileTreeUploadProgressState } from '../hooks/useFileTreeUpload';
+import { pluralizeFiles, type FileTreeUploadProgressState } from '../hooks/useFileTreeUpload';
 
 type FileTreeUploadProgressProps = {
   upload: FileTreeUploadProgressState | null;
 };
 
 const clampProgress = (progress: number) => Math.min(100, Math.max(0, progress));
-
-const pluralizeFiles = (count: number) => (count === 1 ? 'file' : 'files');
 
 export default function FileTreeUploadProgress({ upload }: FileTreeUploadProgressProps) {
   const { t } = useTranslation();

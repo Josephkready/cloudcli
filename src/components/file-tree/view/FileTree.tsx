@@ -12,7 +12,8 @@ import { useFileTreeSearch } from '../hooks/useFileTreeSearch';
 import { useFileTreeViewMode } from '../hooks/useFileTreeViewMode';
 import { useFileTreeUpload } from '../hooks/useFileTreeUpload';
 import type { FileTreeImageSelection, FileTreeNode } from '../types/types';
-import { formatFileSize, formatRelativeTime, isImageFile } from '../utils/fileTreeUtils';
+import { formatRelativeTime, isImageFile } from '../utils/fileTreeUtils';
+import { formatFileSize } from '../../../utils/formatBytes';
 import { Project } from '../../../types/app';
 import { ScrollArea, Input, disabledControlClasses } from '../../../shared/view/ui';
 

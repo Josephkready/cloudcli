@@ -5,6 +5,7 @@ import type { TFunction } from 'i18next';
 import { Badge, CursorContextMenu, Tooltip, buttonVariants } from '../../../../shared/view/ui';
 import { cn } from '../../../../lib/utils';
 import { recordFeatureUse } from '../../../../utils/featureUsage';
+import { formatCompactAgeFromDate } from '../../../../utils/dateUtils';
 import type { Project, ProjectSession, LLMProvider } from '../../../../types/app';
 import type { SessionWithProvider } from '../../types/types';
 import { createSessionViewModel } from '../../utils/utils';
@@ -36,34 +37,6 @@ type SidebarSessionItemProps = {
   t: TFunction;
 };
 
-/**
- * Compact relative time for sidebar rows:
- * <1m, Xm, Xhr, Xd.
- */
-const formatCompactSessionAge = (dateString: string, currentTime: Date): string => {
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-
-  const diffInMinutes = Math.floor(Math.max(0, currentTime.getTime() - date.getTime()) / (1000 * 60));
-  if (diffInMinutes < 1) {
-    return '<1m';
-  }
-
-  if (diffInMinutes < 60) {
-    return `${diffInMinutes}m`;
-  }
-
-  const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24) {
-    return `${diffInHours}hr`;
-  }
-
-  const diffInDays = Math.floor(diffInHours / 24);
-  return `${diffInDays}d`;
-};
-
 export default function SidebarSessionItem({
   project,
   session,
@@ -86,7 +59,7 @@ export default function SidebarSessionItem({
   const sessionView = createSessionViewModel(session, currentTime, t);
   const isSelected = selectedSession?.id === session.id;
   const isEditing = editingSession === session.id;
-  const compactSessionAge = formatCompactSessionAge(sessionView.sessionTime, currentTime);
+  const compactSessionAge = formatCompactAgeFromDate(sessionView.sessionTime, currentTime);
   const editingContainerRef = useRef<HTMLDivElement>(null);
   const showAttentionIndicator = needsAttention && !isSelected;
   const showRecentIndicator = !showAttentionIndicator && !isProcessing && sessionView.isActive;

@@ -9,7 +9,8 @@ import type { LLMProvider, Project, ProjectSession } from '../../../../types/app
 import type { SessionActivityMap } from '../../../../hooks/useSessionProtection';
 import { useHideCliOriginChats } from '../../../../hooks/useHideCliOriginChats';
 import type { SessionWithProvider } from '../../types/types';
-import { buildConversationList, formatCompactAge, STATUS_ORDER, type ConversationListItem, type ConversationStatus } from '../../utils/conversationList';
+import { buildConversationList, STATUS_ORDER, type ConversationListItem, type ConversationStatus } from '../../utils/conversationList';
+import { formatCompactAge } from '../../../../utils/dateUtils';
 import { buildSessionContextMenuActions } from '../../utils/sessionContextMenu';
 import { filterCliOriginConversations, getSessionName, writeHideCliOriginChats } from '../../utils/utils';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';

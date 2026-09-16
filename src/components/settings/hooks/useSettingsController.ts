@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useTheme } from '../../../contexts/ThemeContext';
 import { authenticatedFetch } from '../../../utils/api';
+import { toResponseJson } from '../../../utils/apiResponse';
 import { CLAUDE_SETTINGS_KEY, notifyClaudeSettingsChanged } from '../../../utils/claudeSettings';
 import { setNotificationSoundEnabled } from '../../../utils/notificationSound';
 import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuthStatus';
@@ -76,8 +77,6 @@ const readCodeEditorSettings = (): CodeEditorSettingsState => ({
   lineNumbers: localStorage.getItem('codeEditorLineNumbers') !== 'false',
   fontSize: localStorage.getItem('codeEditorFontSize') ?? DEFAULT_CODE_EDITOR_SETTINGS.fontSize,
 });
-
-const toResponseJson = async <T>(response: Response): Promise<T> => response.json() as Promise<T>;
 
 const createEmptyClaudePermissions = (): ClaudePermissionsState => ({
   allowedTools: [],

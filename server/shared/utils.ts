@@ -1670,7 +1670,10 @@ export function flattenPromptForWindowsShell(prompt: string): string {
   return prompt.replace(/\s*\r?\n\s*/g, ' ').trim();
 }
 
-function readEnvValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
+/**
+ * Reads an env var case-insensitively, because Windows env keys are.
+ */
+export function readEnvValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
   const resolvedKey = Object.keys(env).find((envKey) => envKey.toLowerCase() === key.toLowerCase());
   return resolvedKey ? env[resolvedKey] : undefined;
 }

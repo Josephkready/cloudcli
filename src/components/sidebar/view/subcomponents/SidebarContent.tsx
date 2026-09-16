@@ -9,6 +9,7 @@ import type { ConversationSearchResults, SearchProgress } from '../../hooks/useS
 import type { ArchivedProjectListItem, ArchivedSessionListItem, SidebarOverlay } from '../../types/types';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import { getAllSessions } from '../../utils/utils';
+import { formatCompactAgeFromDate } from '../../../../utils/dateUtils';
 
 import SidebarConversationsList from './SidebarConversationsList';
 import SidebarFooter from './SidebarFooter';
@@ -84,32 +85,6 @@ function groupArchivedSessionsByProject(sessions: ArchivedSessionListItem[]): Ar
     const b = groupB.latestActivity ?? '';
     return b.localeCompare(a);
   });
-}
-
-function formatCompactArchivedAge(dateString: string | null): string {
-  if (!dateString) {
-    return '';
-  }
-
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-
-  const diffInMinutes = Math.floor(Math.max(0, Date.now() - date.getTime()) / (1000 * 60));
-  if (diffInMinutes < 1) {
-    return '<1m';
-  }
-  if (diffInMinutes < 60) {
-    return `${diffInMinutes}m`;
-  }
-
-  const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24) {
-    return `${diffInHours}hr`;
-  }
-
-  return `${Math.floor(diffInHours / 24)}d`;
 }
 
 // Small label above the Conversations section. The Spaces section renders its
@@ -485,7 +460,7 @@ export default function SidebarContent({
                                       : String(session.id))}
                                 </span>
                                 <span className="ml-auto flex-shrink-0 text-[11px] text-muted-foreground">
-                                  {formatCompactArchivedAge(
+                                  {formatCompactAgeFromDate(
                                     typeof session.lastActivity === 'string'
                                       ? session.lastActivity
                                       : typeof session.updated_at === 'string'
@@ -493,6 +468,7 @@ export default function SidebarContent({
                                         : typeof session.created_at === 'string'
                                           ? session.created_at
                                           : null,
+                                    projectListProps.currentTime,
                                   )}
                                 </span>
                               </div>
@@ -547,7 +523,7 @@ export default function SidebarContent({
                               </span>
                               {session.lastActivity && (
                                 <span className="ml-auto flex-shrink-0 text-[11px] text-muted-foreground">
-                                  {formatCompactArchivedAge(session.lastActivity)}
+                                  {formatCompactAgeFromDate(session.lastActivity, projectListProps.currentTime)}
                                 </span>
                               )}
                             </div>

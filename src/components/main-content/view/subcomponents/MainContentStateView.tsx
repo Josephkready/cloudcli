@@ -3,7 +3,8 @@ import { ChevronRight, Folder, MessageSquare } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { useHideCliOriginChats } from '../../../../hooks/useHideCliOriginChats';
-import { buildConversationList, formatCompactAge } from '../../../sidebar/utils/conversationList';
+import { buildConversationList } from '../../../sidebar/utils/conversationList';
+import { formatCompactAge } from '../../../../utils/dateUtils';
 import { filterCliOriginConversations, getSessionName } from '../../../sidebar/utils/utils';
 import SidebarNewConversationButton from '../../../sidebar/view/subcomponents/SidebarNewConversationButton';
 import type { MainContentStateViewProps } from '../../types/types';

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import type { TFunction } from 'i18next';
 
-import { formatTimeAgo } from './dateUtils';
+import { formatCompactAge, formatCompactAgeFromDate, formatTimeAgo } from './dateUtils';
 
 // formatTimeAgo is fully deterministic: `currentTime` is injected (no Date.now())
 // and `t` is optional. We pass `t` as null to exercise the built-in English
@@ -76,4 +76,48 @@ test('uses the provided translator with the right key and count', () => {
     { key: 'time.hoursAgo', count: 2 },
     { key: 'status.unknown', count: undefined },
   ]);
+});
+
+// formatCompactAge is the single band table behind every dense list row, so the
+// boundaries matter: each band is exercised at its edge, not just its middle.
+
+test('formatCompactAge renders compact relative ages across each band', () => {
+  const now = new Date('2026-07-16T12:00:00Z');
+  const at = (iso: string) => new Date(iso).getTime();
+
+  assert.equal(formatCompactAge(at('2026-07-16T11:59:30Z'), now), '<1m');
+  assert.equal(formatCompactAge(at('2026-07-16T11:45:00Z'), now), '15m');
+  assert.equal(formatCompactAge(at('2026-07-16T09:00:00Z'), now), '3hr');
+  assert.equal(formatCompactAge(at('2026-07-14T12:00:00Z'), now), '2d');
+});
+
+test('formatCompactAge switches bands exactly at 1m, 60m and 24h', () => {
+  const now = new Date('2026-07-16T12:00:00Z');
+  const before = (ms: number) => now.getTime() - ms;
+
+  assert.equal(formatCompactAge(before(MIN - 1), now), '<1m');
+  assert.equal(formatCompactAge(before(MIN), now), '1m');
+  assert.equal(formatCompactAge(before(60 * MIN - 1), now), '59m');
+  assert.equal(formatCompactAge(before(60 * MIN), now), '1hr');
+  assert.equal(formatCompactAge(before(24 * HOUR - 1), now), '23hr');
+  assert.equal(formatCompactAge(before(24 * HOUR), now), '1d');
+});
+
+test('formatCompactAge returns empty for invalid or non-positive input', () => {
+  const now = new Date('2026-07-16T12:00:00Z');
+
+  assert.equal(formatCompactAge(NaN, now), '');
+  assert.equal(formatCompactAge(0, now), '');
+  assert.equal(formatCompactAge(-1, now), '');
+  assert.equal(formatCompactAge(now.getTime() + 60_000, now), '<1m');
+});
+
+test('formatCompactAgeFromDate parses ISO strings and blanks unusable ones', () => {
+  const now = new Date('2026-07-16T12:00:00Z');
+
+  assert.equal(formatCompactAgeFromDate('2026-07-16T09:00:00Z', now), '3hr');
+  assert.equal(formatCompactAgeFromDate(null, now), '');
+  assert.equal(formatCompactAgeFromDate(undefined, now), '');
+  assert.equal(formatCompactAgeFromDate('', now), '');
+  assert.equal(formatCompactAgeFromDate('not-a-date', now), '');
 });
