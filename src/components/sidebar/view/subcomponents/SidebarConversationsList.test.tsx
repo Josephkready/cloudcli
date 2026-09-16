@@ -134,6 +134,58 @@ test('leaves a cloudcli-driven session unbadged (#71)', () => {
   assert.ok(!html.includes('Session not driven by cloudcli'), 'a cloudcli-origin session has no CLI origin badge');
 });
 
+// #515: renaming a conversation on mobile was broken because the rename cluster
+// stayed anchored to `right-2` at a fixed `w-32`, so the input floated over the
+// row and the title bled through behind it on a narrow (390px) drawer. While
+// editing, the cluster must span the row (`inset-x-2`) with an opaque background
+// and a flexible input, so it visually replaces the row content instead of
+// overlaying it.
+function renderEditing(sessionId: string): string {
+  showCliOriginChats();
+  return renderToStaticMarkup(
+    React.createElement(SidebarConversationsList, {
+      projects: [projectWith(sessionId)],
+      activeSessions: new Map(),
+      selectedSession: null,
+      currentTime: new Date('2026-07-17T00:00:00Z'),
+      onSelect: noop,
+      onNewConversation: noop,
+      onCreateProject: noop,
+      editingSession: sessionId,
+      editingSessionName: 'draft name',
+      onEditingSessionNameChange: noop,
+      onStartEditingSession: noop,
+      onCancelEditingSession: noop,
+      onSaveEditingSession: noop,
+      onDeleteSession: noop,
+      onArchiveSession: noop,
+      t,
+    }),
+  );
+}
+
+test('renders the rename cluster full-width while editing so it clears the title (#515)', () => {
+  const html = renderEditing('s');
+  assert.ok(html.includes('draft name'), 'the editing input renders the in-progress name');
+  assert.ok(html.includes('inset-x-2'), 'the editing cluster spans the row rather than hugging the right edge');
+});
+
+test('gives the rename input a flexible width while editing, not a fixed w-32 (#515)', () => {
+  const html = renderEditing('s');
+  // The input must fill the available row width; a fixed w-32 is what let the
+  // title bleed through on a narrow mobile drawer.
+  assert.ok(!html.includes('w-32'), 'the editing input must not use the fixed w-32 width');
+  assert.ok(html.includes('flex-1'), 'the editing input flexes to fill the row');
+});
+
+test('leaves the resting rename cluster anchored to the right edge (#515 regression guard)', () => {
+  // Not editing: the cluster is the compact hover/touch action group at right-2,
+  // and must not adopt the full-width editing treatment.
+  const html = render(new Map(), 's');
+  assert.ok(html.includes('right-2'), 'the resting action cluster hugs the right edge');
+  assert.ok(!html.includes('inset-x-2'), 'the resting cluster is not full-width');
+});
+
 test('hides a CLI-origin session by default (#216)', () => {
   // Nothing stored => preference defaults ON => the only session is filtered
   // out, so the list falls through to its empty state.

@@ -269,10 +269,17 @@ function ConversationRow({
       <div
         ref={editingContainerRef}
         className={cn(
-          'absolute right-2 top-1/2 flex -translate-y-1/2 transform items-center gap-1 transition-opacity duration-fast',
-          // A touch device never hovers, so without `touch:` the cluster stays
-          // invisible yet clickable, on top of the status indicator (#244).
-          isEditing ? 'opacity-100' : 'touch:opacity-100 opacity-0 group-hover:opacity-100',
+          'absolute',
+          // While editing, span the row (`inset-x-2`) with an opaque, rounded
+          // background so the rename field replaces the row content instead of
+          // floating over the title — on a narrow mobile drawer the old fixed
+          // `w-32` box hugged `right-2` and the title bled through behind it (#515).
+          isEditing
+            ? 'inset-x-2 z-10 rounded-md border border-border bg-card px-1.5 py-1 opacity-100 shadow-sm'
+            // A touch device never hovers, so without `touch:` the cluster stays
+            // invisible yet clickable, on top of the status indicator (#244).
+            : 'right-2 touch:opacity-100 opacity-0 group-hover:opacity-100',
+          'top-1/2 flex -translate-y-1/2 transform items-center gap-1 transition-opacity duration-fast',
         )}
       >
         {isEditing ? (
@@ -290,7 +297,7 @@ function ConversationRow({
                 }
               }}
               onClick={(event) => event.stopPropagation()}
-              className="w-32 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+              className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
               autoFocus
             />
             <button
