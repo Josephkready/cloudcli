@@ -74,6 +74,7 @@ interface ChatComposerProps {
   effort: string;
   availableEffortOptions: NonNullable<ProviderModelOption['effort']>['values'];
   onSelectEffort: (effort: string) => void;
+  conversationStarted: boolean;
   tokenBudget: Record<string, unknown> | null;
   onShowTokenUsage: () => void;
   onToggleCommandMenu: () => void;
@@ -131,6 +132,7 @@ export default function ChatComposer({
   effort,
   availableEffortOptions,
   onSelectEffort,
+  conversationStarted,
   tokenBudget,
   onShowTokenUsage,
   onToggleCommandMenu,
@@ -472,6 +474,7 @@ export default function ChatComposer({
                 effort={effort}
                 availableEffortOptions={availableEffortOptions}
                 onSelectEffort={onSelectEffort}
+                conversationStarted={conversationStarted}
               />
             )}
 
