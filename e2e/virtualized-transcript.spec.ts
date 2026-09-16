@@ -5,8 +5,9 @@ import { seedLargeConversation, type LargeConversationHandles } from './largeCon
 
 /**
  * cloudcli#483 phase 2 — the transcript is windowed with
- * `@tanstack/react-virtual` for anything short of "Load all". These assert the
- * five behaviours the phase was required to preserve, against a real 500+-row
+ * `@tanstack/react-virtual` for every view except an explicit "show the whole
+ * thread" request, which now only the in-conversation search jump makes. These
+ * assert the behaviours the phase was required to preserve, against a real 500+-row
  * conversation and a real Chromium layout engine (the unit/component suite
  * covers the row-count and prevMessage-wiring logic in jsdom, which has no
  * layout engine and cannot answer "does scrolling actually behave right").
@@ -99,7 +100,7 @@ async function loadHistoryUntil(page: Page, container: Locator, minLoaded: numbe
 
 let fixture: LargeConversationHandles;
 
-// A 520-row session opens, pages, and (in the Load-all case) flat-renders
+// A 520-row session opens, pages, and (in the search-jump case) flat-renders
 // every row under whatever load the CI host is under — the first gate run
 // blew the default 45s budget on exactly those steps while sharing the host
 // with a dozen other CI lanes. The waits below are generous for the same
@@ -220,36 +221,29 @@ test('an off-screen diagram finishing its async layout does not shift the reader
   expect(Math.abs(anchorYAfterDiagram - anchorYBeforeDiagram)).toBeLessThan(12);
 });
 
-test('"Load all" still mounts every message, preserving the search-to-message affordance', async ({ page }) => {
+test('history arrives by scrolling alone — there is no "load all" control to press', async ({ page }) => {
   await page.goto(`/session/${fixture.sessionId}`);
   await expect(page.getByText(fixture.lastMessageText)).toBeVisible({ timeout: 30_000 });
 
   const container = page.locator('.chat-messages-pane');
-  // The "Load all" overlay appears when the reader reaches the top and fades
-  // out again 2.5s later, so under load a single attempt can miss its window.
-  // Reach the top with a deliberately overshooting delta (the trigger is an
-  // *absolute* `scrollTop < 100`, not "scrolled up by some amount"), try to
-  // click within the window, and if it faded first scroll back down past the
-  // re-arm threshold (`scrollTop >= 100`) and go again.
-  const loadAllButton = page.getByRole('button', { name: /Load all messages/ });
-  let clicked = false;
-  for (let attempt = 0; attempt < 6 && !clicked; attempt++) {
-    await wheelUp(page, container, 50_000);
-    try {
-      await loadAllButton.click({ timeout: 2_000 });
-      clicked = true;
-    } catch {
-      await page.mouse.wheel(0, 600);
-      await page.waitForTimeout(300);
-    }
-  }
-  expect(clicked).toBe(true);
 
-  // Fetching and flat-rendering all 520 rows is the slowest thing in this file.
-  await expect(page.getByText(fixture.firstMessageText)).toBeVisible({ timeout: 60_000 });
+  // The affordances this replaced: a "Load all messages (N)" pill that appeared
+  // on nearing the top and faded 2.5s later, a "Showing N of M · scroll to
+  // load" banner, and a "Load earlier messages" link. All three lived *in* the
+  // scrolled content and mounted or unmounted mid-scroll, shoving the
+  // transcript under the reader (cloudcli#495) — and none of them offered
+  // anything scrolling does not already do.
+  const removedControls = page.getByRole('button', { name: /load all|load earlier/i });
 
-  const mountedAfterLoadAll = (await scrollMetrics(container)).mounted;
-  expect(mountedAfterLoadAll).toBeGreaterThan(400);
+  const before = await scrollMetrics(container);
+  const after = await loadHistoryUntil(page, container, 200);
+
+  // Scrolling alone pulled in far more history than the initial page...
+  expect(after.scrollHeight).toBeGreaterThan(before.scrollHeight * 2);
+  // ...while the pane stayed windowed rather than mounting the whole thread...
+  expect(after.mounted).toBeLessThan(120);
+  // ...and at no point was there a control to press.
+  await expect(removedControls).toHaveCount(0);
 });
 
 test('a cross-conversation search jump lands on and highlights the target message', async ({ page }) => {
@@ -272,11 +266,11 @@ test('a cross-conversation search jump lands on and highlights the target messag
   await expect(resultButton).toBeVisible({ timeout: 30_000 });
   await resultButton.click();
 
-  // Landing here forces the pre-existing flat "Load all" fetch+render (the
-  // search flow cannot know in advance whether the target row sits inside
-  // the paginated window) — this is the same code path the previous test's
-  // scroll-driven "Load all" exercises, just reached by search instead of a
-  // manual scroll. What is new here is the actual jump-and-highlight this
+  // Landing here forces the flat fetch+render of the whole thread (the search
+  // flow cannot know in advance whether the target row sits inside the
+  // paginated window). Since the "Load all" control was removed, this is the
+  // only path left that requests it, which makes this test the sole coverage
+  // of that render mode end to end. What this test adds on top is the actual jump-and-highlight this
   // test title promises: the target row must both render and carry the
   // `search-highlight-flash` class the app applies for ~4s once it locates
   // the match by DOM query.

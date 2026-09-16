@@ -47,7 +47,7 @@ export interface LargeConversationHandles {
   sessionId: string;
   /** Total messages that will actually render (control frames are excluded). */
   messageCount: number;
-  /** Text unique to the very first (oldest) message — off-screen until "Load all"/search. */
+  /** Text unique to the very first (oldest) message — off-screen until a search jump or a long scroll back. */
   firstMessageText: string;
   /** Text unique to the very last (newest) message — visible immediately (auto-follow lands here). */
   lastMessageText: string;

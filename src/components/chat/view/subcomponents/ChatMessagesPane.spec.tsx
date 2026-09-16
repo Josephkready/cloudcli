@@ -13,13 +13,12 @@ import ChatMessagesPane from './ChatMessagesPane';
  * true across that change, and both are covered here rather than only in the
  * real-layout e2e suite:
  *
- * 1. The windowed (non-"Load all") path actually bounds how many rows mount —
+ * 1. The windowed path actually bounds how many rows mount —
  *    the whole point of this phase. A regression here (e.g. the virtualizer
  *    silently falling back to rendering everything) would be invisible to any
  *    test that only checks *content*, not *count*.
  * 2. An explicit "show the whole thread" request (`visibleMessageCount ===
- *    Infinity`, set by "Load all" and by search-navigation) keeps the exact
- *    pre-virtualization flat render — every message mounts, matching what the
+ *    Infinity`) keeps the exact pre-virtualization flat render — every message mounts, matching what the
  *    in-conversation search-to-message flow (`useChatSessionState.ts`) depends
  *    on to find a message via `querySelectorAll`. Merely having reached the
  *    start of history by scroll-paging (`allMessagesLoaded` with a finite
@@ -88,14 +87,6 @@ const baseProps = {
   providerModelCatalog: {},
   providerModelsLoading: false,
   isLoadingMoreMessages: false,
-  hasMoreMessages: false,
-  totalMessages: 0,
-  sessionMessagesCount: 0,
-  loadEarlierMessages: () => {},
-  loadAllMessages: () => {},
-  isLoadingAllMessages: false,
-  loadAllJustFinished: false,
-  showLoadAllOverlay: false,
   createDiff: undefined,
   onGrantToolPermission: () => ({ success: true }),
   selectedProject: project,
@@ -138,7 +129,7 @@ describe('ChatMessagesPane virtualization (cloudcli#483 phase 2)', () => {
     offsetHeightSpy.mockRestore();
   });
 
-  it('mounts every row when visibleMessageCount is Infinity (Load all / search-navigation)', () => {
+  it('mounts every row when visibleMessageCount is Infinity (search-navigation)', () => {
     const messages = Array.from({ length: 250 }, (_, i) => makeMessage(`m${i}`));
     const scrollContainerRef = createRef<HTMLDivElement>();
 
