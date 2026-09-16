@@ -17,7 +17,6 @@ import { groupConsecutiveTools, isToolGroupItem, type MessageListItem } from '..
 import MessageComponent from './MessageComponent';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
 import ToolGroupContainer from './ToolGroupContainer';
-import LoadAllMessagesOverlay from './LoadAllMessagesOverlay';
 
 // A row's real height is unknown until it mounts and reports itself via
 // `measureElement` (markdown/Prism/Mermaid/images all vary a message's height
@@ -70,17 +69,10 @@ interface ChatMessagesPaneProps {
   providerModelCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>>;
   providerModelsLoading: boolean;
   isLoadingMoreMessages: boolean;
-  hasMoreMessages: boolean;
-  totalMessages: number;
-  sessionMessagesCount: number;
+  /** True once paging has reached the start of the thread; nothing older is coming. */
+  allMessagesLoaded: boolean;
   visibleMessageCount: number;
   visibleMessages: ChatMessage[];
-  loadEarlierMessages: () => void;
-  loadAllMessages: () => void;
-  allMessagesLoaded: boolean;
-  isLoadingAllMessages: boolean;
-  loadAllJustFinished: boolean;
-  showLoadAllOverlay: boolean;
   createDiff: any;
   onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
@@ -114,17 +106,9 @@ function ChatMessagesPane({
   providerModelCatalog,
   providerModelsLoading,
   isLoadingMoreMessages,
-  hasMoreMessages,
-  totalMessages,
-  sessionMessagesCount,
   visibleMessageCount,
   visibleMessages,
-  loadEarlierMessages,
-  loadAllMessages,
   allMessagesLoaded,
-  isLoadingAllMessages,
-  loadAllJustFinished,
-  showLoadAllOverlay,
   createDiff,
   onFileOpen,
   onShowSettings,
@@ -375,52 +359,30 @@ function ChatMessagesPane({
         />
       ) : (
         <>
-          {/* Loading indicator for older messages (hide when load-all is active) */}
-          {isLoadingMoreMessages && !isLoadingAllMessages && !allMessagesLoaded && (
-            <div className="py-3 text-center text-gray-500 dark:text-gray-400">
-              <div className="flex items-center justify-center space-x-2">
-                <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-gray-400" />
-                <p className="text-sm">{t('session.loading.olderMessages')}</p>
+          {/* Older messages arrive on their own as the reader scrolls up, so the
+              only thing to say about it is that a fetch is in flight — there is
+              no "load all" button, no "showing N of M" banner and no "load
+              earlier" link to offer, and deliberately so (cloudcli#495): every
+              one of them sat *in* the scrolled content and mounted or unmounted
+              mid-scroll, shoving the transcript under the reader's thumb at the
+              exact moment they were reading it.
+
+              This spinner keeps that from coming back the same way. It is always
+              mounted and `h-0`, so it contributes nothing to the scrolled
+              content's height whether or not it is spinning, and `sticky` keeps
+              it in view at the top of the pane rather than scrolling away with
+              the content it describes. */}
+          <div
+            aria-hidden={!isLoadingMoreMessages || allMessagesLoaded}
+            className="pointer-events-none sticky top-2 z-20 flex h-0 justify-center"
+          >
+            {isLoadingMoreMessages && !allMessagesLoaded && (
+              <div className="flex items-center space-x-2 rounded-full bg-gray-900/80 px-3 py-1.5 text-xs font-medium text-white shadow-lg dark:bg-gray-100/90 dark:text-gray-900">
+                <div className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white dark:border-gray-900/30 dark:border-t-gray-900" />
+                <span>{t('session.loading.olderMessages')}</span>
               </div>
-            </div>
-          )}
-
-          {/* Indicator showing there are more messages to load (hide when all loaded) */}
-          {hasMoreMessages && !isLoadingMoreMessages && !allMessagesLoaded && (
-            <div className="border-b border-gray-200 py-2 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              {totalMessages > 0 && (
-                <span>
-                  {t('session.messages.showingOf', { shown: sessionMessagesCount, total: totalMessages })}{' '}
-                  <span className="text-xs">{t('session.messages.scrollToLoad')}</span>
-                </span>
-              )}
-            </div>
-          )}
-
-          <LoadAllMessagesOverlay
-            showLoadAllOverlay={showLoadAllOverlay}
-            isLoadingAllMessages={isLoadingAllMessages}
-            loadAllJustFinished={loadAllJustFinished}
-            totalMessages={totalMessages}
-            onLoadAllMessages={loadAllMessages}
-          />
-
-          {/* Legacy message count indicator (for non-paginated view) */}
-          {!hasMoreMessages && chatMessages.length > visibleMessageCount && (
-            <div className="border-b border-gray-200 py-2 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              {t('session.messages.showingLast', { count: visibleMessageCount, total: chatMessages.length })} |
-              <button className="ml-1 text-blue-600 underline hover:text-blue-700" onClick={loadEarlierMessages}>
-                {t('session.messages.loadEarlier')}
-              </button>
-              {' | '}
-              <button
-                className="text-blue-600 underline hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                onClick={loadAllMessages}
-              >
-                {t('session.messages.loadAll')}
-              </button>
-            </div>
-          )}
+            )}
+          </div>
 
           {renderFlat ? (
             groupedVisibleMessages.map((item, index) => renderRow(item, index))

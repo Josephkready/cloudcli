@@ -627,18 +627,6 @@
 
   .chat-message {
     contain: layout style paint;
-    content-visibility: auto;
-    contain-intrinsic-size: auto 180px;
-  }
-
-  .chat-message.assistant {
-    contain-intrinsic-size: auto 240px;
-  }
-
-  .chat-message.user,
-  .chat-message.tool,
-  .chat-message.error {
-    contain-intrinsic-size: auto 96px;
   }
 
   /* Mobile touch optimization and safe areas */

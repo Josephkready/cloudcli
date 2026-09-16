@@ -49,6 +49,28 @@ const KEYBOARD_SPECS =
  */
 const CROSS_ENGINE_SPECS = /[\\/]composer-focus\.spec\.ts$/;
 
+/**
+ * Transcript scroll stability (#495) — WebKit under an iPhone UA, and *only*
+ * there.
+ *
+ * Not a scoping convenience: no Chromium project can detect this regression.
+ * The bug is that a transcript row's box changes size as it enters and leaves
+ * the viewport, resizing the content above the reader mid-scroll. Chromium
+ * implements CSS scroll anchoring and silently compensates, so the broken code
+ * measured clean on it (a handful of small deviations, median zero) while
+ * WebKit — which implements no scroll anchoring at all, and is what an iPhone
+ * runs — showed the reader's view moving 24px for a 240px scroll, and
+ * sometimes the wrong way entirely.
+ *
+ * A project that passes on the unfixed code is not a regression test; adding
+ * one here would only contribute load-dependent flakiness.
+ *
+ * Same anchoring rules as the patterns above: matched against absolute paths,
+ * so the leading separator and trailing `$` keep a worktree directory name from
+ * widening the match.
+ */
+const SCROLL_STABILITY_SPECS = /[\\/]transcript-scroll-stability\.spec\.ts$/;
+
 export default defineConfig({
   testDir: './e2e',
   globalSetup: './e2e/global-setup.ts',
@@ -84,8 +106,10 @@ export default defineConfig({
       name: 'chromium',
       // The mobile-keyboard specs have their own projects below; excluding them
       // here keeps them from running a third time under desktop metrics, where a
-      // soft keyboard is meaningless.
-      testIgnore: KEYBOARD_SPECS,
+      // soft keyboard is meaningless. The scroll-stability spec is excluded for
+      // a stronger reason — see its pattern above: Chromium's scroll anchoring
+      // masks the very regression it exists to catch.
+      testIgnore: [KEYBOARD_SPECS, SCROLL_STABILITY_SPECS],
       use: { ...devices['Desktop Chrome'] },
     },
     // The soft-keyboard specs run on BOTH engines, and the WebKit half is the
@@ -97,7 +121,7 @@ export default defineConfig({
     // at WebKit would be a much larger and unrelated change, and a slower gate.
     {
       name: 'mobile-safari',
-      testMatch: [KEYBOARD_SPECS, CROSS_ENGINE_SPECS],
+      testMatch: [KEYBOARD_SPECS, CROSS_ENGINE_SPECS, SCROLL_STABILITY_SPECS],
       use: { ...devices['iPhone 14 Pro'] },
     },
     {

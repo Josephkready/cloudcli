@@ -99,20 +99,13 @@ function ChatInterface({
     sessionLoadFailed,
     retryLoadSession,
     isLoadingMoreMessages,
-    hasMoreMessages,
-    totalMessages,
     isUserScrolledUp,
     setIsUserScrolledUp,
     tokenBudget,
     setTokenBudget,
     visibleMessageCount,
     visibleMessages,
-    loadEarlierMessages,
-    loadAllMessages,
     allMessagesLoaded,
-    isLoadingAllMessages,
-    loadAllJustFinished,
-    showLoadAllOverlay,
     createDiff,
     scrollContainerRef,
     scrollToBottom,
@@ -380,17 +373,9 @@ function ChatInterface({
           providerModelCatalog={providerModelCatalog}
           providerModelsLoading={providerModelsLoading}
           isLoadingMoreMessages={isLoadingMoreMessages}
-          hasMoreMessages={hasMoreMessages}
-          totalMessages={totalMessages}
-          sessionMessagesCount={chatMessages.length}
           visibleMessageCount={visibleMessageCount}
           visibleMessages={visibleMessages}
-          loadEarlierMessages={loadEarlierMessages}
-          loadAllMessages={loadAllMessages}
           allMessagesLoaded={allMessagesLoaded}
-          isLoadingAllMessages={isLoadingAllMessages}
-          loadAllJustFinished={loadAllJustFinished}
-          showLoadAllOverlay={showLoadAllOverlay}
           createDiff={createDiff}
           onFileOpen={onFileOpen}
           onShowSettings={onShowSettings}
