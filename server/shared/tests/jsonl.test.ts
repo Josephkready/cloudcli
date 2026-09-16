@@ -98,21 +98,30 @@ test('streamJsonlEntries releases the file descriptor when the caller breaks ear
     return resolved.filter((link) => link === target).length;
   };
 
-  await withJsonlFile('{"n":1}\n{"n":2}\n{"n":3}\n', async (filePath) => {
-    assert.equal(await openCountFor(filePath), 0, 'precondition: file not already open');
+  // Both sizes matter, and the large one is the point. `rl.close()` alone
+  // leaves the descriptor open, but that is only observable once the file is
+  // big enough that the stream has not already drained by the time of the
+  // `break` — a handful of lines leaks nothing either way, which is why the
+  // pre-extraction leak in the search loops went unnoticed. Real transcripts
+  // are the large case, and search breaks out of one per session file scanned.
+  const smallFile = '{"n":1}\n{"n":2}\n{"n":3}\n';
+  const largeFile = `${Array.from({ length: 200_000 }, (_, i) => `{"n":${i}}`).join('\n')}\n`;
 
-    for await (const entry of streamJsonlEntries<{ n: number }>(filePath)) {
-      if (entry.n === 1) {
+  for (const [label, contents] of [['small', smallFile], ['large', largeFile]] as const) {
+    await withJsonlFile(contents, async (filePath) => {
+      assert.equal(await openCountFor(filePath), 0, `precondition (${label}): not already open`);
+
+      for await (const _entry of streamJsonlEntries<{ n: number }>(filePath)) {
         break;
       }
-    }
 
-    // Regression guard for the generator teardown path: a plain readline loop
-    // released this on its own, so wrapping it must not be a step backwards.
-    // The search path abandons a stream per session file as soon as it has
-    // enough matches, so early break is the common case there, not an edge one.
-    assert.equal(await openCountFor(filePath), 0, 'breaking early must not leak the descriptor');
-  });
+      assert.equal(
+        await openCountFor(filePath),
+        0,
+        `breaking early on a ${label} file must not leak the descriptor`,
+      );
+    });
+  }
 });
 
 /* ── iterateJsonlLines ───────────────────────────────────────────────────── */
@@ -140,18 +149,48 @@ test('iterateJsonlLines tolerates a sparse array without throwing', () => {
   assert.deepEqual([...iterateJsonlLines(lines)], [{ n: 1 }, { n: 2 }]);
 });
 
-test('iterateJsonlLines stops parsing once the caller breaks', () => {
-  let parsed = 0;
-  const lines = ['{"n":1}', '{"n":2}', '{"n":3}'];
-  // A reverse scan that returns on its first hit must not pay to parse the
-  // rest of the file — that is the whole reason these readers scan backwards.
+/**
+ * Counts how many lines the generator actually reaches, by observing indexed
+ * reads of the backing array.
+ *
+ * Counting loop iterations instead proves nothing: a consumer that breaks on
+ * the first yielded entry sees exactly one entry whether the generator read one
+ * line or eagerly parsed all of them up front. The previous version of the test
+ * below did exactly that and passed against a deliberately eager implementation.
+ */
+const countingLines = (values: readonly string[]) => {
+  let reads = 0;
+  const proxy = new Proxy([...values], {
+    get(target, prop, receiver) {
+      if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+        reads += 1;
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  return { lines: proxy as readonly string[], reads: () => reads };
+};
+
+test('iterateJsonlLines reads lazily and stops when the caller breaks', () => {
+  // A reverse scan that returns on its first hit must not pay to read the rest
+  // of the file — that is the whole reason these readers scan backwards.
+  const { lines, reads } = countingLines(['{"n":1}', '{"n":2}', '{"n":3}']);
+
   for (const entry of iterateJsonlLines<{ n: number }>(lines, { fromEnd: true })) {
-    parsed += 1;
-    if (entry.n === 3) {
-      break;
-    }
+    assert.equal(entry.n, 3);
+    break;
   }
-  assert.equal(parsed, 1);
+
+  assert.equal(reads(), 1, 'breaking after the first entry must not touch the other lines');
+});
+
+test('iterateJsonlLines reads every line when the caller consumes them all', () => {
+  // The other half of the pair: proves the counter tracks real work, so the
+  // laziness assertion above cannot pass merely because nothing was read.
+  const { lines, reads } = countingLines(['{"n":1}', '{"n":2}', '{"n":3}']);
+
+  assert.equal([...iterateJsonlLines(lines)].length, 3);
+  assert.equal(reads(), 3);
 });
 
 test('iterateJsonlLines yields nothing for an empty list', () => {

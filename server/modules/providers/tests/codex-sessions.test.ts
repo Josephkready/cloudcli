@@ -7,6 +7,7 @@ import test from 'node:test';
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 import { CodexSessionSynchronizer } from '@/modules/providers/list/codex/codex-session-synchronizer.provider.js';
 import { CodexSessionsProvider } from '@/modules/providers/list/codex/codex-sessions.provider.js';
+import { searchConversations } from '@/modules/providers/services/session-conversations-search.service.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
   const original = os.homedir;
@@ -506,6 +507,128 @@ test('Codex synchronizer keeps an existing name when no thread_name exists', { c
     });
   } finally {
     restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+/*
+ * Direction guard for the `fromEnd` scan in `extractLastAgentMessageFromEnd`.
+ *
+ * Every other fixture here carries exactly one `task_complete`, so a reversed
+ * or off-by-one backwards scan would still find it and every assertion would
+ * still pass. Two candidates make the direction observable: the title must come
+ * from the LAST one, which is the whole point of scanning from the end.
+ */
+test('Codex synchronizer takes the last agent message, not the first', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codex-session-sync-newest-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  const sessionsDir = path.join(tempRoot, '.codex', 'sessions', '2026', '07', '07');
+  await Promise.all([
+    mkdir(workspacePath, { recursive: true }),
+    mkdir(sessionsDir, { recursive: true }),
+  ]);
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    await writeFile(
+      path.join(sessionsDir, 'rollout-codex-newest-1.jsonl'),
+      `${[
+        JSON.stringify({
+          type: 'session_meta',
+          payload: { id: 'codex-newest-1', cwd: workspacePath },
+        }),
+        JSON.stringify({
+          type: 'event_msg',
+          payload: { type: 'task_complete', last_agent_message: 'Older agent message' },
+        }),
+        JSON.stringify({
+          type: 'event_msg',
+          payload: { type: 'task_complete', last_agent_message: 'Newest agent message' },
+        }),
+      ].join('\n')}\n`,
+      'utf8',
+    );
+
+    await withIsolatedDatabase(async () => {
+      await new CodexSessionSynchronizer().synchronize();
+
+      assert.equal(
+        sessionsDb.getSessionById('codex-newest-1')?.custom_name,
+        'Newest agent message',
+      );
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+/*
+ * End-to-end guard for the global match limit, which had no test at all.
+ *
+ * Scope, stated honestly: this does NOT isolate the `shouldStop` predicate the
+ * JSONL extraction introduced. Three redundant mechanisms enforce this limit —
+ * the outer project/session loops break on it, `addSessionMatch` declines past
+ * it, and `shouldStop` halts the file scan — and any ONE of them alone produces
+ * the result asserted below. Verified by mutation: disabling `shouldStop`, or
+ * the `addSessionMatch` check, or the outer breaks, each leaves this green.
+ *
+ * `shouldStop`'s early stop is therefore a pure optimisation with no externally
+ * observable effect, and it is pinned where it can be — at the generator, in
+ * `jsonl.test.ts`. What this test adds is the user-visible contract: two
+ * sessions of two matches each, capped to a limit of 2.
+ */
+test('Codex conversation search honours the global match limit across sessions', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codex-search-limit-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+
+  const userMessage = (message: string) => JSON.stringify({
+    type: 'event_msg',
+    payload: { type: 'user_message', kind: 'plain', message },
+  });
+
+  const writeSession = async (sessionId: string, prefix: string): Promise<string> => {
+    const transcriptPath = path.join(tempRoot, `rollout-${sessionId}.jsonl`);
+    await writeFile(
+      transcriptPath,
+      `${[
+        JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: workspacePath } }),
+        userMessage(`${prefix} needle one`),
+        userMessage(`${prefix} needle two`),
+      ].join('\n')}\n`,
+      'utf8',
+    );
+    return transcriptPath;
+  };
+
+  try {
+    const pathA = await writeSession('codex-search-a', 'alpha');
+    const pathB = await writeSession('codex-search-b', 'beta');
+
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createSession('codex-search-a', 'codex', workspacePath, 'A', undefined, undefined, pathA);
+      sessionsDb.createSession('codex-search-b', 'codex', workspacePath, 'B', undefined, undefined, pathB);
+
+      const countSessions = (result: { results: Array<{ sessions: unknown[] }> }) =>
+        result.results.reduce((total, project) => total + project.sessions.length, 0);
+
+      // Control first: with room for everything both sessions contribute their
+      // per-session maximum of 2. This is what makes the capped case below mean
+      // something rather than merely describing the fixture.
+      const uncapped = await searchConversations('needle', 50);
+      assert.equal(uncapped.totalMatches, 4);
+      assert.equal(countSessions(uncapped), 2);
+
+      const capped = await searchConversations('needle', 2);
+      assert.equal(capped.totalMatches, 2, 'the global limit must cap total matches');
+      assert.equal(
+        countSessions(capped),
+        1,
+        'once the limit is met, the second session must contribute nothing',
+      );
+    });
+  } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
 });

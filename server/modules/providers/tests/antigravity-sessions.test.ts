@@ -258,3 +258,47 @@ test('Antigravity history read failures remain distinguishable from empty sessio
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+/*
+ * Direction guard for the `fromEnd` history scan.
+ *
+ * agy appends to history.jsonl, so a conversation that gets renamed or moved
+ * has more than one row and the LAST one is current. Every other fixture here
+ * writes a single row per conversationId, which leaves the scan direction
+ * unobservable — a reversed or off-by-one walk would pick the same row and no
+ * assertion would notice.
+ */
+test('Antigravity synchronizer takes the newest history row for a conversation', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'antigravity-session-newest-'));
+  const stalePath = path.join(tempRoot, 'stale-workspace');
+  const currentPath = path.join(tempRoot, 'current-workspace');
+  const sessionId = 'agy-renamed-1';
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    await mkdir(stalePath, { recursive: true });
+    await mkdir(currentPath, { recursive: true });
+    await writeTranscript(tempRoot, sessionId);
+
+    const historyPath = path.join(tempRoot, '.gemini', 'antigravity-cli', 'history.jsonl');
+    await writeFile(
+      historyPath,
+      [
+        JSON.stringify({ display: 'Stale name', workspace: stalePath, conversationId: sessionId }),
+        JSON.stringify({ display: 'Current name', workspace: currentPath, conversationId: sessionId }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+
+    await withIsolatedDatabase(async () => {
+      await new AntigravitySessionSynchronizer().synchronize();
+
+      const session = sessionsDb.getSessionById(sessionId);
+      assert.equal(session?.custom_name, 'Current name');
+      assert.equal(session?.project_path, currentPath);
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
