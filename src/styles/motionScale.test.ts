@@ -75,7 +75,6 @@ const LAYOUT_TRANSITION_ALLOWLIST: Record<string, string> = {
   'components/git-panel/view/changes/CommitComposer.tsx': 'max-height collapse of the composer',
   'components/git-panel/view/changes/FileChangeItem.tsx': 'max-height reveal of the inline diff',
   'components/git-panel/view/changes/FileSelectionControls.tsx': 'max-height collapse of the controls row',
-  'components/quick-settings-panel/view/QuickSettingsHandle.tsx': 'the drag handle is positioned by `right`',
   'components/sidebar/view/subcomponents/SidebarContent.tsx': 'search progress bar fill',
   'components/sidebar/view/subcomponents/SidebarProjectsState.tsx': 'project-load progress bar fill',
 };
