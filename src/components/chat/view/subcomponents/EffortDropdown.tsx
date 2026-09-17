@@ -9,6 +9,9 @@ interface EffortDropdownProps {
   effort: string;
   availableEffortOptions: NonNullable<ProviderModelOption['effort']>['values'];
   onSelectEffort: (effort: string) => void;
+  // Once a conversation has messages, switching reasoning effort breaks the
+  // prompt cache and can raise cost, so a change is confirmed first (#499).
+  conversationStarted?: boolean;
 }
 
 /**
@@ -25,8 +28,12 @@ export default function EffortDropdown({
   effort,
   availableEffortOptions,
   onSelectEffort,
+  conversationStarted = false,
 }: EffortDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
+  // The effort a user picked that still needs mid-conversation confirmation
+  // before it is applied (#499). Null when no change is pending.
+  const [pendingEffort, setPendingEffort] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -55,13 +62,40 @@ export default function EffortDropdown({
     });
   }, []);
 
-  const selectEffort = useCallback(
+  const applyEffort = useCallback(
     (value: string) => {
       onSelectEffort(value);
+      setPendingEffort(null);
       setIsOpen(false);
     },
     [onSelectEffort],
   );
+
+  const selectEffort = useCallback(
+    (value: string) => {
+      // No-op selection of the already-active effort: never warn, just close.
+      if (value === effort) {
+        setIsOpen(false);
+        return;
+      }
+      // Mid-conversation, defer the change to an explicit confirmation so the
+      // user knows it breaks prompt caching (#499). Otherwise apply at once.
+      if (conversationStarted) {
+        setPendingEffort(value);
+        return;
+      }
+      applyEffort(value);
+    },
+    [applyEffort, conversationStarted, effort],
+  );
+
+  // A pending confirmation only makes sense while the menu is open; drop it
+  // whenever the menu closes so reopening starts from the option list (#499).
+  useEffect(() => {
+    if (!isOpen) {
+      setPendingEffort(null);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -130,9 +164,50 @@ export default function EffortDropdown({
             maxHeight: position.maxHeight,
             transform: 'translateY(-100%)',
           }}
-          role="menu"
+          role={pendingEffort ? 'alertdialog' : 'menu'}
+          aria-label={pendingEffort ? 'Confirm reasoning effort change' : undefined}
         >
-          {effortOptions.map((option) => {
+          {pendingEffort ? (
+            <div className="max-w-[15rem] p-2">
+              <p className="text-xs text-foreground">
+                Change reasoning effort to{' '}
+                <span className="font-semibold capitalize">
+                  {pendingEffort === 'default' ? 'Default' : pendingEffort}
+                </span>
+                ?
+              </p>
+              <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                Switching effort mid-conversation breaks prompt caching and can increase cost.
+              </p>
+              <div className="mt-2 flex justify-end gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPendingEffort(null)}
+                  onPointerUp={(event: ReactPointerEvent<HTMLButtonElement>) => {
+                    if (event.pointerType !== 'mouse') {
+                      setPendingEffort(null);
+                    }
+                  }}
+                  className="rounded px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+                >
+                  Keep {effort === 'default' ? 'Default' : effort}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyEffort(pendingEffort)}
+                  onPointerUp={(event: ReactPointerEvent<HTMLButtonElement>) => {
+                    if (event.pointerType !== 'mouse') {
+                      applyEffort(pendingEffort);
+                    }
+                  }}
+                  className="rounded bg-primary px-2 py-1 text-xs font-medium capitalize text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  Change to {pendingEffort === 'default' ? 'Default' : pendingEffort}
+                </button>
+              </div>
+            </div>
+          ) : (
+            effortOptions.map((option) => {
             const isSelected = option.value === effort;
             const label = option.value === 'default' ? 'Default' : option.value;
             return (
@@ -161,7 +236,8 @@ export default function EffortDropdown({
                 <span>{label}</span>
               </button>
             );
-          })}
+            })
+          )}
         </div>,
         document.body,
       )}

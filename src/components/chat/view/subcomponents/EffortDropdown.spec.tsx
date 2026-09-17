@@ -56,6 +56,103 @@ describe('EffortDropdown', () => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
+  // #499: changing reasoning effort mid-conversation can break prompt caching
+  // and raise cost, so once a conversation has messages a different selection
+  // must be confirmed before it applies (warn-and-allow).
+  it('applies a change immediately before the conversation has started', () => {
+    const onSelectEffort = vi.fn();
+    render(
+      <EffortDropdown
+        effort="default"
+        availableEffortOptions={[{ value: 'low' }, { value: 'high' }]}
+        onSelectEffort={onSelectEffort}
+        conversationStarted={false}
+      />,
+    );
+
+    open();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'high' }));
+
+    expect(onSelectEffort).toHaveBeenCalledWith('high');
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('warns instead of applying when changing effort mid-conversation (#499)', () => {
+    const onSelectEffort = vi.fn();
+    render(
+      <EffortDropdown
+        effort="default"
+        availableEffortOptions={[{ value: 'low' }, { value: 'high' }]}
+        onSelectEffort={onSelectEffort}
+        conversationStarted
+      />,
+    );
+
+    open();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'high' }));
+
+    // Not applied yet: a confirmation must be shown first.
+    expect(onSelectEffort).not.toHaveBeenCalled();
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+    expect(screen.getByText(/caching/i)).toBeTruthy();
+  });
+
+  it('applies the change after the mid-conversation warning is confirmed (#499)', () => {
+    const onSelectEffort = vi.fn();
+    render(
+      <EffortDropdown
+        effort="default"
+        availableEffortOptions={[{ value: 'low' }, { value: 'high' }]}
+        onSelectEffort={onSelectEffort}
+        conversationStarted
+      />,
+    );
+
+    open();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'high' }));
+    fireEvent.click(screen.getByRole('button', { name: /change to high/i }));
+
+    expect(onSelectEffort).toHaveBeenCalledWith('high');
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('keeps the current effort when the mid-conversation warning is dismissed (#499)', () => {
+    const onSelectEffort = vi.fn();
+    render(
+      <EffortDropdown
+        effort="default"
+        availableEffortOptions={[{ value: 'low' }, { value: 'high' }]}
+        onSelectEffort={onSelectEffort}
+        conversationStarted
+      />,
+    );
+
+    open();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'high' }));
+    fireEvent.click(screen.getByRole('button', { name: /keep/i }));
+
+    expect(onSelectEffort).not.toHaveBeenCalled();
+  });
+
+  it('does not warn when re-selecting the current effort mid-conversation (#499)', () => {
+    const onSelectEffort = vi.fn();
+    render(
+      <EffortDropdown
+        effort="high"
+        availableEffortOptions={[{ value: 'low' }, { value: 'high' }]}
+        onSelectEffort={onSelectEffort}
+        conversationStarted
+      />,
+    );
+
+    open();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'high' }));
+
+    // Same value → no change, no warning, just closes.
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
   it('ignores a mouse pointerup and selects only on the click that follows it', () => {
     const onSelectEffort = vi.fn();
     render(

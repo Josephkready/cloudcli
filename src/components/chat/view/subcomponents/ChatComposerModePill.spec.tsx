@@ -43,6 +43,7 @@ function renderComposer(permissionMode: PermissionMode, overrides: ComposerOverr
       effort="default"
       availableEffortOptions={[]}
       onSelectEffort={noop}
+      conversationStarted={false}
       tokenBudget={null}
       onShowTokenUsage={noop}
       onToggleCommandMenu={noop}

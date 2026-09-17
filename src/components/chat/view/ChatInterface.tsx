@@ -421,6 +421,7 @@ function ChatInterface({
           effort={currentProviderEffort}
           availableEffortOptions={currentProviderEffortOptions}
           onSelectEffort={(nextEffort) => setStoredProviderEffort(provider, nextEffort)}
+          conversationStarted={chatMessages.length > 0}
           tokenBudget={tokenBudget}
           onShowTokenUsage={showCostModal}
           onToggleCommandMenu={handleToggleCommandMenu}
