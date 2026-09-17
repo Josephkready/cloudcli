@@ -22,6 +22,7 @@ import {
   parseClaudeLocalCommandPayload,
   stripAnsiFormatting,
 } from '@/modules/providers/shared/transcript/transcript-text.js';
+import type { ClaudeLocalCommandPayload } from '@/modules/providers/shared/transcript/transcript-text.js';
 
 const PROVIDER = 'claude';
 
@@ -342,6 +343,49 @@ export function isAgentAuthoredUserTurn(raw: AnyRecord): boolean {
   return typeof originKind === 'string' && originKind !== 'human';
 }
 
+/**
+ * How a single `role: 'user'` text payload should surface in chat.
+ *
+ * Slash-command envelopes and their captured stdout are serialized as plain
+ * text — sometimes as a bare string, sometimes (newer builds) as a single
+ * text part inside array content. Both transports must classify identically,
+ * or a `/goal` command and its `Goal set: …` stdout render as raw-tagged blue
+ * user bubbles in one shape and correctly in the other (#501/#509).
+ */
+export type ClaudeUserTextClassification =
+  | { kind: 'command'; displayText: string; payload: ClaudeLocalCommandPayload }
+  | { kind: 'stdout'; text: string }
+  | { kind: 'user'; text: string }
+  | { kind: 'skip' };
+
+export function classifyClaudeUserText(
+  text: string,
+  agentAuthored: boolean,
+): ClaudeUserTextClassification {
+  // A slash-command invocation is a user action even on an agent-flagged row
+  // (a subagent may run one), so it renders as a chip regardless of provenance.
+  const commandPayload = parseClaudeLocalCommandPayload(text);
+  if (commandPayload) {
+    const displayText = buildClaudeLocalCommandDisplayText(commandPayload);
+    return displayText ? { kind: 'command', displayText, payload: commandPayload } : { kind: 'skip' };
+  }
+
+  // Command stdout is terminal output produced in response to the command, so
+  // it belongs to the assistant side of the transcript, never a user bubble.
+  const stdout = extractTaggedContent(text, 'local-command-stdout');
+  if (stdout !== null) {
+    const stdoutText = stripAnsiFormatting(stdout).trim();
+    return stdoutText ? { kind: 'stdout', text: stdoutText } : { kind: 'skip' };
+  }
+
+  // Mirrors the historical `rendersAsUserText`: harness banners are hidden,
+  // task notifications survive for frontend re-attribution, and every other
+  // agent-authored turn is dropped rather than shown as the user's.
+  if (!text || isInternalContent(text)) return { kind: 'skip' };
+  if (isTaskNotificationContent(text)) return { kind: 'user', text };
+  return agentAuthored ? { kind: 'skip' } : { kind: 'user', text };
+}
+
 
 export class ClaudeSessionsProvider implements IProviderSessions {
   /**
@@ -408,7 +452,11 @@ export class ClaudeSessionsProvider implements IProviderSessions {
             }));
           } else if (part.type === 'text') {
             const text = part.text || '';
-            if (rendersAsUserText(text)) {
+            // Same slash-command / stdout / user classification the string
+            // branch uses, so an array-serialized `/goal` and its stdout don't
+            // leak as raw-tagged user bubbles (#501/#509).
+            const classified = classifyClaudeUserText(text, agentAuthored);
+            if (classified.kind === 'command') {
               messages.push(createNormalizedMessage({
                 id: `${baseId}_text_${partIndex}`,
                 sessionId,
@@ -416,7 +464,32 @@ export class ClaudeSessionsProvider implements IProviderSessions {
                 provider: PROVIDER,
                 kind: 'text',
                 role: 'user',
-                content: text,
+                content: classified.displayText,
+                commandName: classified.payload.commandName,
+                commandMessage: classified.payload.commandMessage,
+                commandArgs: classified.payload.commandArgs,
+                isLocalCommand: true,
+              }));
+            } else if (classified.kind === 'stdout') {
+              messages.push(createNormalizedMessage({
+                id: `${baseId}_text_${partIndex}`,
+                sessionId,
+                timestamp: ts,
+                provider: PROVIDER,
+                kind: 'text',
+                role: 'assistant',
+                content: classified.text,
+                isLocalCommandStdout: true,
+              }));
+            } else if (classified.kind === 'user') {
+              messages.push(createNormalizedMessage({
+                id: `${baseId}_text_${partIndex}`,
+                sessionId,
+                timestamp: ts,
+                provider: PROVIDER,
+                kind: 'text',
+                role: 'user',
+                content: classified.text,
                 images: !imagesAttached && imageAttachments.length > 0 ? imageAttachments : undefined,
               }));
               imagesAttached = true;
@@ -483,58 +556,11 @@ export class ClaudeSessionsProvider implements IProviderSessions {
           return messages;
         }
 
-        /**
-         * Local slash commands are serialized as tagged text even though they
-         * are semantically a user action. Expose the parsed fields to the
-         * frontend and emit a plain user-visible command string so the command
-         * no longer disappears from history.
-         */
-        const localCommandPayload = parseClaudeLocalCommandPayload(text);
-        if (localCommandPayload) {
-          const displayText = buildClaudeLocalCommandDisplayText(localCommandPayload);
-          if (displayText) {
-            messages.push(createNormalizedMessage({
-              id: baseId,
-              sessionId,
-              timestamp: ts,
-              provider: PROVIDER,
-              kind: 'text',
-              role: 'user',
-              content: displayText,
-              commandName: localCommandPayload.commandName,
-              commandMessage: localCommandPayload.commandMessage,
-              commandArgs: localCommandPayload.commandArgs,
-              isLocalCommand: true,
-            }));
-          }
-          return messages;
-        }
-
-        /**
-         * Local command stdout is also written as a "user" row in Claude's
-         * transcript, but it is terminal output produced in response to the
-         * command. Re-label it as assistant text so the chat transcript matches
-         * the actual conversational flow seen by the user.
-         */
-        const localCommandStdout = extractTaggedContent(text, 'local-command-stdout');
-        if (localCommandStdout !== null) {
-          const stdoutText = stripAnsiFormatting(localCommandStdout).trim();
-          if (stdoutText) {
-            messages.push(createNormalizedMessage({
-              id: baseId,
-              sessionId,
-              timestamp: ts,
-              provider: PROVIDER,
-              kind: 'text',
-              role: 'assistant',
-              content: stdoutText,
-              isLocalCommandStdout: true,
-            }));
-          }
-          return messages;
-        }
-
-        if (rendersAsUserText(text)) {
+        // Slash-command envelopes, their stdout, and plain user text all go
+        // through the shared classifier so a bare-string row and an
+        // array-serialized row surface identically (#501/#509).
+        const classified = classifyClaudeUserText(text, agentAuthored);
+        if (classified.kind === 'command') {
           messages.push(createNormalizedMessage({
             id: baseId,
             sessionId,
@@ -542,7 +568,32 @@ export class ClaudeSessionsProvider implements IProviderSessions {
             provider: PROVIDER,
             kind: 'text',
             role: 'user',
-            content: text,
+            content: classified.displayText,
+            commandName: classified.payload.commandName,
+            commandMessage: classified.payload.commandMessage,
+            commandArgs: classified.payload.commandArgs,
+            isLocalCommand: true,
+          }));
+        } else if (classified.kind === 'stdout') {
+          messages.push(createNormalizedMessage({
+            id: baseId,
+            sessionId,
+            timestamp: ts,
+            provider: PROVIDER,
+            kind: 'text',
+            role: 'assistant',
+            content: classified.text,
+            isLocalCommandStdout: true,
+          }));
+        } else if (classified.kind === 'user') {
+          messages.push(createNormalizedMessage({
+            id: baseId,
+            sessionId,
+            timestamp: ts,
+            provider: PROVIDER,
+            kind: 'text',
+            role: 'user',
+            content: classified.text,
           }));
         }
       }
