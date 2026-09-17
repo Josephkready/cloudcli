@@ -1,8 +1,6 @@
-import { createReadStream } from 'node:fs';
-import readline from 'node:readline';
-
 import { sessionsDb } from '@/modules/database/index.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
+import { streamJsonlEntries } from '@/shared/jsonl.js';
 import type { FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import {
   AppError,
@@ -128,19 +126,14 @@ export class AntigravitySessionsProvider implements IProviderSessions {
 
     const collector = new HistoryPageCollector<NormalizedMessage>({ limit, offset });
     try {
-      const fileStream = createReadStream(transcriptPath);
-      const lines = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-      for await (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          continue;
-        }
+      for await (const entry of streamJsonlEntries(transcriptPath)) {
         try {
-          for (const message of normalizeAntigravityHistoryStep(JSON.parse(trimmed), sessionId)) {
+          for (const message of normalizeAntigravityHistoryStep(entry, sessionId)) {
             collector.add(message);
           }
         } catch {
-          // Ignore a malformed or partially-written line without losing history.
+          // Keeps the body half of the original per-line catch: a step the
+          // normalizer chokes on must not cost the rest of the history.
         }
       }
     } catch (error) {

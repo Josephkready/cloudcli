@@ -90,14 +90,24 @@ export async function* streamJsonlEntries<T = Record<string, any>>(
   } finally {
     // Reached on early `return`/`break` as well as normal exhaustion.
     //
-    // `destroy()` is load-bearing, and specifically because this is a generator.
-    // A bare `for await (const line of rl) { ... break }` releases the
-    // descriptor on its own — readline's iterator cleanup handles it — which is
-    // what every call site did before this extraction. Wrapping that loop in a
-    // generator changes the teardown path: breaking out of the *consumer* loop
-    // returns the generator, and the descriptor then survives until GC unless
-    // it is destroyed here. Removing this line reintroduces a leak that the
-    // pre-extraction code did not have; `jsonl.test.ts` pins it.
+    // `destroy()` is load-bearing: `rl.close()` alone never destroys the
+    // underlying `fs.ReadStream`, and readline's iterator cleanup only calls
+    // `rl.close()`. A reader that stops early therefore leaks the descriptor
+    // until GC unless the stream is destroyed explicitly.
+    //
+    // This fixes a real pre-existing leak rather than guarding a new one. The
+    // three conversation-search loops previously did a bare
+    // `for await (const line of rl) { if (limitReached) break; ... }` with no
+    // cleanup at all, and hitting that limit is their normal path — once per
+    // session file scanned. It went unnoticed because the leak only appears
+    // once the file is big enough that the stream has not already drained by
+    // the time of the `break`: measured, a 3-line file leaks nothing and a
+    // 200k-line one leaks a descriptor, and real transcripts are the latter.
+    // (`extractFirstValidJsonlData` was the one site that got this right — it
+    // called `fileStream.close()` explicitly, which this replaces.)
+    //
+    // `jsonl.test.ts` pins it at both sizes, and the assertion was
+    // mutation-checked by deleting this line.
     rl.close();
     fileStream.destroy();
   }
