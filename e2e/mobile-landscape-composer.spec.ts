@@ -27,8 +27,7 @@ import { showKeyboard, expectClearsKeyboard } from './keyboard';
  *    mobile regardless of width.
  *
  * Runs under the desktop chromium project with an explicit phone-landscape
- * viewport and touch context, matching `settings-handle-stacking.spec.ts`'s
- * convention — it keeps this spec out of the shared mobile-safari/
+ * viewport and touch context — it keeps this spec out of the shared mobile-safari/
  * mobile-chrome project filters (see playwright.config.ts's KEYBOARD_SPECS
  * comment) while still exercising the exact `pointer: coarse`/`hover: none`
  * signal (3) depends on.
