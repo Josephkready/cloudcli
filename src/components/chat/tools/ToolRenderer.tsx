@@ -271,6 +271,9 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
           <QuestionAnswerContent
             questions={contentProps.questions || []}
             answers={contentProps.answers || {}}
+            // 'running' == no tool result yet == still waiting on the user, so a
+            // pending question is not "Skipped" (#518).
+            resolved={toolStatus === 'completed'}
           />
         );
         break;

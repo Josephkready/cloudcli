@@ -5,6 +5,17 @@ interface QuestionAnswerContentProps {
   questions: Question[];
   answers: Record<string, string>;
   className?: string;
+  /**
+   * Whether the AskUserQuestion tool has RESOLVED (has a result), as opposed to
+   * still waiting on the user. A question with no answer means two very
+   * different things depending on this: while pending it is "waiting for your
+   * answer"; only once resolved is a still-answerless question genuinely
+   * "Skipped". Rendering "Skipped" on a pending question told the user the
+   * conversation had moved on without them when it was in fact still blocked on
+   * their input (#518). Defaults to `true` so a transcript row loaded from disk
+   * (already resolved) reads the same as before.
+   */
+  resolved?: boolean;
 }
 
 // Exception to the stateless ContentRenderer pattern: multi-question navigation requires local state.
@@ -12,6 +23,7 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
   questions,
   answers,
   className = '',
+  resolved = true,
 }) => {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
@@ -106,7 +118,7 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
                   </div>
                 )}
 
-                {!isExpanded && skipped && hasAnyAnswer && (
+                {!isExpanded && skipped && hasAnyAnswer && resolved && (
                   <span className="mt-1 inline-block text-[10px] italic text-gray-400 dark:text-gray-500">
                     Skipped
                   </span>
@@ -181,7 +193,7 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
                     </div>
                   ))}
 
-                  {skipped && hasAnyAnswer && (
+                  {skipped && hasAnyAnswer && resolved && (
                     <div className="px-2.5 py-1 text-[11px] italic text-gray-400 dark:text-gray-500">
                       No answer provided
                     </div>
@@ -195,7 +207,7 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
 
       {!hasAnyAnswer && total === 1 && (
         <div className="text-[11px] italic text-gray-400 dark:text-gray-500">
-          Skipped
+          {resolved ? 'Skipped' : 'Waiting for your answer…'}
         </div>
       )}
     </div>
