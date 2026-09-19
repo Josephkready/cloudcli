@@ -169,6 +169,43 @@ test('subagent sidechain prompts are not attributed to the user', () => {
   assert.deepEqual(userTexts(raw), []);
 });
 
+test('a live subagent prompt turn is not attributed to the user (#509)', () => {
+  // Captured verbatim from the SDK stream while a Task subagent ran: the parent
+  // agent's prompt to the subagent arrives as a plain user-role text row that
+  // carries ONLY `parent_tool_use_id` — no `isMeta`, `isSynthetic`,
+  // `isSidechain`, or `origin`. Before the fix this rendered as a blue user
+  // bubble ("Reply with the single word: BANANA…") as if the person typed it.
+  const raw = {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [textPart('Reply with the single word: BANANA\n\nDo not use any tools. Do not add any other text.')],
+    },
+    parent_tool_use_id: 'toolu_01CH19Z7q7opzzc48CnJAGSY',
+    session_id: 'session-1',
+    uuid: 'u-subagent-prompt',
+    timestamp: '2026-09-19T15:32:52.000Z',
+  };
+
+  assert.equal(isAgentAuthoredUserTurn(raw), true);
+  assert.deepEqual(userTexts(raw), []);
+});
+
+test('the transformMessage `parentToolUseId` spelling is also caught (#509)', () => {
+  // claude-sdk.js `transformMessage` mirrors `parent_tool_use_id` to a camelCase
+  // `parentToolUseId` on the wrapper; accept it too so the guard cannot regress
+  // if normalization ever reads the transformed shape.
+  const raw = {
+    type: 'user',
+    message: { role: 'user', content: [textPart('subagent instructions here')] },
+    parentToolUseId: 'toolu_abc123',
+    uuid: 'u-subagent-prompt-camel',
+  };
+
+  assert.equal(isAgentAuthoredUserTurn(raw), true);
+  assert.deepEqual(userTexts(raw), []);
+});
+
 test('background task notifications still reach the frontend re-attribution', () => {
   // These are user-role rows that the UI turns into an assistant notification.
   // Suppressing them here would silently drop background-task results.
