@@ -75,3 +75,42 @@ test('still renders a well-formed question + answer', () => {
   );
   assert.ok(html.includes('Pick one?'));
 });
+
+// #518: a pending question (the tool has no result yet — still waiting on the
+// user) must NOT read as "Skipped". Rendering "Skipped" while the actionable
+// panel was still asking made it look like the conversation had moved on
+// without the user choosing anything.
+test('a pending single question shows "waiting", not "Skipped"', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(QuestionAnswerContent, {
+      questions: [{ question: 'Pick a fruit?', options: [{ label: 'Apple' }, { label: 'Banana' }] }],
+      answers: {},
+      resolved: false,
+    }),
+  );
+  assert.ok(!html.includes('Skipped'), 'pending question must not render "Skipped"');
+  assert.ok(html.includes('Waiting for your answer'), 'pending question should say it is waiting');
+});
+
+test('a resolved single question with no answer still shows "Skipped"', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(QuestionAnswerContent, {
+      questions: [{ question: 'Pick a fruit?', options: [{ label: 'Apple' }, { label: 'Banana' }] }],
+      answers: {},
+      resolved: true,
+    }),
+  );
+  assert.ok(html.includes('Skipped'), 'a genuinely skipped (resolved, answerless) question is still Skipped');
+  assert.ok(!html.includes('Waiting for your answer'));
+});
+
+test('defaults to resolved so a persisted transcript row is unchanged', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(QuestionAnswerContent, {
+      questions: [{ question: 'Pick a fruit?', options: [{ label: 'Apple' }] }],
+      answers: {},
+      // no `resolved` prop
+    }),
+  );
+  assert.ok(html.includes('Skipped'));
+});
