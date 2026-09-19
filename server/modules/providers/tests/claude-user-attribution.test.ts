@@ -74,6 +74,32 @@ test('a live tool_result turn still yields its tool result', () => {
   assert.equal(normalized[0].content, 'hello-probe');
 });
 
+test('a subagent tool_result turn (non-null parent_tool_use_id) still yields its result (#509)', () => {
+  // A subagent's OWN tool results also stream with `parent_tool_use_id` set.
+  // The #509 guard keys on that same field, so pin that a tool_result row is
+  // still emitted regardless — the extraction is unconditional today, and this
+  // guards a future refactor that might nest it behind an `agentAuthored` check.
+  const raw = {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [
+        { type: 'tool_result', tool_use_id: 'toolu_sub', content: 'subagent-probe', is_error: false },
+      ],
+    },
+    parent_tool_use_id: 'toolu_parent',
+    session_id: 'session-1',
+    uuid: 'u-subagent-toolresult',
+  };
+
+  const normalized = provider.normalizeMessage(raw, 'session-1');
+  assert.equal(normalized.length, 1);
+  assert.equal(normalized[0].kind, 'tool_result');
+  assert.equal(normalized[0].content, 'subagent-probe');
+  // ...and it never leaks as a user bubble.
+  assert.deepEqual(userTexts(raw), []);
+});
+
 test('a real keyboard message is still a user message', () => {
   // Guards the local-echo reconciliation added in #327/#336: if genuine user
   // turns stopped coming back, queued messages would never reconcile.
@@ -163,6 +189,43 @@ test('subagent sidechain prompts are not attributed to the user', () => {
     isSidechain: true,
     message: { role: 'user', content: [textPart('repo: /tmp/liftosaur-workouts\npr: https://example.test/pull/8')] },
     uuid: 'u7',
+  };
+
+  assert.equal(isAgentAuthoredUserTurn(raw), true);
+  assert.deepEqual(userTexts(raw), []);
+});
+
+test('a live subagent prompt turn is not attributed to the user (#509)', () => {
+  // Captured verbatim from the SDK stream while a Task subagent ran: the parent
+  // agent's prompt to the subagent arrives as a plain user-role text row that
+  // carries ONLY `parent_tool_use_id` — no `isMeta`, `isSynthetic`,
+  // `isSidechain`, or `origin`. Before the fix this rendered as a blue user
+  // bubble ("Reply with the single word: BANANA…") as if the person typed it.
+  const raw = {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [textPart('Reply with the single word: BANANA\n\nDo not use any tools. Do not add any other text.')],
+    },
+    parent_tool_use_id: 'toolu_01CH19Z7q7opzzc48CnJAGSY',
+    session_id: 'session-1',
+    uuid: 'u-subagent-prompt',
+    timestamp: '2026-09-19T15:32:52.000Z',
+  };
+
+  assert.equal(isAgentAuthoredUserTurn(raw), true);
+  assert.deepEqual(userTexts(raw), []);
+});
+
+test('the transformMessage `parentToolUseId` spelling is also caught (#509)', () => {
+  // claude-sdk.js `transformMessage` mirrors `parent_tool_use_id` to a camelCase
+  // `parentToolUseId` on the wrapper; accept it too so the guard cannot regress
+  // if normalization ever reads the transformed shape.
+  const raw = {
+    type: 'user',
+    message: { role: 'user', content: [textPart('subagent instructions here')] },
+    parentToolUseId: 'toolu_abc123',
+    uuid: 'u-subagent-prompt-camel',
   };
 
   assert.equal(isAgentAuthoredUserTurn(raw), true);

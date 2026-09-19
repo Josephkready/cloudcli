@@ -325,6 +325,17 @@ export function isTaskNotificationContent(content: string): boolean {
  * every synthetic turn as if the user had sent it, and the same turn vanished
  * on reload once the `isMeta`-tagged transcript was read back.
  *
+ * Subagent (Task) prompt turns are a case those flags do NOT cover on the live
+ * stream: the parent agent's prompt to the subagent streams as a plain
+ * `role: 'user'` text row carrying `parent_tool_use_id` but none of `isMeta`,
+ * `isSynthetic`, `isSidechain`, or `origin` (verified live against the Claude
+ * Agent SDK — the earlier assumption that `isSynthetic`/`origin` caught these
+ * was wrong). Without the `parent_tool_use_id` check below, the subagent's
+ * prompt rendered as a blue user bubble as if the person had typed it (#509).
+ * A real keyboard turn is always main-thread, so `parent_tool_use_id` is null
+ * for genuine input — the check never matches it. On reload the persisted row
+ * carries `isSidechain: true` instead, which the check above already handles.
+ *
  * Every check here is a positive assertion of non-human origin: a genuine user
  * message (and a tool_result row, which carries none of these fields) is never
  * matched, so local-echo reconciliation is unaffected.
@@ -332,10 +343,13 @@ export function isTaskNotificationContent(content: string): boolean {
 export function isAgentAuthoredUserTurn(raw: AnyRecord): boolean {
   if (raw.isMeta === true) return true;
   if (raw.isSynthetic === true) return true;
-  // Subagent (Task) turns, whose prompt is written by the parent agent. This is
-  // a persisted-transcript flag only — the SDK stream has no `isSidechain`, so
-  // a live subagent turn is caught by `isSynthetic`/`origin` above instead.
   if (raw.isSidechain === true) return true;
+
+  // A subagent (Task) turn: the SDK tags it with the parent tool_use id and
+  // nothing else. `transformMessage` (claude-sdk.js) mirrors this to
+  // `parentToolUseId`, so accept either spelling.
+  const parentToolUseId = raw.parent_tool_use_id ?? raw.parentToolUseId;
+  if (typeof parentToolUseId === 'string' && parentToolUseId) return true;
 
   // Anything that is not a plain object (or has a non-string `kind`) fails
   // closed to "human", so a malformed row is never silently hidden.
