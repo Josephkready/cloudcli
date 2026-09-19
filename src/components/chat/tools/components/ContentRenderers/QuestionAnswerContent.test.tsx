@@ -104,6 +104,23 @@ test('a resolved single question with no answer still shows "Skipped"', () => {
   assert.ok(!html.includes('Waiting for your answer'));
 });
 
+// Locks the invariant for the per-question branches: even if a pending
+// multi-question call ever surfaced a partial answer set, the still-unanswered
+// question must not read as "Skipped" while the tool is pending (#518).
+test('a pending multi-question set never marks an unanswered question "Skipped"', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(QuestionAnswerContent, {
+      questions: [
+        { question: 'Q1?', options: [{ label: 'A' }, { label: 'B' }] },
+        { question: 'Q2?', options: [{ label: 'C' }, { label: 'D' }] },
+      ],
+      answers: { 'Q1?': 'A' }, // Q2 unanswered, but the tool is still pending
+      resolved: false,
+    }),
+  );
+  assert.ok(!html.includes('Skipped'), 'a pending multi-question set must not render "Skipped"');
+});
+
 test('defaults to resolved so a persisted transcript row is unchanged', () => {
   const html = renderToStaticMarkup(
     React.createElement(QuestionAnswerContent, {
