@@ -398,6 +398,20 @@ export function useProjectsState({
         return;
       }
 
+      // A run that finishes while this client is disconnected sends its
+      // `session_upserted` (which would flip the sidebar row from working →
+      // idle and stamp `last_completed_at`) to a dead socket, so the client
+      // keeps the stale `liveStatus: 'working'` it last saw and pins the row to
+      // Running forever — even after the socket comes back and the composer
+      // reconciles (#497). The running-sessions poll only corrects the ephemeral
+      // activity map, not the projects snapshot those fields live in. Refetch it
+      // on reconnect (silently — the sidebar is already on screen) so the missed
+      // terminal upsert is picked up. Mirrors the `projects_snapshot_stale` path.
+      if (event.kind === 'websocket_reconnected') {
+        void refreshProjectsSilently();
+        return;
+      }
+
       // Attention is no longer tracked per-tab from websocket events. The sidebar
       // derives Blocked from the live server `blocked` flag and Done from the
       // persisted last_completed_at/last_viewed_at (conversationList.resolveStatus),

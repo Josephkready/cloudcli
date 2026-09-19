@@ -128,6 +128,28 @@ describe('useProjectsState — projects_snapshot_stale', () => {
     });
   });
 
+  it('refetches the project list on websocket reconnect (#497)', async () => {
+    // A run that completed while the socket was down sent its terminal
+    // `session_upserted` (working → idle, `last_completed_at` stamped) to a
+    // dead socket. Without a refetch on reconnect the sidebar keeps the stale
+    // `liveStatus: 'working'` and pins the row to Running forever.
+    respondWith(['s1']);
+    const { result, emit } = mountHook();
+
+    await waitFor(() => expect(result.current.isLoadingProjects).toBe(false));
+    expect(projectsFetch).toHaveBeenCalledTimes(1);
+
+    respondWith(['s1', 's2']);
+    await act(async () => {
+      emit({ kind: 'websocket_reconnected', timestamp: Date.now() } as unknown as ServerEvent);
+    });
+
+    await waitFor(() => expect(projectsFetch).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(result.current.projects[0]?.sessions?.map((session) => session.id)).toEqual(['s1', 's2']),
+    );
+  });
+
   it('ignores unrelated event kinds', async () => {
     respondWith(['s1']);
     const { result, emit } = mountHook();
@@ -135,7 +157,7 @@ describe('useProjectsState — projects_snapshot_stale', () => {
     await waitFor(() => expect(result.current.isLoadingProjects).toBe(false));
 
     await act(async () => {
-      emit({ kind: 'websocket_reconnected', timestamp: Date.now() } as unknown as ServerEvent);
+      emit({ kind: 'some_unhandled_kind', timestamp: Date.now() } as unknown as ServerEvent);
     });
 
     expect(projectsFetch).toHaveBeenCalledTimes(1);
