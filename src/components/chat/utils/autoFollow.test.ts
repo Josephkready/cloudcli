@@ -59,47 +59,57 @@ test('a short upward drag suspends following even inside the near-bottom band', 
     shouldSuspendAutoFollow({
       previousScrollTop: AT_BOTTOM,
       metrics: metrics(AT_BOTTOM - 20),
-      pointerDown: true,
     }),
     true,
   );
 });
 
-test('a programmatic scroll does not suspend following', () => {
-  // Same movement, no finger on the glass — this is the follow itself, or a
-  // layout settle. Treating it as intent would disable following permanently.
+test('a wheel/no-pointer upward scroll off the bottom suspends following (#508)', () => {
+  // Reading up 20px with the mouse wheel — or a touch flick whose finger has
+  // already lifted — is intent even with no pointer on the glass. The old rule
+  // required pointerDown here and so kept following armed, yanking the reader
+  // back to the bottom on the next streamed chunk.
   assert.equal(
     shouldSuspendAutoFollow({
       previousScrollTop: AT_BOTTOM,
       metrics: metrics(AT_BOTTOM - 20),
-      pointerDown: false,
+    }),
+    true,
+  );
+});
+
+test('a rubber-band settle that lands back at the bottom does not suspend', () => {
+  // Overscroll past the bottom then release: `scrollTop` snaps UP to the bottom.
+  // handleScroll sees the raw `scroll` event, so this reaches shouldSuspend with
+  // no pointer — but it LANDS within PINNED_TO_BOTTOM_PX of the bottom, so it is
+  // a settle, not a read-up, and following must stay armed.
+  assert.equal(
+    shouldSuspendAutoFollow({
+      previousScrollTop: AT_BOTTOM + 30, // overscrolled past the bottom
+      metrics: metrics(AT_BOTTOM),       // settled back exactly at the bottom
     }),
     false,
   );
 });
 
-test('sub-pixel jitter under a resting finger is not intent', () => {
+test('sub-pixel jitter is not intent', () => {
   assert.equal(
     shouldSuspendAutoFollow({
       previousScrollTop: AT_BOTTOM,
       metrics: metrics(AT_BOTTOM - 1),
-      pointerDown: true,
     }),
     false,
   );
 });
 
-test('scrolling clear of the band suspends following with or without a pointer', () => {
-  for (const pointerDown of [true, false]) {
-    assert.equal(
-      shouldSuspendAutoFollow({
-        previousScrollTop: AT_BOTTOM,
-        metrics: metrics(AT_BOTTOM - 300),
-        pointerDown,
-      }),
-      true,
-    );
-  }
+test('scrolling clear of the band suspends following', () => {
+  assert.equal(
+    shouldSuspendAutoFollow({
+      previousScrollTop: AT_BOTTOM,
+      metrics: metrics(AT_BOTTOM - 300),
+    }),
+    true,
+  );
 });
 
 test('scrolling downward never suspends following', () => {
@@ -107,7 +117,6 @@ test('scrolling downward never suspends following', () => {
     shouldSuspendAutoFollow({
       previousScrollTop: AT_BOTTOM - 40,
       metrics: metrics(AT_BOTTOM),
-      pointerDown: true,
     }),
     false,
   );
@@ -152,10 +161,13 @@ test('an untouched pane pinned at the bottom still follows the run', () => {
 // through, since every other case sits comfortably to one side.
 
 test('upward intent is measured strictly beyond the noise floor', () => {
+  // Start 10px off the bottom — inside the near-bottom band, but past the pinned
+  // threshold so the rubber-band landing guard is not in play — to isolate the
+  // upward-movement noise floor itself.
+  const base = AT_BOTTOM - 10;
   const drag = (delta: number) => shouldSuspendAutoFollow({
-    previousScrollTop: AT_BOTTOM,
-    metrics: metrics(AT_BOTTOM - delta),
-    pointerDown: true,
+    previousScrollTop: base,
+    metrics: metrics(base - delta),
   });
   assert.equal(drag(UPWARD_INTENT_PX), false);
   assert.equal(drag(UPWARD_INTENT_PX + 1), true);
