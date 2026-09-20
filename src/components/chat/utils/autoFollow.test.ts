@@ -52,23 +52,13 @@ test('isNearBottom spans the documented threshold', () => {
   assert.equal(isNearBottom(metrics(AT_BOTTOM - NEAR_BOTTOM_THRESHOLD_PX)), false);
 });
 
-test('a short upward drag suspends following even inside the near-bottom band', () => {
-  // 20px up from the bottom: still "near bottom", so the old threshold-only
-  // rule kept following armed and the next message yanked the reader back.
-  assert.equal(
-    shouldSuspendAutoFollow({
-      previousScrollTop: AT_BOTTOM,
-      metrics: metrics(AT_BOTTOM - 20),
-    }),
-    true,
-  );
-});
-
-test('a wheel/no-pointer upward scroll off the bottom suspends following (#508)', () => {
-  // Reading up 20px with the mouse wheel — or a touch flick whose finger has
-  // already lifted — is intent even with no pointer on the glass. The old rule
-  // required pointerDown here and so kept following armed, yanking the reader
-  // back to the bottom on the next streamed chunk.
+test('a short upward scroll off the bottom suspends following, with or without a pointer (#508)', () => {
+  // 20px up from the bottom: still "near bottom", so the old threshold-only rule
+  // kept following armed and the next chunk yanked the reader back. The absence
+  // of a `pointerDown` field is itself the #508 regression assertion: the old
+  // signature required it and short-circuited to "don't suspend" when it was
+  // falsy, so a mouse wheel-up or a finger-lifted flick never suspended. Now any
+  // upward move that lands off the bottom is intent regardless of pointer state.
   assert.equal(
     shouldSuspendAutoFollow({
       previousScrollTop: AT_BOTTOM,
