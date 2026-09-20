@@ -220,7 +220,7 @@ export function useSessionStore() {
       }
       return slot;
     }
-  }, [getSlot, notify]);
+  }, [getSlot, notify, persistSlot]);
 
   /**
    * Load older (paginated) messages and prepend to serverMessages.
@@ -277,7 +277,7 @@ export function useSessionStore() {
       // so the next scroll tries again (cloudcli#510 review).
       return null;
     }
-  }, [getSlot, notify]);
+  }, [getSlot, notify, persistSlot]);
 
   /**
    * Append a realtime (WebSocket) message to the correct session slot.
@@ -465,7 +465,7 @@ export function useSessionStore() {
     } catch (error) {
       console.error(`[SessionStore] refresh failed for ${sessionId}:`, error);
     }
-  }, [getSlot, notify]);
+  }, [getSlot, notify, persistSlot]);
 
   /**
    * Update session status.
