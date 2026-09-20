@@ -38,6 +38,8 @@ function makeSessionStore(): SessionStore {
     isStale: () => true,
     getMessages: () => [],
     setActiveSession: vi.fn(),
+    noteProvider: vi.fn(),
+    hydrateFromCache: vi.fn(async () => false),
     appendRealtime: vi.fn(),
     clearRealtime: vi.fn(),
     fetchMore: vi.fn(async () => null),

@@ -4,7 +4,7 @@ import type { MutableRefObject } from 'react';
 import { authenticatedFetch } from '../../../utils/api';
 import type { MarkSessionIdle, SessionActivityMap } from '../../../hooks/useSessionProtection';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
-import type { SessionStore, NormalizedMessage } from '../../../stores/useSessionStore';
+import type { SessionStore, NormalizedMessage, SessionSlot } from '../../../stores/useSessionStore';
 import type { ChatMessage } from '../types/types';
 import { createCachedDiffCalculator, type DiffCalculator } from '../utils/messageTransforms';
 import { retryPendingSends } from '../utils/pendingSendRetry';
@@ -625,15 +625,10 @@ export function useChatSessionState({
 
     lastLoadedSessionKeyRef.current = sessionKey;
 
-    // Fetch from server → store updates → chatMessages re-derives automatically
-    setIsLoadingSessionMessages(true);
-    setSessionLoadFailed(false);
-    sessionStore.fetchFromServer(selectedSessionId, {
-      limit: MESSAGES_PER_PAGE,
-      offset: 0,
-    }).then(slot => {
-      // `fetchFromServer` swallows its own errors and reports them on the slot,
-      // so the rejection path below never fires for a failed fetch.
+    // Post-load handling shared by the cache-hydrated and network-only paths:
+    // token budget reconciliation and the closed-app pending-send recovery
+    // (#325), run against whatever transcript the slot now holds.
+    const applyLoadedSlot = (slot: SessionSlot | null | undefined) => {
       setSessionLoadFailed(slot?.status === 'error');
       if (slot) {
         setHasMoreMessages(slot.hasMore);
@@ -660,15 +655,49 @@ export function useChatSessionState({
             send: sendMessage,
             persist: (entries) => writePendingSends(selectedSessionId, entries),
             now: () => Date.now(),
-            // This fetch is one page (`MESSAGES_PER_PAGE`, offset 0). When more
-            // remain, the session's older messages — its opening prompt above
-            // all — are not in `slot.serverMessages`, and their absence must not
-            // be read as "the server never got it" (#347/#350).
+            // One page's worth (or a windowed reconcile) — older messages, the
+            // opening prompt above all, may not be loaded, and their absence
+            // must not read as "the server never got it" (#347/#350).
             transcriptComplete: !slot.hasMore,
           });
         }
       }
       setIsLoadingSessionMessages(false);
+    };
+
+    // Note the provider so the store can persist this session to the on-device
+    // transcript cache (#511), then try to hydrate from that cache: a hit paints
+    // the transcript from IndexedDB immediately instead of blocking first paint
+    // on the network. Either way we still hit the server — a hydrated slot is
+    // reconciled with a windowed `refreshFromServer` (a tail-merge that keeps
+    // the older cached pages and self-corrects a stale cache), and a miss falls
+    // back to the normal page-0 fetch.
+    const sessionProvider =
+      (selectedSession?.__provider as LLMProvider | undefined)
+      || (localStorage.getItem('selected-provider') as LLMProvider | null)
+      || 'claude';
+    sessionStore.noteProvider(selectedSessionId, sessionProvider);
+
+    setIsLoadingSessionMessages(true);
+    setSessionLoadFailed(false);
+    sessionStore.hydrateFromCache(selectedSessionId).then((hydrated) => {
+      if (hydrated) {
+        const cachedSlot = sessionStore.getSessionSlot(selectedSessionId);
+        if (cachedSlot) {
+          setHasMoreMessages(cachedSlot.hasMore);
+          setTotalMessages(cachedSlot.total);
+        }
+        // Painted from cache — drop the loading state now, reconcile in the
+        // background. The windowed refresh only touches the newest end, so it
+        // cannot shift the older rows the reader may already be scrolling (#495).
+        setIsLoadingSessionMessages(false);
+        return sessionStore
+          .refreshFromServer(selectedSessionId, { limit: MESSAGES_PER_PAGE })
+          .then(() => applyLoadedSlot(sessionStore.getSessionSlot(selectedSessionId)));
+      }
+      return sessionStore
+        .fetchFromServer(selectedSessionId, { limit: MESSAGES_PER_PAGE, offset: 0 })
+        .then(applyLoadedSlot);
     }).catch(() => {
       setSessionLoadFailed(true);
       setIsLoadingSessionMessages(false);

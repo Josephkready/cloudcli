@@ -111,6 +111,18 @@ export interface SessionSlot {
   hasMore: boolean;
   offset: number;
   tokenUsage: unknown;
+  /**
+   * @internal Provider for this session, noted once on open so the store can
+   * persist the slot to the on-device transcript cache (#511) without every
+   * fetch site having to thread it through. `undefined` until noted, in which
+   * case the slot is simply not cached.
+   */
+  provider?: string;
+  /**
+   * @internal Fingerprint of `serverMessages` at the last cache write, so an
+   * unchanged transcript is not rewritten to IndexedDB on every re-fetch.
+   */
+  _cacheFingerprint?: string;
 }
 
 const EMPTY: NormalizedMessage[] = [];

@@ -109,6 +109,8 @@ function renderChat(container: HTMLDivElement) {
     getMessages: () => messages,
     getSessionSlot: () => ({ hasMore: false, total: messages.length, messages }),
     setActiveSession: vi.fn(),
+    noteProvider: vi.fn(),
+    hydrateFromCache: vi.fn(async () => false),
     appendRealtime: vi.fn(),
     clearRealtime: vi.fn(),
     fetchMore: vi.fn(async () => null),
