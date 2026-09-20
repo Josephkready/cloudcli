@@ -22,6 +22,12 @@ import {
   recomputeMergedIfNeeded,
 } from './useSessionStore.pure';
 import type { NormalizedMessage, SessionSlot, SessionStatus } from './useSessionStore.pure';
+import {
+  deleteCachedTranscript,
+  readCachedTranscript,
+  writeCachedTranscript,
+} from './transcriptCache';
+import { computeFingerprint, shouldCacheTranscript } from './transcriptCache.pure';
 
 export type {
   MessageKind,
@@ -67,6 +73,80 @@ export function useSessionStore() {
   const has = useCallback((sessionId: string) => {
     return storeRef.current.has(sessionId);
   }, []);
+
+  /**
+   * Records this session's provider so later fetches can persist the slot to the
+   * on-device transcript cache (#511). Noted once on open; nothing is cached for
+   * a session whose provider was never noted.
+   */
+  const noteProvider = useCallback((sessionId: string, provider: string) => {
+    getSlot(sessionId).provider = provider;
+  }, [getSlot]);
+
+  /**
+   * Best-effort persist of a slot's loaded transcript to IndexedDB. A no-op
+   * until the provider has been noted, and skipped when the fingerprint is
+   * unchanged since the last write so a re-fetch that produced the same rows
+   * does not rewrite the cache. Fire-and-forget: never awaited, never throws.
+   */
+  const persistSlot = useCallback((sessionId: string, slot: SessionSlot) => {
+    const provider = slot.provider;
+    if (!provider) return;
+    const serverMessages = slot.serverMessages;
+    if (!shouldCacheTranscript(serverMessages)) {
+      // Too large (or emptied) to cache — drop any prior entry so a stale or
+      // truncated copy is never hydrated later.
+      if (slot._cacheFingerprint !== undefined) {
+        slot._cacheFingerprint = undefined;
+        void deleteCachedTranscript(sessionId);
+      }
+      return;
+    }
+    const fingerprint = computeFingerprint(serverMessages);
+    if (slot._cacheFingerprint === fingerprint) return;
+    slot._cacheFingerprint = fingerprint;
+    void writeCachedTranscript({
+      sessionId,
+      provider,
+      serverMessages,
+      hasMore: slot.hasMore,
+      offset: slot.offset,
+      total: slot.total,
+      fingerprint,
+      cachedAt: Date.now(),
+    });
+  }, []);
+
+  /**
+   * Populates an empty slot from the on-device cache so a re-opened conversation
+   * paints from disk instead of blocking on the network (#511). Only ever fills
+   * an empty slot — a live or already-loaded slot is left untouched, and a fetch
+   * that lands while the async read is in flight wins the re-check below. The
+   * caller reconciles against the server afterwards, so a stale hit self-corrects.
+   *
+   * Returns whether the slot was hydrated.
+   */
+  const hydrateFromCache = useCallback(async (sessionId: string): Promise<boolean> => {
+    const slot = getSlot(sessionId);
+    if (slot.serverMessages.length > 0 || slot.realtimeMessages.length > 0) return false;
+    const cached = await readCachedTranscript(sessionId);
+    if (!cached || !Array.isArray(cached.serverMessages) || cached.serverMessages.length === 0) {
+      return false;
+    }
+    // A network fetch may have applied while we were reading IndexedDB; never
+    // clobber it with a possibly-older cache.
+    if (slot.serverMessages.length > 0 || slot.realtimeMessages.length > 0) return false;
+
+    slot.serverMessages = cached.serverMessages;
+    slot.hasMore = Boolean(cached.hasMore);
+    slot.offset = typeof cached.offset === 'number' ? cached.offset : cached.serverMessages.length;
+    slot.total = typeof cached.total === 'number' ? cached.total : cached.serverMessages.length;
+    slot._cacheFingerprint = cached.fingerprint;
+    slot.status = 'idle';
+    recomputeMergedIfNeeded(slot);
+    notify(sessionId);
+    return true;
+  }, [getSlot, notify]);
 
   /**
    * Fetch messages from the provider sessions endpoint and populate serverMessages.
@@ -128,6 +208,7 @@ export function useSessionStore() {
         slot.tokenUsage = data.tokenUsage;
       }
 
+      persistSlot(sessionId, slot);
       notify(sessionId);
       return slot;
     } catch (error) {
@@ -181,6 +262,7 @@ export function useSessionStore() {
       slot.hasMore = Boolean(data.hasMore);
       slot.offset = slot.offset + olderMessages.length;
       recomputeMergedIfNeeded(slot);
+      persistSlot(sessionId, slot);
       notify(sessionId);
       return slot;
     } catch (error) {
@@ -378,6 +460,7 @@ export function useSessionStore() {
         slot.realtimeMessages,
       );
       recomputeMergedIfNeeded(slot);
+      persistSlot(sessionId, slot);
       notify(sessionId);
     } catch (error) {
       console.error(`[SessionStore] refresh failed for ${sessionId}:`, error);
@@ -480,6 +563,8 @@ export function useSessionStore() {
   return useMemo(() => ({
     getSlot,
     has,
+    noteProvider,
+    hydrateFromCache,
     fetchFromServer,
     fetchMore,
     appendRealtime,
@@ -494,7 +579,7 @@ export function useSessionStore() {
     getMessages,
     getSessionSlot,
   }), [
-    getSlot, has, fetchFromServer, fetchMore,
+    getSlot, has, noteProvider, hydrateFromCache, fetchFromServer, fetchMore,
     appendRealtime, appendRealtimeBatch, refreshFromServer,
     setActiveSession, setStatus, isStale, updateStreaming, finalizeStreaming,
     clearRealtime, getMessages, getSessionSlot,
