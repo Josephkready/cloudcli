@@ -78,22 +78,35 @@ export function isNearBottom(
 /**
  * Should this scroll event suspend auto-follow?
  *
- * The `isNearBottom` threshold alone is not enough on a phone. A deliberate but
- * short drag — 20px, well inside the 50px band — left auto-follow armed, so the
- * next message of a streaming run snapped the reader back to the bottom, and
- * the one after that, for as long as the run lasted. Treating any upward drag
- * *made with a finger on the glass* as intent is what stops the fight; the
- * pointer condition keeps programmatic scrolls (which move `scrollTop` too)
- * from suspending following.
+ * The `isNearBottom` threshold alone is not enough. A deliberate but short
+ * scroll up — 20px, well inside the 50px band — left auto-follow armed, so the
+ * next chunk of a streaming run snapped the reader back to the bottom, and the
+ * one after that, for as long as the run lasted (#508). Any upward movement
+ * past the jitter floor is the reader taking control, so it suspends following
+ * regardless of whether a finger is currently on the glass — this is what
+ * catches a mouse wheel-up (no pointer) and a flick-and-lift where the finger
+ * is already off the glass by the time the next chunk arrives.
+ *
+ * The one non-intent source of an upward movement is a rubber-band / overscroll
+ * *settle*: pushing past the bottom and releasing snaps `scrollTop` back UP to
+ * the bottom. `handleScroll` is bound to the raw `scroll` event too (not only
+ * wheel/touch), so those settles reach here with no pointer down and would
+ * otherwise read as a read-up. They are told apart by where they LAND: a genuine
+ * read-up leaves the reader off the bottom, while a settle returns them to it —
+ * so an upward move that ends within `PINNED_TO_BOTTOM_PX` of the bottom is
+ * ignored. (This is why the old code gated on `pointerDown`; the landing check
+ * is a truer signal — it also covers the settle *during* a real gesture.)
  */
 export function shouldSuspendAutoFollow(input: {
   previousScrollTop: number;
   metrics: ScrollMetrics;
-  pointerDown: boolean;
 }): boolean {
   if (!isNearBottom(input.metrics)) return true;
-  if (!input.pointerDown) return false;
-  return input.metrics.scrollTop < input.previousScrollTop - UPWARD_INTENT_PX;
+  const movedUp = input.metrics.scrollTop < input.previousScrollTop - UPWARD_INTENT_PX;
+  if (!movedUp) return false;
+  // Upward, but landed back at the very bottom → a rubber-band settle, not a
+  // read-up. Anything that leaves the reader off the bottom is intent.
+  return distanceFromBottom(input.metrics) > PINNED_TO_BOTTOM_PX;
 }
 
 /**

@@ -451,7 +451,6 @@ export function useChatSessionState({
     if (shouldSuspendAutoFollow({
       previousScrollTop: lastScrollTopRef.current,
       metrics,
-      pointerDown: pointerIsActive(),
     })) {
       autoFollowSuspendedRef.current = true;
     } else if (shouldResumeAutoFollow(metrics)) {
@@ -470,7 +469,7 @@ export function useChatSessionState({
       const didLoad = await loadOlderMessages(container);
       if (didLoad) topLoadLockRef.current = true;
     }
-  }, [loadOlderMessages, pointerIsActive, readScrollMetrics]);
+  }, [loadOlderMessages, readScrollMetrics]);
 
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) return;
