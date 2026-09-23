@@ -134,7 +134,7 @@ test('beginDrain refuses new runs; waitForActiveRuns is bounded and completes on
 
     // With nothing running, the drain wait returns immediately as drained.
     const idle = await chatRunRegistry.waitForActiveRuns(50);
-    assert.deepEqual(idle, { drained: true, remaining: 0 });
+    assert.deepEqual(idle, { drained: true, remaining: 0, interrupted: 0 });
 
     const started = chatRunRegistry.submitMessage(inputFor(connection, 'p4'), makeQueuedMessage(connection, 'x'));
     assert.equal(started.action, 'start');
@@ -155,6 +155,56 @@ test('beginDrain refuses new runs; waitForActiveRuns is bounded and completes on
     // Letting the in-flight run finish drains the server cleanly.
     chatRunRegistry.completeRun('p4', { exitCode: 0 });
     const drained = await chatRunRegistry.waitForActiveRuns(120, 20);
-    assert.deepEqual(drained, { drained: true, remaining: 0 });
+    assert.deepEqual(drained, { drained: true, remaining: 0, interrupted: 0 });
+  });
+});
+
+test('a run killed mid-drain keeps its journal row and resumes after restart (#535)', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('p5', 'claude', '/workspace/demo');
+    sessionsDb.createAppSession('p6', 'claude', '/workspace/demo');
+    sessionsDb.createAppSession('p7', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+
+    for (const id of ['p5', 'p6', 'p7']) {
+      const started = chatRunRegistry.submitMessage(inputFor(connection, id), makeQueuedMessage(connection, id));
+      assert.equal(started.action, 'start');
+    }
+
+    chatRunRegistry.beginDrain();
+
+    // p5: the provider child dies with the server's signal (exit 143) — the
+    // runtime reports it as a failed complete.
+    chatRunRegistry.completeRun('p5', { exitCode: 1 });
+    // p6: finishes normally within the drain window.
+    chatRunRegistry.completeRun('p6', { exitCode: 0 });
+    // p7: the user stopped it during the drain — a deliberate end, not a loss.
+    chatRunRegistry.completeRun('p7', { exitCode: 1, aborted: true });
+
+    assert.deepEqual(statuses('p5'), ['running'], 'the killed run stays journaled');
+    assert.deepEqual(statuses('p6'), [], 'a clean finish still clears its row');
+    assert.deepEqual(statuses('p7'), [], 'an abort still clears its row');
+
+    const result = await chatRunRegistry.waitForActiveRuns(50, 10);
+    assert.deepEqual(result, { drained: true, remaining: 0, interrupted: 1 });
+
+    // After the restart, only the killed run surfaces as resumable.
+    chatRunRegistry.clearAll();
+    const summary = reconcileInterruptedRuns();
+    assert.equal(summary.interruptedSessions, 1);
+    assert.equal(activeRunsDb.hasInterrupted('p5'), true);
+  });
+});
+
+test('outside a drain, a failed run still clears its journal row (no ghost resume)', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('p8', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+
+    chatRunRegistry.submitMessage(inputFor(connection, 'p8'), makeQueuedMessage(connection, 'x'));
+    chatRunRegistry.completeRun('p8', { exitCode: 1 });
+
+    assert.deepEqual(statuses('p8'), []);
+    assert.equal(reconcileInterruptedRuns().interruptedMessages, 0);
   });
 });
