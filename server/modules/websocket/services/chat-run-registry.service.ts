@@ -12,6 +12,11 @@ import type {
   NormalizedMessage,
   RealtimeClientConnection,
 } from '@/shared/types.js';
+import {
+  isShutdownDraining,
+  markShutdownDraining,
+  resetShutdownDrainingForTests,
+} from '@/shared/shutdown-drain.js';
 
 type ChatRunStatus = 'running' | 'completed';
 
@@ -212,9 +217,18 @@ const dispatchingSessions = new Set<string>();
  * While draining, `submitMessage` reports `draining` so the caller surfaces a
  * *visible* "retry" error rather than starting a run the imminent exit would
  * guillotine mid-stream. Module-level (not per-session) because a drain applies
- * to the whole process.
+ * to the whole process. Backed by `@/shared/shutdown-drain` so the
+ * notification orchestrator can read the same flag.
  */
-let draining = false;
+const isDrainingNow = isShutdownDraining;
+
+/**
+ * Runs that died *during* the shutdown drain rather than finishing (#535): the
+ * provider child was killed by the same signal as the server (a terminal
+ * Ctrl-C, or systemd's control-group kill). Counted so the drain does not
+ * report "drained cleanly" when it actually lost runs.
+ */
+let runsInterruptedByDrain = 0;
 
 /**
  * Best-effort hook the stale-run reaper calls to interrupt a wedged run's
@@ -326,11 +340,21 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
     run.completedAt = Date.now();
     evictRunLater(run);
 
+    // A run that fails (not aborted) once the shutdown drain has begun was, in
+    // practice, killed by the shutdown itself: the provider child received the
+    // same signal as the server (#535). Keep its durable journal record so the
+    // startup reconcile surfaces it as interrupted + resumable instead of losing
+    // it as an ordinary failure.
+    const interruptedByDrain = isDrainingNow() && outbound.success === false && !outbound.aborted;
+    if (interruptedByDrain) {
+      runsInterruptedByDrain += 1;
+    }
+
     // Single completion choke point (natural end, abort, and synthetic
     // safety-net all funnel through here): drop the durable journal record so a
     // cleanly-finished run never lingers to be surfaced as interrupted after a
     // later restart (issue #70).
-    if (run.persistId != null) {
+    if (run.persistId != null && !interruptedByDrain) {
       try {
         activeRunsDb.remove(run.persistId);
         run.persistId = undefined;
@@ -687,7 +711,7 @@ export const chatRunRegistry = {
     // imminent process exit would guillotine mid-stream. The caller surfaces a
     // visible "server restarting, retry" error so the message is never silently
     // lost (issue #70).
-    if (draining) {
+    if (isDrainingNow()) {
       return { action: 'draining' };
     }
 
@@ -761,6 +785,20 @@ export const chatRunRegistry = {
       }
     }
     return run;
+  },
+
+  /**
+   * Stops a session's dispatcher during the shutdown drain without starting its
+   * queued messages (#535): a run started now would be killed by the imminent
+   * exit. Unlike `releaseDispatcher`, the queued messages' durable journal rows
+   * are deliberately KEPT, so the startup reconcile surfaces them as interrupted
+   * + resumable. Returns the number of messages parked.
+   */
+  parkQueueForShutdown(appSessionId: string): number {
+    const parked = pendingQueues.get(appSessionId)?.length ?? 0;
+    pendingQueues.delete(appSessionId);
+    dispatchingSessions.delete(appSessionId);
+    return parked;
   },
 
   /**
@@ -916,7 +954,7 @@ export const chatRunRegistry = {
 
   /** Whether the server has entered shutdown drain (issue #70). */
   isDraining(): boolean {
-    return draining;
+    return isDrainingNow();
   },
 
   /**
@@ -969,7 +1007,7 @@ export const chatRunRegistry = {
    * in-flight runs can finish before the process exits. Idempotent.
    */
   beginDrain(): void {
-    draining = true;
+    markShutdownDraining();
   },
 
   /** Number of runs currently streaming (status `running`). */
@@ -988,22 +1026,23 @@ export const chatRunRegistry = {
    * graceful-drain wait the shutdown handler awaits before exiting. Polls the
    * run map rather than hooking each run's completion so it stays decoupled from
    * the writer path and safe to call from a signal handler. Returns whether the
-   * drain fully completed and how many runs were still live at the deadline
-   * (those survive as interrupted+resumable via the journal after the restart).
+   * drain fully completed, how many runs were still live at the deadline, and
+   * how many died mid-drain (#535). Both of the latter survive as
+   * interrupted+resumable via the journal after the restart.
    */
   async waitForActiveRuns(
     timeoutMs: number,
     pollMs = 100,
-  ): Promise<{ drained: boolean; remaining: number }> {
+  ): Promise<{ drained: boolean; remaining: number; interrupted: number }> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const remaining = this.countRunningRuns();
       if (remaining === 0) {
-        return { drained: true, remaining: 0 };
+        return { drained: true, remaining: 0, interrupted: runsInterruptedByDrain };
       }
       const timeLeft = deadline - Date.now();
       if (timeLeft <= 0) {
-        return { drained: false, remaining };
+        return { drained: false, remaining, interrupted: runsInterruptedByDrain };
       }
       // Deliberately NOT unref'd: the shutdown handler awaits this wait, so the
       // poll timer must keep the event loop alive until the drain resolves —
@@ -1022,7 +1061,8 @@ export const chatRunRegistry = {
     runs.clear();
     pendingQueues.clear();
     dispatchingSessions.clear();
-    draining = false;
+    resetShutdownDrainingForTests();
+    runsInterruptedByDrain = 0;
     this.stopStaleRunReaper();
     runAbortHook = null;
   },

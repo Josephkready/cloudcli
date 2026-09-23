@@ -320,6 +320,19 @@ async function driveRunAndDrain(
     for (;;) {
       await driveSingleRun(sessionId, run, message, dependencies);
 
+      if (chatRunRegistry.isDraining()) {
+        // Shutting down: don't start queued messages the exit would kill. They
+        // stay journaled and resume after the restart (#535).
+        const parked = chatRunRegistry.parkQueueForShutdown(sessionId);
+        if (parked > 0) {
+          console.log('[Chat] Shutdown drain: left queued messages for resume after restart', {
+            sessionId,
+            parked,
+          });
+        }
+        return;
+      }
+
       const next = chatRunRegistry.takeNextQueued(sessionId);
       if (!next) {
         // Queue empty; the dispatcher role was released inside takeNextQueued.

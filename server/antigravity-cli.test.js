@@ -13,6 +13,7 @@ import {
   terminateAntigravityChild,
 } from './antigravity-cli.js';
 import { providerModelsService } from './modules/providers/services/provider-models.service.js';
+import { markShutdownDraining, resetShutdownDrainingForTests } from './shared/shutdown-drain.js';
 
 // Drive spawnAntigravity's effort path with a deterministic catalog instead of
 // the real ~/.cloudcli-cached one, so the model/effort gating is hermetic.
@@ -57,6 +58,10 @@ if (process.env.AGY_ARGS_CAPTURE) {
 const id = process.env.AGY_FAKE_CONVERSATION_ID || 'agy-native-session';
 console.log(JSON.stringify({ event: 'init', conversation_id: id, init: { model: 'gemini-test-model' } }));
 if (process.env.AGY_FAKE_MODE === 'hang') {
+  setInterval(() => {}, 1000);
+} else if (process.env.AGY_FAKE_MODE === 'self-sigterm') {
+  // Stands in for the server's own stop signal reaching the child (#535).
+  setTimeout(() => process.kill(process.pid, 'SIGTERM'), 20);
   setInterval(() => {}, 1000);
 } else if (process.env.AGY_FAKE_MODE === 'result-only') {
   console.log(JSON.stringify({ event: 'result', result: {
@@ -411,5 +416,38 @@ test('abortAntigravitySession terminates a live process with one aborted complet
     const completions = writer.messages.filter((message) => message.kind === 'complete');
     assert.equal(completions.length, 1);
     assert.equal(completions[0].aborted, true);
+  });
+});
+
+test('a SIGTERM that is not a user abort is a failure during the shutdown drain, not an abort (#535)', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    process.env.AGY_FAKE_MODE = 'self-sigterm';
+    const run = async ({ expectFailure }) => {
+      const writer = createWriter();
+      const spawned = spawnAntigravity('Wait', { cwd: tempRoot, model: 'gemini-test-model' }, writer);
+      if (expectFailure) {
+        await assert.rejects(spawned, /Antigravity CLI failed/);
+      } else {
+        await spawned;
+      }
+      return writer.messages.filter((message) => message.kind === 'complete');
+    };
+
+    // Outside a drain, a bare SIGTERM keeps its historical meaning: aborted.
+    const outside = await run({ expectFailure: false });
+    assert.equal(outside.length, 1);
+    assert.equal(outside[0].aborted, true);
+
+    // During the drain it was the server's own stop signal: a non-aborted
+    // failure, which the run registry keeps resumable.
+    markShutdownDraining();
+    try {
+      const during = await run({ expectFailure: true });
+      assert.equal(during.length, 1);
+      assert.equal(during[0].aborted, false);
+      assert.equal(during[0].success, false);
+    } finally {
+      resetShutdownDrainingForTests();
+    }
   });
 });

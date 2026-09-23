@@ -1,6 +1,7 @@
 import webPush from 'web-push';
 
 import { notificationPreferencesDb, pushSubscriptionsDb, sessionsDb } from '@/modules/database/index.js';
+import { isShutdownDraining } from '@/shared/shutdown-drain.js';
 
 const KIND_TO_PREF_KEY = {
   action_required: 'actionRequired',
@@ -253,6 +254,13 @@ function notifyRunStopped({ userId, provider, sessionId = null, stopReason = 'co
 }
 
 function notifyRunFailed({ userId, provider, sessionId = null, error, sessionName = null }) {
+  // A run that fails once the server is shutting down was killed by the
+  // shutdown, not by a real error; it resumes after the restart, so a
+  // "run failed" push would be a false alarm on every deploy (#535).
+  if (isShutdownDraining()) {
+    return;
+  }
+
   const errorMessage = normalizeErrorMessage(error);
 
   notifyUserIfEnabled({

@@ -1373,11 +1373,18 @@ async function startServer() {
                 });
                 chatRunRegistry.beginDrain();
                 const drainResult = await chatRunRegistry.waitForActiveRuns(CHAT_DRAIN_TIMEOUT_MS);
-                if (drainResult.drained) {
+                if (drainResult.drained && drainResult.interrupted > 0) {
+                    // A run's provider child died with the server's own signal (e.g.
+                    // systemd KillMode=control-group, or Ctrl-C in a terminal) — #535.
+                    console.warn('[Shutdown] Chat runs were killed mid-drain; they will resume after restart', {
+                        interrupted: drainResult.interrupted,
+                    });
+                } else if (drainResult.drained) {
                     console.log('[Shutdown] All chat runs drained cleanly before exit');
                 } else {
                     console.warn('[Shutdown] Drain timed out with runs still active; they will resume after restart', {
                         remaining: drainResult.remaining,
+                        interrupted: drainResult.interrupted,
                         timeoutMs: CHAT_DRAIN_TIMEOUT_MS,
                     });
                 }

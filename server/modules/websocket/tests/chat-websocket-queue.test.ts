@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import { activeRunsDb, closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
 import { connectedClients } from '@/modules/websocket/services/websocket-state.service.js';
@@ -373,5 +373,35 @@ test('deleting a session mid-queue discards the remaining messages and releases 
     assert.equal(chatRunRegistry.getPendingCount('gone-session'), 0);
     assert.equal(chatRunRegistry.isProcessing('gone-session'), false);
     assert.equal(chatRunRegistry.isDispatching('gone-session'), false);
+  });
+});
+
+test('during the shutdown drain, queued messages are not started but stay journaled for resume (#535)', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('drain-session', 'claude', '/workspace/demo');
+    const { spawn, calls } = makeControllableSpawn();
+    const dependencies = makeDependencies(spawn);
+    const device = new FakeSocket();
+    connect(device, dependencies);
+
+    sendChat(device, 'drain-session', 'message-A');
+    sendChat(device, 'drain-session', 'message-B');
+    await settle();
+    assert.equal(calls.length, 1);
+    assert.equal(chatRunRegistry.getPendingCount('drain-session'), 1);
+
+    // The server starts draining, then the in-flight run finishes.
+    chatRunRegistry.beginDrain();
+    finishRun(calls[0] as SpawnCall);
+    await settle();
+
+    // B was NOT started (the imminent exit would kill it) and the dispatcher
+    // is released, but B's queued journal row survives for the restart.
+    assert.equal(calls.length, 1);
+    assert.equal(chatRunRegistry.isDispatching('drain-session'), false);
+    assert.deepEqual(
+      activeRunsDb.getBySession('drain-session').map((row) => [row.status, row.content]),
+      [['queued', 'message-B']],
+    );
   });
 });

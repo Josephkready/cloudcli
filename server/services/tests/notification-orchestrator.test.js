@@ -14,8 +14,8 @@ import {
   sessionsDb,
   userDb,
 } from '../../modules/database/index.js';
-
-import { notifyRunStopped } from '../notification-orchestrator.js';
+import { notifyRunFailed, notifyRunStopped } from '../notification-orchestrator.js';
+import { markShutdownDraining, resetShutdownDrainingForTests } from '../../shared/shutdown-drain.js';
 
 async function withIsolatedDatabase(runTest) {
   const previousDatabasePath = process.env.DATABASE_PATH;
@@ -75,6 +75,52 @@ test('push payload uses the app session id when notified with a provider session
       assert.match(sentPayloads[0]?.data?.tag, /app-session-1/);
     });
   } finally {
+    webPush.sendNotification = originalSendNotification;
+  }
+});
+
+test('no "run failed" push while the server is shutting down (#535)', async () => {
+  const originalSendNotification = webPush.sendNotification;
+  const sentPayloads = [];
+
+  webPush.sendNotification = async (_subscription, payload) => {
+    sentPayloads.push(JSON.parse(payload));
+    return {};
+  };
+
+  try {
+    await withIsolatedDatabase(async () => {
+      const user = userDb.createUser('drain-user', 'hash');
+      const userId = Number(user.id);
+
+      notificationPreferencesDb.updatePreferences(userId, {
+        channels: { webPush: true },
+        events: { actionRequired: true, stop: true, error: true },
+      });
+      pushSubscriptionsDb.saveSubscription(userId, 'https://example.test/push', 'p256dh', 'auth');
+      sessionsDb.createAppSession('app-session-2', 'claude', '/workspace/demo');
+
+      const failure = {
+        userId,
+        provider: 'claude',
+        sessionId: 'app-session-2',
+        error: new Error('Claude Code process exited with code 143'),
+      };
+
+      // The deploy's own SIGTERM killed the child: not a failure worth a push.
+      markShutdownDraining();
+      notifyRunFailed(failure);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(sentPayloads.length, 0);
+
+      // Outside a shutdown, a failure still notifies.
+      resetShutdownDrainingForTests();
+      notifyRunFailed(failure);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(sentPayloads.length, 1);
+    });
+  } finally {
+    resetShutdownDrainingForTests();
     webPush.sendNotification = originalSendNotification;
   }
 });

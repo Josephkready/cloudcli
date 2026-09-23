@@ -3,6 +3,7 @@ import crossSpawn from 'cross-spawn';
 import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
 import { providerModelsService } from './modules/providers/services/provider-models.service.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
+import { isShutdownDraining } from './shared/shutdown-drain.js';
 import {
   buildProviderCliEnv,
   createCompleteMessage,
@@ -372,7 +373,10 @@ export async function spawnAntigravity(command, options = {}, writer) {
         processLine(stdoutBuffer);
       }
 
-      const aborted = child.aborted === true || signal === 'SIGTERM';
+      // A bare SIGTERM during the shutdown drain is the server's own stop signal
+      // reaching the child, not a user abort: report it as a failure so the run
+      // registry keeps it resumable (#535). User aborts set `child.aborted`.
+      const aborted = child.aborted === true || (signal === 'SIGTERM' && !isShutdownDraining());
       const stderr = sanitizeAntigravityError(stderrBuffer);
       const exitCode = aborted ? 1 : (code ?? 1);
       if (!aborted && stderr && exitCode !== 0 && !resultError) {

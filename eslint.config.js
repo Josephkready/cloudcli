@@ -168,6 +168,7 @@ export default tseslint.config(
             "server/shared/image-attachments.ts",
             "server/shared/session-id-guards.ts",
             "server/shared/api-key-file.ts",
+            "server/shared/shutdown-drain.ts",
             "server/shared/build-info.js",
           ], // classify shared utility files so modules can depend on them explicitly
           mode: "file",
