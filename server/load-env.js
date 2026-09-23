@@ -22,7 +22,19 @@ try {
     }
   });
 } catch (e) {
-  console.error('No .env file found or error reading it:', e.message);
+  reportEnvLoadError(e);
+}
+
+/**
+ * A missing .env is the normal case wherever config comes from the process
+ * environment (e.g. a systemd unit), so it stays silent instead of printing an
+ * ENOENT "error" on every start (#536). Any other read failure is still loud.
+ */
+export function reportEnvLoadError(error, log = console.error) {
+  if (error?.code === 'ENOENT') {
+    return;
+  }
+  log('Error reading .env file:', error?.message ?? error);
 }
 
 // Keep the default database in a stable user-level location so rebuilding dist-server
