@@ -1384,6 +1384,7 @@ async function startServer() {
                 } else {
                     console.warn('[Shutdown] Drain timed out with runs still active; they will resume after restart', {
                         remaining: drainResult.remaining,
+                        interrupted: drainResult.interrupted,
                         timeoutMs: CHAT_DRAIN_TIMEOUT_MS,
                     });
                 }

@@ -788,6 +788,20 @@ export const chatRunRegistry = {
   },
 
   /**
+   * Stops a session's dispatcher during the shutdown drain without starting its
+   * queued messages (#535): a run started now would be killed by the imminent
+   * exit. Unlike `releaseDispatcher`, the queued messages' durable journal rows
+   * are deliberately KEPT, so the startup reconcile surfaces them as interrupted
+   * + resumable. Returns the number of messages parked.
+   */
+  parkQueueForShutdown(appSessionId: string): number {
+    const parked = pendingQueues.get(appSessionId)?.length ?? 0;
+    pendingQueues.delete(appSessionId);
+    dispatchingSessions.delete(appSessionId);
+    return parked;
+  },
+
+  /**
    * Forcibly releases the dispatcher role and drops any still-queued messages
    * for a session. Reserved for the two abnormal exits the dispatcher loop can
    * hit — an unexpected error mid-drain, or a session deleted out from under a
