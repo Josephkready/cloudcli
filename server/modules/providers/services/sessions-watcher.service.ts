@@ -209,6 +209,29 @@ const watcherUpdateDebouncer = createSessionUpsertDebouncer({
 });
 
 /**
+ * Per-change trace of a watcher sync, off by default. The watcher polls every
+ * few seconds and fires once per poll for every transcript being written, so
+ * logging each one unconditionally made up ~98% of the service journal and
+ * buried real errors (#536). Set CLOUDCLI_DEBUG_WATCHER=1 to see them again.
+ */
+export function logWatcherSync(
+  eventType: WatcherEventType,
+  provider: LLMProvider,
+  filePath: string,
+  sessionId: string | null,
+  env: NodeJS.ProcessEnv = process.env,
+  log: (...args: unknown[]) => void = console.log,
+): void {
+  if (env.CLOUDCLI_DEBUG_WATCHER !== '1') {
+    return;
+  }
+  log(`Session synchronization triggered by ${eventType} event for provider "${provider}"`, {
+    filePath,
+    sessionId,
+  });
+}
+
+/**
  * Handles file watcher updates and triggers provider file-level synchronization.
  */
 async function onUpdate(
@@ -226,10 +249,7 @@ async function onUpdate(
       return;
     }
 
-    console.log(`Session synchronization triggered by ${eventType} event for provider "${provider}"`, {
-      filePath,
-      sessionId: result.sessionId,
-    });
+    logWatcherSync(eventType, provider, filePath, result.sessionId);
     watcherUpdateDebouncer.queue(eventType, provider, result.sessionId);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
