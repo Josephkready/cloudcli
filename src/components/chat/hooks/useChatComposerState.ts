@@ -26,7 +26,7 @@ import {
 import { appendPendingSend, makePendingSendId, markPendingSendDispatched } from '../utils/pendingSends';
 import { decideQueueFlush } from '../utils/queueFlush';
 import { resolveEnterKeyAction } from '../utils/enterKeyAction';
-import { partitionImageFiles } from '../utils/imageAttachments';
+import { MAX_IMAGE_ATTACHMENT_COUNT, partitionImageFiles } from '../utils/imageAttachments';
 import { getNotificationSessionSummary } from '../utils/sessionSummary';
 import type {
   ChatMessage,
@@ -615,7 +615,7 @@ export function useChatComposerState({
 
     if (validFiles.length > 0) {
       recordFeatureUse('chat.image_attach');
-      setAttachedImages((previous) => [...previous, ...validFiles].slice(0, 5));
+      setAttachedImages((previous) => [...previous, ...validFiles].slice(0, MAX_IMAGE_ATTACHMENT_COUNT));
     }
   }, []);
 

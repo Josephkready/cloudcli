@@ -53,3 +53,21 @@ test('partitions a mixed batch in order', () => {
   assert.equal(result.validFiles[0]?.name, 'good.png');
   assert.equal(result.errors[0]?.fileName, 'bad.png');
 });
+
+test('drops a file whose properties throw on access and keeps the rest', () => {
+  const hostile = {
+    get type(): string {
+      throw new Error('boom');
+    },
+  };
+  const good = file();
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    const result = partitionImageFiles([hostile as ReturnType<typeof file>, good]);
+    assert.deepEqual(result.validFiles, [good]);
+    assert.deepEqual(result.errors, []);
+  } finally {
+    console.error = originalError;
+  }
+});

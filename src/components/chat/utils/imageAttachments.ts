@@ -27,8 +27,8 @@ type AttachableFile = {
 /**
  * Splits candidate files into ones that pass the attachment rules (real
  * image type, under the size ceiling) and the ones rejected with a reason.
- * Anything not shaped like a `File` (null, wrong type) is silently dropped
- * rather than surfaced as an error, matching the original inline behavior.
+ * Anything not shaped like a `File`, or whose properties throw on access, is
+ * logged and dropped rather than surfaced as an error.
  */
 export function partitionImageFiles<TFile extends AttachableFile>(
   files: TFile[],
@@ -37,17 +37,22 @@ export function partitionImageFiles<TFile extends AttachableFile>(
   const errors: ImageAttachmentError[] = [];
 
   for (const file of files) {
-    if (!file || typeof file !== 'object') {
-      continue;
+    try {
+      if (!file || typeof file !== 'object') {
+        console.warn('Invalid file object:', file);
+        continue;
+      }
+      if (!file.type || !file.type.startsWith('image/')) {
+        continue;
+      }
+      if (!file.size || file.size > MAX_IMAGE_ATTACHMENT_BYTES) {
+        errors.push({ fileName: file.name || 'Unknown file', message: 'File too large (max 5MB)' });
+        continue;
+      }
+      validFiles.push(file);
+    } catch (error) {
+      console.error('Error validating file:', error, file);
     }
-    if (!file.type || !file.type.startsWith('image/')) {
-      continue;
-    }
-    if (!file.size || file.size > MAX_IMAGE_ATTACHMENT_BYTES) {
-      errors.push({ fileName: file.name || 'Unknown file', message: 'File too large (max 5MB)' });
-      continue;
-    }
-    validFiles.push(file);
   }
 
   return { validFiles, errors };
