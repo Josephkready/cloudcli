@@ -33,15 +33,6 @@ function baseHookState(overrides: Partial<Record<string, unknown>> = {}) {
     loadError: null,
     deleteError: null,
     saveStatus: null,
-    isFormOpen: false,
-    isGlobalFormOpen: false,
-    editingServer: null,
-    openForm: vi.fn(),
-    openGlobalForm: vi.fn(),
-    closeForm: vi.fn(),
-    closeGlobalForm: vi.fn(),
-    submitForm: vi.fn().mockResolvedValue(undefined),
-    submitGlobalForm: vi.fn().mockResolvedValue(undefined),
     deleteServer: vi.fn(),
     refreshServers: vi.fn(),
     ...overrides,
@@ -92,16 +83,12 @@ describe('McpServers', () => {
     expect(screen.queryByText('run-thing')).not.toBeInTheDocument();
   });
 
-  it('invokes openForm and deleteServer from the row action buttons', async () => {
-    const openForm = vi.fn();
+  it('invokes deleteServer from the row action button', async () => {
     const deleteServer = vi.fn();
     const server = makeServer();
-    useMcpServers.mockReturnValue(baseHookState({ servers: [server], openForm, deleteServer }));
+    useMcpServers.mockReturnValue(baseHookState({ servers: [server], deleteServer }));
     const user = userEvent.setup();
     render(<McpServers selectedProvider="claude" currentProjects={[]} />);
-
-    await user.click(screen.getByTitle('Edit server'));
-    expect(openForm).toHaveBeenCalledWith(server);
 
     await user.click(screen.getByTitle('Delete server'));
     expect(deleteServer).toHaveBeenCalledWith(server);
@@ -129,30 +116,6 @@ describe('McpServers', () => {
 
     rerender(<McpServers selectedProvider="claude" currentProjects={[]} />);
     expect(screen.queryByText('About Codex MCP')).not.toBeInTheDocument();
-  });
-
-  it('opens the provider add-server form via the action menu', async () => {
-    const openForm = vi.fn();
-    useMcpServers.mockReturnValue(baseHookState({ openForm }));
-    const user = userEvent.setup();
-    render(<McpServers selectedProvider="claude" currentProjects={[]} />);
-
-    await user.click(screen.getByRole('button', { name: /Add MCP Server/i }));
-    await user.click(await screen.findByText('Add Claude MCP Server'));
-
-    expect(openForm).toHaveBeenCalledWith();
-  });
-
-  it('opens the global add-server form via the action menu', async () => {
-    const openGlobalForm = vi.fn();
-    useMcpServers.mockReturnValue(baseHookState({ openGlobalForm }));
-    const user = userEvent.setup();
-    render(<McpServers selectedProvider="claude" currentProjects={[]} />);
-
-    await user.click(screen.getByRole('button', { name: /Add MCP Server/i }));
-    await user.click(await screen.findByText('Add Global MCP Server'));
-
-    expect(openGlobalForm).toHaveBeenCalled();
   });
 
   it('shows a save-status success message', () => {

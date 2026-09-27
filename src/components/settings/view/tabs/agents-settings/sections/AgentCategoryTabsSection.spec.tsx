@@ -8,7 +8,7 @@ import AgentCategoryTabsSection from './AgentCategoryTabsSection';
 
 describe('AgentCategoryTabsSection', () => {
   it('renders a tab for each category and marks the selected one', () => {
-    const categories: AgentCategory[] = ['account', 'permissions', 'mcp', 'skills'];
+    const categories: AgentCategory[] = ['account', 'permissions', 'mcp'];
 
     render(
       <AgentCategoryTabsSection
@@ -20,7 +20,7 @@ describe('AgentCategoryTabsSection', () => {
     );
 
     const tabs = screen.getAllByRole('tab');
-    expect(tabs).toHaveLength(4);
+    expect(tabs).toHaveLength(3);
 
     const selected = tabs.find((tab) => tab.getAttribute('aria-selected') === 'true');
     expect(selected?.textContent).toMatch(/permissions/i);
@@ -42,18 +42,5 @@ describe('AgentCategoryTabsSection', () => {
 
     await user.click(screen.getByRole('tab', { name: /mcp servers/i }));
     expect(onSelectCategory).toHaveBeenCalledWith('mcp');
-  });
-
-  it('renders the skills tab label', () => {
-    render(
-      <AgentCategoryTabsSection
-        categories={['skills']}
-        selectedCategory="skills"
-        selectedAgent="claude"
-        onSelectCategory={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByRole('tab', { name: /skills/i })).toBeInTheDocument();
   });
 });

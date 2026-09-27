@@ -518,13 +518,12 @@ export function useSidebarController({
       return;
     }
 
-    // The dedup check below must be synchronous: React 18 batches ALL state
-    // updates (not just ones inside event handlers), so a functional
-    // `setLoadingMoreProjects` updater does not run until the next
-    // reconciliation — reading a flag set inside it right after the `setState`
-    // call would always see the pre-update value. A ref gives us an
-    // immediately-consistent "is this project already loading" check; the
-    // state copy alongside it exists purely to trigger a re-render.
+    // The dedup check below must be synchronous: a functional `setState`
+    // updater is not invoked immediately — it only runs when React processes
+    // the update at the next render — so reading a flag set inside one right
+    // after the `setState` call would always see the pre-update value. A ref
+    // gives us an immediately-consistent "is this project already loading"
+    // check; the state copy alongside it exists purely to trigger a re-render.
     if (loadingMoreProjectsRef.current.has(projectId)) {
       return;
     }

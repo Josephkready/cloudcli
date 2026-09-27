@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const authenticatedFetch = vi.fn();
 const copyTextToClipboard = vi.fn();
@@ -61,6 +61,10 @@ beforeEach(() => {
     return jsonResponse({ success: true });
   });
   vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('useCredentialsSettings', () => {
@@ -479,7 +483,6 @@ describe('useCredentialsSettings', () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
     expect(screen.getByTestId('copiedKey')).toHaveTextContent('');
-    vi.useRealTimers();
   });
 
   it('logs an error when clipboard copy fails', async () => {
