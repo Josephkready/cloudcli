@@ -21,6 +21,19 @@
  */
 export const MOCK_CODE_BLOCK_SENTINEL = '__CODE_SURFACES__';
 
+/**
+ * Hold the mock run open (still `isProcessing`) for `MOCK_HOLD_RUN_MS` before
+ * it streams its reply and completes.
+ *
+ * The default mock reply lands in one tick, so the "a run is in progress" UI —
+ * the activity indicator and its Stop button — is gone before a spec can look
+ * at it. Opt-in by sentinel, like the one above, so no other suite changes.
+ */
+export const MOCK_HOLD_RUN_SENTINEL = '__HOLD_RUN__';
+
+/** How long a `MOCK_HOLD_RUN_SENTINEL` run stays in progress. */
+export const MOCK_HOLD_RUN_MS = 15_000;
+
 /** A line far wider than any test viewport, with no space to wrap at. */
 export const MOCK_LONG_CODE_LINE =
   'const resultOfAVeryDeliberatelyLongExpression = computeSomething(alphaArgument, betaArgument, gammaArgument, deltaArgument, epsilonArgument);';
