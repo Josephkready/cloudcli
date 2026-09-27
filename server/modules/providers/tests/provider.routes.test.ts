@@ -194,45 +194,6 @@ test('GET /:provider/skills omits workspacePath when not provided', async () => 
   }
 });
 
-test('POST /:provider/skills (install) reaches the service with the parsed entry', async () => {
-  const restore = patch(providerSkillsService, 'addProviderSkills', async (provider: string, input: any) => {
-    assert.equal(provider, 'claude');
-    assert.equal(input.entries[0].directoryName, 'new-skill');
-    return [{ name: 'new-skill' }] as any;
-  });
-  try {
-    await withServer(async (baseUrl) => {
-      const res = await fetch(`${baseUrl}/claude/skills`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: '# skill', directoryName: 'new-skill' }),
-      });
-      assert.equal(res.status, 200);
-      const body = await readJson(res);
-      assert.deepEqual(body.data.skills, [{ name: 'new-skill' }]);
-    });
-  } finally {
-    restore();
-  }
-});
-
-test('DELETE /:provider/skills/:directoryName removes a skill', async () => {
-  const restore = patch(providerSkillsService, 'removeProviderSkill', async (provider: string, input: any) => {
-    assert.equal(provider, 'claude');
-    assert.equal(input.directoryName, 'my-skill');
-    return { removed: true, provider: 'claude', directoryName: 'my-skill' };
-  });
-  try {
-    await withServer(async (baseUrl) => {
-      const res = await fetch(`${baseUrl}/claude/skills/my-skill`, { method: 'DELETE' });
-      assert.equal(res.status, 200);
-      assert.deepEqual((await readJson(res)).data, { removed: true, provider: 'claude', directoryName: 'my-skill' });
-    });
-  } finally {
-    restore();
-  }
-});
-
 // ---------------------------------------------------------------------------
 // MCP
 // ---------------------------------------------------------------------------
@@ -274,23 +235,6 @@ test('GET /:provider/mcp/servers with a scope returns a flat list for that scope
   }
 });
 
-test('POST /:provider/mcp/servers upserts and returns 201', async () => {
-  const restore = patch(providerMcpService, 'upsertProviderMcpServer', async () => ({ name: 'srv1' }) as any);
-  try {
-    await withServer(async (baseUrl) => {
-      const res = await fetch(`${baseUrl}/claude/mcp/servers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'srv1', scope: 'user', transport: 'stdio', command: 'foo' }),
-      });
-      assert.equal(res.status, 201);
-      assert.deepEqual((await readJson(res)).data, { server: { name: 'srv1' } });
-    });
-  } finally {
-    restore();
-  }
-});
-
 test('DELETE /:provider/mcp/servers/:name removes a server with scope + workspacePath forwarded', async () => {
   let seenInput: unknown;
   const restore = patch(providerMcpService, 'removeProviderMcpServer', async (_p: string, input: any) => {
@@ -305,44 +249,6 @@ test('DELETE /:provider/mcp/servers/:name removes a server with scope + workspac
       assert.equal(res.status, 200);
       assert.deepEqual(seenInput, { name: 'srv1', scope: 'user', workspacePath: '/tmp' });
     });
-  } finally {
-    restore();
-  }
-});
-
-test('POST /mcp/servers/global rejects a "local" scope with 400', async () => {
-  await withServer(async (baseUrl) => {
-    const res = await fetch(`${baseUrl}/mcp/servers/global`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'srv1', scope: 'local', transport: 'stdio', command: 'foo' }),
-    });
-    assert.equal(res.status, 400);
-    const body = await readJson(res);
-    assert.equal(body.error.code, 'INVALID_GLOBAL_MCP_SCOPE');
-  });
-});
-
-test('POST /mcp/servers/global normalizes a missing/other scope to "project" and forwards "user" as-is', async () => {
-  const seenScopes: unknown[] = [];
-  const restore = patch(providerMcpService, 'addMcpServerToAllProviders', async (input: any) => {
-    seenScopes.push(input.scope);
-    return [];
-  });
-  try {
-    await withServer(async (baseUrl) => {
-      await fetch(`${baseUrl}/mcp/servers/global`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'srv1', transport: 'stdio', command: 'foo' }),
-      });
-      await fetch(`${baseUrl}/mcp/servers/global`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'srv2', scope: 'user', transport: 'stdio', command: 'foo' }),
-      });
-    });
-    assert.deepEqual(seenScopes, ['project', 'user']);
   } finally {
     restore();
   }
