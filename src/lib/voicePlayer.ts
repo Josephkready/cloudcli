@@ -76,16 +76,20 @@ class VoicePlayer {
     let playResult: Promise<void> | undefined;
     try {
       playResult = audio.play();
-    } catch {
-      /* synchronous priming failure; leave unlocked as-is so we retry later */
+    } catch (err) {
+      // Synchronous priming failure (e.g. blocked autoplay); leave unlocked
+      // as-is so we retry on the next user gesture. Expected on some
+      // browsers, but worth a trace for debugging a stuck "locked" state.
+      console.warn('Voice unlock priming failed synchronously:', err);
       return;
     }
     if (playResult && typeof playResult.then === 'function') {
       playResult.then(() => {
         audio.pause();
         this.unlocked = true;
-      }).catch(() => {
-        /* priming attempt rejected; leave unlocked as-is so we retry later */
+      }).catch((err) => {
+        // Priming attempt rejected; leave unlocked as-is so we retry later.
+        console.warn('Voice unlock priming was rejected:', err);
       });
     } else {
       // Some environments' play() doesn't return a promise; treat a non-throwing

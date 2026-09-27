@@ -75,8 +75,10 @@ export function useWebPush(): WebPushState {
           setIsSubscribed(sub !== null);
         }
       })
-    )).catch(() => {
-      // SW not ready yet, or getSubscription() rejected
+    )).catch((err) => {
+      // SW not ready yet, or getSubscription() rejected - not fatal, the UI
+      // just falls back to showing "not subscribed" until the user retries.
+      console.warn('Could not check existing push subscription:', err);
     });
 
     return () => {
