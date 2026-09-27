@@ -86,6 +86,9 @@ describe('voicePlayer', () => {
       const { voicePlayer } = await freshModules();
       voicePlayer.unlock();
       expect(currentAudio.play).toHaveBeenCalledTimes(1);
+      // pause() must not fire until the play() promise actually resolves -
+      // pins down the async timing, not just the eventual call count.
+      expect(currentAudio.pause).not.toHaveBeenCalled();
 
       // pause() only happens once the play() promise resolves.
       await Promise.resolve();
