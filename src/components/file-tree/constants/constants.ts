@@ -23,7 +23,7 @@ export const FILE_TREE_VIEW_MODES: FileTreeViewMode[] = ['simple', 'compact', 'd
  */
 export const FILE_TREE_DETAILED_GRID_CLASS = 'grid grid-cols-[minmax(0,1fr)_5rem_7rem_6rem] gap-2';
 
-export const MAX_FILE_UPLOAD_SIZE_MB = 200;
+const MAX_FILE_UPLOAD_SIZE_MB = 200;
 
 export const MAX_FILE_UPLOAD_SIZE_BYTES = MAX_FILE_UPLOAD_SIZE_MB * 1024 * 1024;
 

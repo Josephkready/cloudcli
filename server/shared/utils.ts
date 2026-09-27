@@ -119,7 +119,7 @@ export const WORKSPACES_ROOT = process.env.WORKSPACES_ROOT || os.homedir();
  * The validation helper blocks these values directly and also blocks paths
  * nested under them (with explicit allow-list exceptions where necessary).
  */
-export const FORBIDDEN_WORKSPACE_PATHS = [
+const FORBIDDEN_WORKSPACE_PATHS = [
   // Unix
   '/',
   '/etc',
@@ -321,7 +321,7 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
   }
 }
 
-export type ProjectPathValidationResult = {
+type ProjectPathValidationResult = {
   valid: boolean;
   resolved?: string;
   error?: string;
@@ -794,7 +794,7 @@ const PROVIDER_SESSION_ACTIVE_MODEL_CHANGE_CACHE_VERSION = 1;
  * runtime command launchers should all use this helper instead of re-creating
  * the path so the storage location stays consistent.
  */
-export function getProviderSessionActiveModelChangesPath(): string {
+function getProviderSessionActiveModelChangesPath(): string {
   return path.join(os.homedir(), '.cloudcli', 'provider-session-active-model-changes.json');
 }
 
@@ -1342,7 +1342,7 @@ export function normalizeSessionName(rawValue: string | undefined, fallback: str
  * metadata or transcript events so every provider writes the same ISO timestamp
  * shape to API responses and database rows.
  */
-export function normalizeProviderTimestamp(value: unknown): string {
+function normalizeProviderTimestamp(value: unknown): string {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
     const millis = value < 1_000_000_000_000 ? value * 1000 : value;
     return new Date(millis).toISOString();
@@ -1361,53 +1361,6 @@ export function normalizeProviderTimestamp(value: unknown): string {
   }
 
   return new Date().toISOString();
-}
-
-/**
- * Parses a JSON string or narrows an existing object into a plain record.
- *
- * Use this when provider databases store structured JSON inside text columns.
- * Invalid JSON, arrays, and primitive values return `null` so callers can skip
- * malformed optional metadata without hiding the rest of a session transcript.
- */
-export function readJsonRecord(value: unknown): AnyRecord | null {
-  if (typeof value !== 'string') {
-    return readObjectRecord(value);
-  }
-
-  try {
-    return readObjectRecord(JSON.parse(value));
-  } catch {
-    return null;
-  }
-}
-
-// ---------------------------
-//----------------- SAFE DIRECTORY NAME UTILITIES ------------
-/**
- * Validates that a user or provider supplied identifier can safely be treated
- * as one leaf directory name under an existing root folder.
- *
- * Use this before composing paths like `<root>/<session-id>/file.db>` to block
- * path traversal and accidental nested paths. The returned string is trimmed but
- * otherwise unchanged so callers can still match the provider's on-disk naming.
- */
-export function sanitizeLeafDirectoryName(inputName: string, label = 'directory name'): string {
-  const normalized = inputName.trim();
-  if (!normalized) {
-    throw new Error(`${label} is required.`);
-  }
-
-  if (
-    normalized.includes('..')
-    || normalized.includes(path.posix.sep)
-    || normalized.includes(path.win32.sep)
-    || normalized !== path.basename(normalized)
-  ) {
-    throw new Error(`Invalid ${label} "${inputName}".`);
-  }
-
-  return normalized;
 }
 
 // ---------------------------

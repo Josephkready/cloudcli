@@ -301,7 +301,7 @@ export function isInternalContent(content: string): boolean {
  * re-attributes to the assistant (see `parseTaskNotification`). They must
  * survive the agent-authored filter below so that re-attribution still runs.
  */
-export function isTaskNotificationContent(content: string): boolean {
+function isTaskNotificationContent(content: string): boolean {
   return content.trimStart().startsWith('<task-notification>');
 }
 
@@ -372,7 +372,7 @@ export type ClaudeUserTextClassification =
   | { kind: 'user'; text: string }
   | { kind: 'skip' };
 
-export function classifyClaudeUserText(
+function classifyClaudeUserText(
   text: string,
   agentAuthored: boolean,
 ): ClaudeUserTextClassification {

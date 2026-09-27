@@ -1,8 +1,8 @@
-export function isWildcardHost(host) {
+function isWildcardHost(host) {
   return host === '0.0.0.0' || host === '::';
 }
 
-export function isLoopbackHost(host) {
+function isLoopbackHost(host) {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
 }
 

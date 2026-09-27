@@ -19,7 +19,7 @@ export function getGlobalImageAssetsDir(): string {
   return path.join(os.homedir(), '.cloudcli', 'assets');
 }
 
-export type ImageAttachmentDescriptor = {
+type ImageAttachmentDescriptor = {
   /** Project-relative (preferred) or absolute path to the stored image. */
   path: string;
   name?: string;
@@ -81,7 +81,7 @@ export function toPosixPath(value: string): string {
 }
 
 /** Resolves a project-relative image path against the run's working directory. */
-export function resolveImageAbsolutePath(cwd: string | undefined, imagePath: string): string {
+function resolveImageAbsolutePath(cwd: string | undefined, imagePath: string): string {
   if (path.isAbsolute(imagePath)) {
     return imagePath;
   }

@@ -415,14 +415,6 @@ function getSession(sessionId) {
   return activeSessions.get(sessionId);
 }
 
-/**
- * Gets all active session IDs
- * @returns {Array<string>} Array of active session IDs
- */
-function getAllSessions() {
-  return Array.from(activeSessions.keys());
-}
-
 /** Bind a Claude query's interrupt method to the gateway writer for early aborts. */
 export function registerClaudeQueryAbort(writer, queryInstance) {
   writer.setAbortHandler?.(async () => {
@@ -1083,24 +1075,6 @@ async function abortClaudeSDKSession(sessionId) {
 }
 
 /**
- * Checks if an SDK session is currently active
- * @param {string} sessionId - Session identifier
- * @returns {boolean} True if session is active
- */
-function isClaudeSDKSessionActive(sessionId) {
-  const session = getSession(sessionId);
-  return session && session.status === 'active';
-}
-
-/**
- * Gets all active SDK session IDs
- * @returns {Array<string>} Array of active session IDs
- */
-function getActiveClaudeSDKSessions() {
-  return getAllSessions();
-}
-
-/**
  * Get pending tool approvals for a specific session.
  * @param {string} sessionId - The session ID
  * @returns {Array} Array of pending permission request objects
@@ -1122,33 +1096,15 @@ function getPendingApprovalsForSession(sessionId) {
   return pending;
 }
 
-/**
- * Reconnect a session's WebSocketWriter to a new raw WebSocket.
- * Called when client reconnects (e.g. page refresh) while SDK is still running.
- * @param {string} sessionId - The session ID
- * @param {Object} newRawWs - The new raw WebSocket connection
- * @returns {boolean} True if writer was successfully reconnected
- */
-function reconnectSessionWriter(sessionId, newRawWs) {
-  const session = getSession(sessionId);
-  if (!session?.writer?.updateWebSocket) return false;
-  session.writer.updateWebSocket(newRawWs);
-  console.log(`[RECONNECT] Writer swapped for session ${sessionId}`);
-  return true;
-}
-
 // Export public API
 export {
   queryClaudeSDK,
   abortClaudeSDKSession,
-  isClaudeSDKSessionActive,
-  getActiveClaudeSDKSessions,
   resolveToolApproval,
   waitForToolApproval,
   approvalTimeoutForTool,
   denyResultForDecision,
   getPendingApprovalsForSession,
-  reconnectSessionWriter,
   isSpawnRaceError,
   parseMsEnv,
   extractTokenBudget,

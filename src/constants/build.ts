@@ -14,4 +14,3 @@
  * tests (tsx --test) and any non-Vite runtime see empty strings.
  */
 export const BUILD_SHA: string = typeof __CLOUDCLI_BUILD_SHA__ === 'string' ? __CLOUDCLI_BUILD_SHA__ : '';
-export const BUILT_AT: string = typeof __CLOUDCLI_BUILT_AT__ === 'string' ? __CLOUDCLI_BUILT_AT__ : '';

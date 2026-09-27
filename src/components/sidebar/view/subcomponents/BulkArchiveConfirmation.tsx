@@ -29,7 +29,7 @@ export interface BulkArchiveConfirmationProps {
  * A `confirm` prompt offers Cancel + Archive; an `inform` prompt (nothing
  * qualifies) offers a single OK that just dismisses.
  */
-export function BulkArchiveConfirmation({
+function BulkArchiveConfirmation({
   prompt,
   onConfirm,
   onCancel,

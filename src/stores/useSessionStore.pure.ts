@@ -152,8 +152,8 @@ export function createEmptySlot(): SessionSlot {
  * assistant echo (same trimmed text), so finalized stream rows do not stack
  * on top of the persisted copy before realtime is cleared.
  */
-export const LOCAL_USER_DEDUPE_WINDOW_MS = 5 * 60 * 1000;
-export const LOCAL_USER_DEDUPE_CLOCK_SKEW_MS = 10_000;
+const LOCAL_USER_DEDUPE_WINDOW_MS = 5 * 60 * 1000;
+const LOCAL_USER_DEDUPE_CLOCK_SKEW_MS = 10_000;
 
 export function userTextFingerprint(m: NormalizedMessage): string | null {
   if (m.kind !== 'text' || m.role !== 'user') return null;
@@ -161,7 +161,7 @@ export function userTextFingerprint(m: NormalizedMessage): string | null {
   return t.length > 0 ? t : null;
 }
 
-export function readMessageTime(m: NormalizedMessage): number | null {
+function readMessageTime(m: NormalizedMessage): number | null {
   const time = Date.parse(m.timestamp);
   return Number.isFinite(time) ? time : null;
 }
@@ -254,7 +254,7 @@ export function hasServerEchoForLocalUser(
   });
 }
 
-export function compareMessagesChronologically(a: NormalizedMessage, b: NormalizedMessage): number {
+function compareMessagesChronologically(a: NormalizedMessage, b: NormalizedMessage): number {
   const timeA = readMessageTime(a) ?? 0;
   const timeB = readMessageTime(b) ?? 0;
   if (timeA !== timeB) {

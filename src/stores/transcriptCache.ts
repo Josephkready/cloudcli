@@ -169,8 +169,3 @@ export async function deleteCachedTranscript(sessionId: string): Promise<void> {
     // best-effort
   }
 }
-
-/** Test-only: reset the memoized DB handle so a fresh fake-indexeddb is picked up. */
-export function __resetTranscriptCacheForTests(): void {
-  dbPromise = null;
-}

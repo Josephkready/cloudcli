@@ -34,31 +34,4 @@ const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
 );
 Alert.displayName = 'Alert';
 
-const AlertTitle = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
-    <div
-      ref={ref}
-      data-slot="alert-title"
-      className={cn('col-start-2 line-clamp-1 min-h-4 font-medium tracking-tight', className)}
-      {...props}
-    />
-  )
-);
-AlertTitle.displayName = 'AlertTitle';
-
-const AlertDescription = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
-    <div
-      ref={ref}
-      data-slot="alert-description"
-      className={cn(
-        'text-muted-foreground col-start-2 grid justify-items-start gap-1 text-sm [&_p]:leading-relaxed',
-        className
-      )}
-      {...props}
-    />
-  )
-);
-AlertDescription.displayName = 'AlertDescription';
-
-export { Alert, AlertTitle, AlertDescription, alertVariants };
+export { Alert };

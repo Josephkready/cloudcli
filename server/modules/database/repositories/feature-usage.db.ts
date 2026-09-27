@@ -20,7 +20,7 @@ import { FEATURE_USAGE_TABLE_SCHEMA_SQL } from '@/modules/database/schema.js';
 import { FEATURE_KEYS, isFeatureKey, type FeatureKey } from '../../../../shared/featureKeys.js';
 
 /** One inventory entry as the readout presents it (zero-filled if never used). */
-export type FeatureUsageEntry = {
+type FeatureUsageEntry = {
   featureKey: FeatureKey;
   useCount: number;
   firstUsedAt: string | null;
@@ -56,7 +56,7 @@ const DISABLED_VALUES: ReadonlySet<string> = new Set(['0', 'false', 'off', 'no']
  * Read from the environment at call time rather than frozen at import, so the
  * flag is testable and a restart is the only thing needed to flip it.
  */
-export const isFeatureUsageEnabled = (): boolean => {
+const isFeatureUsageEnabled = (): boolean => {
   const raw = process.env.FEATURE_USAGE_ENABLED;
   if (raw === undefined || raw.trim() === '') return true;
   return !DISABLED_VALUES.has(raw.trim().toLowerCase());
