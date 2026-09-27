@@ -4,7 +4,6 @@ import { I18nextProvider } from 'react-i18next';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, ProtectedRoute } from './components/auth';
 import { WebSocketProvider } from './contexts/WebSocketContext';
-import { PluginsProvider } from './contexts/PluginsContext';
 import AppRoutes from './components/app/AppRoutes';
 import i18n from './i18n/config.js';
 
@@ -106,13 +105,11 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <WebSocketProvider>
-            <PluginsProvider>
-                <ProtectedRoute>
-                  <Router basename={routerBasename}>
-                    <AppRoutes />
-                  </Router>
-                </ProtectedRoute>
-            </PluginsProvider>
+            <ProtectedRoute>
+              <Router basename={routerBasename}>
+                <AppRoutes />
+              </Router>
+            </ProtectedRoute>
           </WebSocketProvider>
         </AuthProvider>
       </ThemeProvider>

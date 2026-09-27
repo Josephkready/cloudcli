@@ -12,10 +12,6 @@ import type { Project, ProjectSession } from '@/types/app';
  * project name; desktop keeps the editable session title.
  */
 
-vi.mock('@/contexts/PluginsContext', () => ({
-  usePlugins: () => ({ plugins: [], loading: false, pluginsError: null, refreshPlugins: () => {} }),
-}));
-
 const project = {
   projectId: 'p1',
   projectPath: '/repos/p1',
