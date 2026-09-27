@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AUTH_DISABLED, IS_PLATFORM } from '../../../constants/config';
 import { api } from '../../../utils/api';
 import { AUTH_ERROR_MESSAGES, AUTH_TOKEN_STORAGE_KEY } from '../constants';
@@ -115,6 +115,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [checkOnboardingStatus, clearSession, token]);
 
+  // Keep the latest checkAuthStatus in a ref so the mount effect below can call
+  // it without depending on it directly. checkAuthStatus is recreated whenever
+  // `token` changes (e.g. after a successful login/register sets a new token),
+  // and including it in the mount effect's deps would re-run the initial
+  // /auth/status check after every login, re-setting isLoading and potentially
+  // clobbering the login's `setNeedsSetup(false)` back to true.
+  const checkAuthStatusRef = useRef(checkAuthStatus);
+  checkAuthStatusRef.current = checkAuthStatus;
+
   useEffect(() => {
     if (IS_PLATFORM) {
       setUser({ username: 'platform-user' });
@@ -137,8 +146,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return;
     }
 
-    void checkAuthStatus();
-  }, [checkAuthStatus, checkOnboardingStatus, setSession]);
+    void checkAuthStatusRef.current();
+    // Mount-only: run the initial status check exactly once. checkOnboardingStatus
+    // and setSession are stable (empty deps), so this intentionally omits
+    // checkAuthStatus/checkAuthStatusRef to avoid re-running on every token change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkOnboardingStatus, setSession]);
 
   const login = useCallback<AuthContextValue['login']>(
     async (username, password) => {
