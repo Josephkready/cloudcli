@@ -4,7 +4,6 @@ import { WebSocketServer, type VerifyClientCallbackSync } from 'ws';
 
 import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
 import { verifyWebSocketClient } from '@/modules/websocket/services/websocket-auth.service.js';
-import { handlePluginWsProxy } from '@/modules/websocket/services/plugin-websocket-proxy.service.js';
 import { handleShellConnection } from '@/modules/websocket/services/shell-websocket.service.js';
 import { tagAuthenticatedWebSocket } from '@/modules/websocket/services/websocket-session-revocation.service.js';
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
@@ -13,7 +12,6 @@ type WebSocketServerDependencies = {
   verifyClient: Parameters<typeof verifyWebSocketClient>[1];
   chat: Parameters<typeof handleChatConnection>[2];
   shell: Parameters<typeof handleShellConnection>[1];
-  getPluginPort: Parameters<typeof handlePluginWsProxy>[2];
 };
 
 /**
@@ -54,8 +52,8 @@ export function attachHeartbeat(
     setInterval: (handler: () => void, ms: number) => unknown;
     clearInterval: (handle: never) => void;
   } = globalThis as never,
-  /** Names the socket in the termination log. Chat, shell, and plugin sockets
-   *  all pass through here, and only chat logs its own disconnects. */
+  /** Names the socket in the termination log. Chat and shell sockets both pass
+   *  through here, and only chat logs its own disconnects. */
   label = 'websocket',
 ): () => void {
   let awaitingPong = false;
@@ -73,9 +71,9 @@ export function attachHeartbeat(
       // socket from every run.
       //
       // Logged because a silent terminate would recreate #389's real problem —
-      // a connection dying with no observable signal. Shell and plugin sockets
-      // log nothing on close at all, so without this line a heartbeat kill on
-      // those paths is completely invisible to an operator.
+      // a connection dying with no observable signal. Shell sockets log nothing
+      // on close at all, so without this line a heartbeat kill on that path is
+      // completely invisible to an operator.
       console.warn(`[Heartbeat] Terminating unresponsive ${label}: no pong within ${intervalMs}ms`);
       ws.terminate();
       return;
@@ -98,8 +96,8 @@ export function attachHeartbeat(
 }
 
 /**
- * Creates and wires the server-wide websocket gateway used for chat, shell, and
- * plugin proxy routes.
+ * Creates and wires the server-wide websocket gateway used for chat and shell
+ * routes.
  */
 export function createWebSocketServer(
   server: HttpServer,
@@ -128,11 +126,6 @@ export function createWebSocketServer(
 
     if (pathname === '/ws') {
       handleChatConnection(ws, incomingRequest, dependencies.chat);
-      return;
-    }
-
-    if (pathname.startsWith('/plugin-ws/')) {
-      handlePluginWsProxy(ws, pathname, dependencies.getPluginPort);
       return;
     }
 

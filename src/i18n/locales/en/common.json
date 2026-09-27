@@ -19,7 +19,6 @@
   },
   "tabs": {
     "chat": "Chat",
-    "shell": "Shell",
     "files": "Files",
     "git": "Source Control",
     "computer": "Computer"

@@ -12,6 +12,8 @@ import {
   shouldFollowNewMessages,
   shouldResumeAutoFollow,
   shouldSuspendAutoFollow,
+  isReaderScroll,
+  READER_INPUT_WINDOW_MS,
   type ScrollMetrics,
 } from './autoFollow';
 
@@ -63,6 +65,7 @@ test('a short upward scroll off the bottom suspends following, with or without a
     shouldSuspendAutoFollow({
       previousScrollTop: AT_BOTTOM,
       metrics: metrics(AT_BOTTOM - 20),
+      readerInput: true,
     }),
     true,
   );
@@ -77,6 +80,7 @@ test('a rubber-band settle that lands back at the bottom does not suspend', () =
     shouldSuspendAutoFollow({
       previousScrollTop: AT_BOTTOM + 30, // overscrolled past the bottom
       metrics: metrics(AT_BOTTOM),       // settled back exactly at the bottom
+      readerInput: true,
     }),
     false,
   );
@@ -87,6 +91,7 @@ test('sub-pixel jitter is not intent', () => {
     shouldSuspendAutoFollow({
       previousScrollTop: AT_BOTTOM,
       metrics: metrics(AT_BOTTOM - 1),
+      readerInput: true,
     }),
     false,
   );
@@ -97,6 +102,7 @@ test('scrolling clear of the band suspends following', () => {
     shouldSuspendAutoFollow({
       previousScrollTop: AT_BOTTOM,
       metrics: metrics(AT_BOTTOM - 300),
+      readerInput: true,
     }),
     true,
   );
@@ -107,6 +113,7 @@ test('scrolling downward never suspends following', () => {
     shouldSuspendAutoFollow({
       previousScrollTop: AT_BOTTOM - 40,
       metrics: metrics(AT_BOTTOM),
+      readerInput: true,
     }),
     false,
   );
@@ -121,28 +128,26 @@ test('following only re-arms when the reader is pinned at the very bottom', () =
 
 test('a finger on the glass outranks every other follow condition', () => {
   assert.equal(
-    shouldFollowNewMessages({ pointerDown: true, autoFollowSuspended: false, userScrolledUp: false }),
+    shouldFollowNewMessages({ pointerDown: true, autoFollowSuspended: false }),
     false,
   );
 });
 
 test('a suspended follow stays suspended even while near the bottom', () => {
   assert.equal(
-    shouldFollowNewMessages({ pointerDown: false, autoFollowSuspended: true, userScrolledUp: false }),
+    shouldFollowNewMessages({ pointerDown: false, autoFollowSuspended: true }),
     false,
   );
 });
 
 test('a reader who scrolled away is not pulled back', () => {
-  assert.equal(
-    shouldFollowNewMessages({ pointerDown: false, autoFollowSuspended: false, userScrolledUp: true }),
-    false,
-  );
+  // Scrolling away with their own input is what suspends following.
+  assert.equal(shouldFollowNewMessages({ pointerDown: false, autoFollowSuspended: true }), false);
 });
 
 test('an untouched pane pinned at the bottom still follows the run', () => {
   assert.equal(
-    shouldFollowNewMessages({ pointerDown: false, autoFollowSuspended: false, userScrolledUp: false }),
+    shouldFollowNewMessages({ pointerDown: false, autoFollowSuspended: false }),
     true,
   );
 });
@@ -158,6 +163,7 @@ test('upward intent is measured strictly beyond the noise floor', () => {
   const drag = (delta: number) => shouldSuspendAutoFollow({
     previousScrollTop: base,
     metrics: metrics(base - delta),
+    readerInput: true,
   });
   assert.equal(drag(UPWARD_INTENT_PX), false);
   assert.equal(drag(UPWARD_INTENT_PX + 1), true);
@@ -184,4 +190,69 @@ test('a gesture that never ended expires instead of wedging the gate on forever'
   // auto-follow for the rest of the session.
   assert.equal(isGestureActive({ pointerDown: true, startedAt: 1000, now: 1000 + MAX_GESTURE_MS }), false);
   assert.equal(isGestureActive({ pointerDown: true, startedAt: 0, now: MAX_GESTURE_MS * 100 }), false);
+});
+
+/*
+ * #540: the app moves the pane too. The virtualizer corrects `scrollTop` when a
+ * re-measured row differs from its estimate, and that write arrives as an
+ * ordinary `scroll` event. Read as the reader scrolling up, it suspended
+ * following a few pixels off the bottom — too far to re-arm (4px), too close
+ * for the scroll-to-bottom button (50px) — and the rest of the run slid out of
+ * view with nothing on screen to say so. Only a move with reader input behind
+ * it may suspend.
+ */
+test('a small upward move with no reader input behind it does not suspend', () => {
+  assert.equal(
+    shouldSuspendAutoFollow({
+      previousScrollTop: AT_BOTTOM,
+      metrics: metrics(AT_BOTTOM - 7),
+      readerInput: false,
+    }),
+    false,
+  );
+});
+
+test('the same move with reader input behind it still suspends (#508 is kept)', () => {
+  assert.equal(
+    shouldSuspendAutoFollow({
+      previousScrollTop: AT_BOTTOM,
+      metrics: metrics(AT_BOTTOM - 7),
+      readerInput: true,
+    }),
+    true,
+  );
+});
+
+test('without reader input, not even a move clear of the band suspends', () => {
+  // A reply landing as one tall message grows the content before the follow
+  // runs, and a virtualizer correction in that gap reads as far off the bottom.
+  // A search jump, the one programmatic move that should suspend, does so
+  // explicitly rather than through this path.
+  assert.equal(
+    shouldSuspendAutoFollow({
+      previousScrollTop: AT_BOTTOM,
+      metrics: metrics(AT_BOTTOM - 300),
+      readerInput: false,
+    }),
+    false,
+  );
+});
+
+test('a finger on the glass is always reader input', () => {
+  assert.equal(isReaderScroll({ pointerDown: true, lastInputAt: 0, now: 1_000_000 }), true);
+});
+
+test('input inside the window credits the scroll to the reader', () => {
+  const now = 50_000;
+  assert.equal(isReaderScroll({ pointerDown: false, lastInputAt: now - READER_INPUT_WINDOW_MS, now }), true);
+});
+
+test('input older than the window does not', () => {
+  const now = 50_000;
+  assert.equal(
+    isReaderScroll({ pointerDown: false, lastInputAt: now - READER_INPUT_WINDOW_MS - 1, now }),
+    false,
+  );
+  // Never having had input at all is the virtualizer's case on a fresh pane.
+  assert.equal(isReaderScroll({ pointerDown: false, lastInputAt: 0, now }), false);
 });
