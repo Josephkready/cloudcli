@@ -36,6 +36,10 @@ const xterm = vi.hoisted(() => {
     refresh: ReturnType<typeof vi.fn>;
     clear: ReturnType<typeof vi.fn>;
     write: ReturnType<typeof vi.fn>;
+    getSelection: ReturnType<typeof vi.fn>;
+    hasSelection: ReturnType<typeof vi.fn>;
+    attachCustomKeyEventHandler: ReturnType<typeof vi.fn>;
+    onData: ReturnType<typeof vi.fn>;
   };
 
   const terminals: FakeTerminal[] = [];
@@ -129,8 +133,15 @@ vi.mock('@xterm/addon-webgl', () => ({
   },
 }));
 
+const mobileSelection = vi.hoisted(() => ({
+  calls: [] as unknown[][],
+}));
+
 vi.mock('../utils/mobileTerminalSelection', () => ({
-  installMobileTerminalSelection: () => ({ dispose: vi.fn(), updateHandles: vi.fn() }),
+  installMobileTerminalSelection: (...args: unknown[]) => {
+    mobileSelection.calls.push(args);
+    return { dispose: vi.fn(), updateHandles: vi.fn() };
+  },
 }));
 
 const { useShellTerminal } = await import('./useShellTerminal');
@@ -221,6 +232,7 @@ beforeEach(() => {
   xterm.webgls.length = 0;
   xterm.events.length = 0;
   xterm.clipboardArgs.length = 0;
+  mobileSelection.calls.length = 0;
 });
 
 afterEach(() => {
@@ -568,5 +580,228 @@ describe('useShellTerminal — teardown (#272)', () => {
     webgl.loseContext();
 
     expect(webgl.dispose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useShellTerminal — OSC 52 clipboard provider (#272 follow-up)', () => {
+  it('reads only the system clipboard selection, ignoring the X11 primary selection', async () => {
+    render(<Harness />);
+    flushBuild();
+
+    const [, provider] = xterm.clipboardArgs[0] as [unknown, { readText: (s: string) => Promise<string> }];
+    const readSpy = vi.spyOn(navigator.clipboard, 'readText').mockResolvedValue('clipboard text');
+
+    await expect(provider.readText('p')).resolves.toBe('');
+    await expect(provider.readText('c')).resolves.toBe('clipboard text');
+    expect(readSpy).toHaveBeenCalledTimes(1);
+    readSpy.mockRestore();
+  });
+
+  it('falls back to an empty string when the clipboard read rejects', async () => {
+    render(<Harness />);
+    flushBuild();
+
+    const [, provider] = xterm.clipboardArgs[0] as [unknown, { readText: (s: string) => Promise<string> }];
+    const readSpy = vi.spyOn(navigator.clipboard, 'readText').mockRejectedValue(new Error('denied'));
+
+    await expect(provider.readText('c')).resolves.toBe('');
+    readSpy.mockRestore();
+  });
+
+  it('writes only the system clipboard selection', async () => {
+    render(<Harness />);
+    flushBuild();
+
+    const [, provider] = xterm.clipboardArgs[0] as [
+      unknown,
+      { writeText: (s: string, t: string) => Promise<void> },
+    ];
+    const writeSpy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+
+    await provider.writeText('p', 'ignored');
+    expect(writeSpy).not.toHaveBeenCalled();
+
+    await provider.writeText('c', 'copied text');
+    expect(writeSpy).toHaveBeenCalledWith('copied text');
+    writeSpy.mockRestore();
+  });
+});
+
+describe('useShellTerminal — keyboard copy/paste shortcuts (#272 follow-up)', () => {
+  function keyHandlerFor(terminal: (typeof xterm.terminals)[number]) {
+    return (terminal.attachCustomKeyEventHandler as ReturnType<typeof vi.fn>).mock.calls[0][0] as (
+      event: Partial<KeyboardEvent>,
+    ) => boolean;
+  }
+
+  it('copies the selection on Ctrl/Cmd+C and swallows the native event', async () => {
+    render(<Harness />);
+    flushBuild();
+    const terminal = xterm.terminals[0];
+    terminal.hasSelection = vi.fn(() => true) as never;
+    terminal.getSelection = vi.fn(() => 'selected text') as never;
+    const writeSpy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+
+    const handler = keyHandlerFor(terminal);
+    const event = {
+      type: 'keydown',
+      ctrlKey: true,
+      key: 'c',
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    const result = handler(event as unknown as KeyboardEvent);
+
+    expect(result).toBe(false);
+    expect(event.preventDefault).toHaveBeenCalled();
+    await Promise.resolve();
+    expect(writeSpy).toHaveBeenCalledWith('selected text');
+    writeSpy.mockRestore();
+  });
+
+  it('does not intercept Ctrl+C when nothing is selected', () => {
+    render(<Harness />);
+    flushBuild();
+    const terminal = xterm.terminals[0];
+    terminal.hasSelection = vi.fn(() => false) as never;
+
+    const handler = keyHandlerFor(terminal);
+    const event = { type: 'keydown', ctrlKey: true, key: 'c', preventDefault: vi.fn(), stopPropagation: vi.fn() };
+
+    expect(handler(event as unknown as KeyboardEvent)).toBe(true);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('reads the clipboard and forwards it as input on Ctrl/Cmd+V', async () => {
+    const socket = fakeSocket();
+    render(<Harness socket={socket} />);
+    flushBuild();
+    const terminal = xterm.terminals[0];
+    const readSpy = vi.spyOn(navigator.clipboard, 'readText').mockResolvedValue('pasted!');
+
+    const handler = keyHandlerFor(terminal);
+    const event = { type: 'keydown', metaKey: true, key: 'V', preventDefault: vi.fn(), stopPropagation: vi.fn() };
+
+    expect(handler(event as unknown as KeyboardEvent)).toBe(false);
+    expect(event.preventDefault).toHaveBeenCalled();
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(resizeFrames(socket)).toHaveLength(0);
+    const inputCalls = socket.send.mock.calls
+      .map(([payload]) => JSON.parse(String(payload)))
+      .filter((message) => message.type === 'input');
+    expect(inputCalls).toContainEqual({ type: 'input', data: 'pasted!' });
+    readSpy.mockRestore();
+  });
+
+  it('passes through key events that are not the copy/paste shortcuts', () => {
+    render(<Harness />);
+    flushBuild();
+    const terminal = xterm.terminals[0];
+
+    const handler = keyHandlerFor(terminal);
+    const event = { type: 'keydown', key: 'a', preventDefault: vi.fn(), stopPropagation: vi.fn() };
+
+    expect(handler(event as unknown as KeyboardEvent)).toBe(true);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+});
+
+describe('useShellTerminal — native copy event (#272 follow-up)', () => {
+  it('puts the selection on the clipboard event when clipboardData is available', () => {
+    render(<Harness />);
+    flushBuild();
+    const terminal = xterm.terminals[0];
+    terminal.hasSelection = vi.fn(() => true) as never;
+    terminal.getSelection = vi.fn(() => 'copy me') as never;
+
+    const container = screen.getByTestId('terminal-container');
+    const setData = vi.fn();
+    const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, 'clipboardData', { value: { setData }, configurable: true });
+
+    container.dispatchEvent(event);
+
+    expect(setData).toHaveBeenCalledWith('text/plain', 'copy me');
+  });
+
+  it('falls back to the async clipboard when the browser gives no clipboardData', async () => {
+    render(<Harness />);
+    flushBuild();
+    const terminal = xterm.terminals[0];
+    terminal.hasSelection = vi.fn(() => true) as never;
+    terminal.getSelection = vi.fn(() => 'copy me too') as never;
+    const writeSpy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+
+    const container = screen.getByTestId('terminal-container');
+    const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, 'clipboardData', { value: null, configurable: true });
+
+    container.dispatchEvent(event);
+    await Promise.resolve();
+
+    expect(writeSpy).toHaveBeenCalledWith('copy me too');
+    writeSpy.mockRestore();
+  });
+
+  it('ignores the copy event entirely when there is no selection', () => {
+    render(<Harness />);
+    flushBuild();
+    const terminal = xterm.terminals[0];
+    terminal.hasSelection = vi.fn(() => false) as never;
+
+    const container = screen.getByTestId('terminal-container');
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    const preventDefault = vi.spyOn(event, 'preventDefault');
+
+    container.dispatchEvent(event);
+
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+});
+
+describe('useShellTerminal — pty input and mobile pinch-zoom wiring (#272 follow-up)', () => {
+  it('forwards typed data from xterm to the pty', () => {
+    const socket = fakeSocket();
+    render(<Harness socket={socket} />);
+    flushBuild();
+    const terminal = xterm.terminals[0];
+
+    const dataHandler = (terminal.onData as ReturnType<typeof vi.fn>).mock.calls[0][0] as (
+      data: string,
+    ) => void;
+    dataHandler('ls -la\r');
+
+    const inputCalls = socket.send.mock.calls
+      .map(([payload]) => JSON.parse(String(payload)))
+      .filter((message) => message.type === 'input');
+    expect(inputCalls).toContainEqual({ type: 'input', data: 'ls -la\r' });
+  });
+
+  it('re-fits and reports the resize when a pinch-zoom changes the font size', () => {
+    const socket = fakeSocket();
+    render(<Harness socket={socket} />);
+    flushBuild();
+    const terminal = xterm.terminals[0];
+    const fitAddon = xterm.fits[0];
+    fitAddon.fit.mockImplementation(() => {
+      terminal.cols = 90;
+      terminal.rows = 30;
+    });
+    socket.send.mockClear();
+
+    const [, , options] = mobileSelection.calls[0] as [
+      unknown,
+      unknown,
+      { onFontSizeChange: (fontSize: number) => void },
+    ];
+    options.onFontSizeChange(20);
+
+    expect(terminal.options.fontSize).toBe(20);
+    expect(fitAddon.fit).toHaveBeenCalled();
+    expect(resizeFrames(socket)).toContainEqual({ type: 'resize', cols: 90, rows: 30 });
   });
 });
