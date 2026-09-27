@@ -4,7 +4,6 @@ This module owns the server-side WebSocket gateway used by:
 
 1. Chat streaming (`/ws`)
 2. Interactive terminal sessions (`/shell`)
-3. Plugin WebSocket passthrough (`/plugin-ws/:pluginName`)
 
 It is intentionally structured as **small services** plus a **barrel export** in `index.ts`.
 
@@ -38,7 +37,6 @@ Benefits:
 | `services/chat-run-reconcile.service.ts` | Startup reconcile: flags `active_runs` rows left by a previous process as `interrupted` so stranded work is surfaced as resumable, never silently lost |
 | `services/chat-session-writer.service.ts` | Gateway writer handed to provider runtimes: remaps provider session ids to app ids, swallows `session_created`, assigns `seq` |
 | `services/shell-websocket.service.ts` | Handles `/shell` PTY lifecycle, reconnect buffering, auth URL detection |
-| `services/plugin-websocket-proxy.service.ts` | Bridges client socket to plugin socket |
 | `services/websocket-writer.service.ts` | Adapts raw WebSocket to writer interface (`send`, `setSessionId`, `getSessionId`) for non-chat writer consumers |
 | `services/websocket-state.service.ts` | Holds shared chat client set and open-state constant |
 
@@ -51,13 +49,11 @@ flowchart LR
   B --> D{Pathname}
   D -->|/ws| E[handleChatConnection]
   D -->|/shell| F[handleShellConnection]
-  D -->|/plugin-ws/:name| G[handlePluginWsProxy]
   D -->|other| H[close()]
 
   E --> I[connectedClients Set]
   E --> J[chatRunRegistry + ChatSessionWriter]
   F --> K[ptySessionsMap]
-  G --> L[Upstream Plugin ws://127.0.0.1:port/ws]
 
   I --> M[projects.service loading_progress]
   I --> N[sessions-watcher.service session_upserted]
@@ -74,7 +70,6 @@ sequenceDiagram
   participant Router as connection router
   participant Chat as /ws handler
   participant Shell as /shell handler
-  participant Proxy as /plugin-ws handler
 
   Client->>WSS: Upgrade Request
   WSS->>Auth: verifyClient(info)
@@ -96,8 +91,6 @@ sequenceDiagram
       Router->>Chat: handleChatConnection(ws, request, deps.chat)
     else pathname == /shell
       Router->>Shell: handleShellConnection(ws, deps.shell)
-    else pathname startsWith /plugin-ws/
-      Router->>Proxy: handlePluginWsProxy(ws, pathname, getPluginPort)
     else unknown
       Router->>Router: ws.close()
     end
@@ -153,7 +146,7 @@ flowchart TD
 4. `chat_subscribed` includes `isProcessing` (replaces `check-session-status`), `pendingPermissions` (replaces `get-pending-permissions`), and `interrupted` (true when a previous process left in-flight/queued work for this session that a `chat.resume` can re-dispatch).
 5. **Restart persistence + resume** (`active_runs` table, issue #70): the in-memory run registry is mirrored to a durable SQLite journal — one row per accepted `chat.send` (`running`/`queued`), deleted at the single completion choke point so a clean run leaves no trace. On SIGTERM/SIGINT the server enters a bounded graceful drain (`CHAT_DRAIN_TIMEOUT_MS`, default 10s): new sends are refused with a `SERVER_DRAINING` `protocol_error` while in-flight runs finish. A run that *fails* (not aborted) once the drain has begun is treated as killed by the shutdown — its provider child caught the same signal (systemd `KillMode=control-group`, a terminal Ctrl-C) — so its journal row is kept rather than deleted, and no "run failed" push is sent (issue #535). Anything still journaled after a restart is flagged `interrupted` by the startup reconcile and surfaced via `chat_subscribed.interrupted`; `chat.resume { sessionId }` re-dispatches those messages, in arrival order (the head resuming the provider transcript by provider-native id, the rest queueing behind it), and acks with `chat_resumed { sessionId, resumed, timestamp }`. Net: no in-flight or queued message is silently lost across a restart.
 6. **Delivery ack + send idempotency** (issue #389): `chat.send` may carry a client-generated `clientMessageId`. When the server takes ownership of the message — whether it started a run or queued it behind one — it replies `chat_send_accepted { sessionId, clientMessageId, timestamp }`. This exists because the client's only other evidence of delivery is a transcript echo, which a *queued* message does not produce until the run ahead of it finishes; past the client's 30s resend grace that read as "never arrived" and the message was sent twice. The ack is sent **before** the run is awaited, so a long turn cannot delay its own acknowledgement. Because the ack is itself just a frame and can be lost (a half-open socket with a working uplink and a dead downlink), accepted ids are also remembered per session (10 min TTL, 200 ids): a resend of a known id is re-acked and **not** run again. Ids are recorded only after acceptance, so a send rejected for `SERVER_DRAINING` or `QUEUE_FULL` stays retryable. A client that sends no `clientMessageId` gets the old behaviour — the message runs, unacked and undeduped.
-7. **Liveness heartbeat** (issue #389): every socket — chat, shell, and plugin-proxy alike — gets a `ws.ping()` every 30s from `attachHeartbeat`, and a socket that fails to answer with a pong before the next beat is `terminate()`d. The ping half keeps reverse proxies from idling the connection out; the pong half is what reaps a peer whose connection has black-holed, which would otherwise sit in `connectedClients` forever still holding the writer for any run fanning out to it. Browsers answer protocol pings automatically, so this direction needs no client cooperation. The reverse direction cannot use protocol pings — browsers never expose them to JavaScript — so clients probe with an application-level `chat.ping`, answered by `pong`. A server too old to know `chat.ping` answers `protocol_error { code: "UNKNOWN_MESSAGE_TYPE", type: "chat.ping" }`; the `type` field exists so a newer client can recognise that rejection as an answer to its own probe and swallow it rather than rendering it into the conversation.
+7. **Liveness heartbeat** (issue #389): every socket — chat and shell alike — gets a `ws.ping()` every 30s from `attachHeartbeat`, and a socket that fails to answer with a pong before the next beat is `terminate()`d. The ping half keeps reverse proxies from idling the connection out; the pong half is what reaps a peer whose connection has black-holed, which would otherwise sit in `connectedClients` forever still holding the writer for any run fanning out to it. Browsers answer protocol pings automatically, so this direction needs no client cooperation. The reverse direction cannot use protocol pings — browsers never expose them to JavaScript — so clients probe with an application-level `chat.ping`, answered by `pong`. A server too old to know `chat.ping` answers `protocol_error { code: "UNKNOWN_MESSAGE_TYPE", type: "chat.ping" }`; the `type` field exists so a newer client can recognise that rejection as an answer to its own probe and swallow it rather than rendering it into the conversation.
 
 ## `/shell` Terminal Flow
 
@@ -206,34 +199,6 @@ Strips ANSI, accumulates text buffer, extracts URLs, emits `auth_url` once per n
 7. Close behavior:
 Socket disconnect does not instantly kill PTY; session is kept alive and terminated on timeout.
 
-## `/plugin-ws/:pluginName` Proxy Flow
-
-```mermaid
-sequenceDiagram
-  participant Client
-  participant Proxy as handlePluginWsProxy
-  participant PM as getPluginPort
-  participant Upstream as Plugin WS
-
-  Client->>Proxy: Connect /plugin-ws/:name
-  Proxy->>Proxy: Validate pluginName regex
-  alt Invalid name
-    Proxy-->>Client: close(4400, "Invalid plugin name")
-  else Valid
-    Proxy->>PM: getPluginPort(name)
-    alt Plugin not running
-      Proxy-->>Client: close(4404, "Plugin not running")
-    else Port found
-      Proxy->>Upstream: new WebSocket(ws://127.0.0.1:port/ws)
-      Client-->>Upstream: relay messages bidirectionally
-      Upstream-->>Client: relay messages bidirectionally
-      Upstream-->>Client: close propagation
-      Client-->>Upstream: close propagation
-      Upstream-->>Client: close(4502, "Upstream error") on upstream error
-    end
-  end
-```
-
 ## Shared Client Registry and Broadcasts
 
 Only chat sockets (`/ws`) are tracked in `connectedClients`.
@@ -264,13 +229,7 @@ Allows active session stream redirection on reconnect.
 
 ## Error Handling and Close Codes
 
-Current explicit close codes in this module:
-
-1. `4400`: Invalid plugin name
-2. `4404`: Plugin not running
-3. `4502`: Upstream plugin WebSocket error
-
-Other errors:
+Errors:
 
 1. Chat handler catches and emits `{ kind: "protocol_error", code, error, sessionId }`. An `UNKNOWN_MESSAGE_TYPE` rejection also carries `type`, the client message type that was rejected.
 2. Shell handler catches and writes terminal-visible error output.

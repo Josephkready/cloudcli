@@ -24,13 +24,8 @@
 export const FEATURE_KEYS = [
   // --- Tabs -----------------------------------------------------------------
   'tab.chat',
-  'tab.shell',
   'tab.files',
   'tab.git',
-  // Aggregate across every drop-installed plugin tab (docs/plugins.md). There is
-  // no per-plugin key on purpose: the question this answers is "is the plugin
-  // subsystem worth keeping at all", not "which plugin is popular".
-  'tab.plugin',
 
   // --- Chat -----------------------------------------------------------------
   'chat.send',
