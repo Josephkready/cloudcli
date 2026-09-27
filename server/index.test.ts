@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+
+// APP_ROOT resolves to this repo's root (findAppRoot walks up from
+// server/index.js's own directory). Some environments (e.g. a CI image that
+// ran `npm run build` while baking) may already have a real dist/ here, so
+// tests below that depend on dist's presence/absence make no assumption about
+// the ambient state — they move any pre-existing dist/ aside and restore it.
+const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DIST_DIR = path.join(APP_ROOT, 'dist');
+const DIST_INDEX_PATH = path.join(DIST_DIR, 'index.html');
 
 // server/index.js does real work (DB init, app-construction, route mounting)
 // as soon as it is imported: express() + wss are built at module scope so the
@@ -134,12 +144,27 @@ test('GET /nonexistent-file.png returns a plain 404 (static-asset short-circuit)
 });
 
 test('GET /some/spa/route redirects to the Vite dev server when no build exists', async () => {
-  await withRunningServer(async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/some/spa/route`, { redirect: 'manual' });
-    assert.equal(response.status, 302);
-    const location = response.headers.get('location');
-    assert.match(location ?? '', /:5173$/);
-  });
+  // Some CI environments bake an image that has already run `npm run build`,
+  // so a real dist/ may exist ambiently. This test's premise is "no build",
+  // so it moves any pre-existing dist/ aside for its duration and restores it
+  // afterward rather than assuming a clean checkout.
+  const backupDir = existsSync(DIST_DIR) ? `${DIST_DIR}.bak-${Date.now()}` : null;
+  if (backupDir) {
+    await rename(DIST_DIR, backupDir);
+  }
+
+  try {
+    await withRunningServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/some/spa/route`, { redirect: 'manual' });
+      assert.equal(response.status, 302);
+      const location = response.headers.get('location');
+      assert.match(location ?? '', /:5173$/);
+    });
+  } finally {
+    if (backupDir) {
+      await rename(backupDir, DIST_DIR);
+    }
+  }
 });
 
 test('GET /api/browse-filesystem 400s on a file path and 404s on a missing one', async () => {
@@ -169,16 +194,18 @@ test('POST /api/create-folder 404s when the parent directory is missing', async 
 });
 
 test('GET / and /index.html serve the built SPA with the router-basename injected, when dist exists', async () => {
-  // APP_ROOT resolves to this repo's root (findAppRoot walks up from
-  // server/index.js's own directory), so a real dist/index.html has to exist
-  // there for sendIndexHtmlWithBasename's happy path to run. It's created and
-  // torn down here rather than checked in — dist/ is gitignored build output.
-  const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const distDir = path.join(appRoot, 'dist');
-  const distIndexPath = path.join(distDir, 'index.html');
-  await mkdir(distDir, { recursive: true });
+  // A real dist/index.html has to exist under APP_ROOT for
+  // sendIndexHtmlWithBasename's happy path to run. dist/ is gitignored build
+  // output, but some CI environments bake an image with a real one already
+  // present — back that up rather than clobbering/deleting it so this test
+  // works the same in a clean checkout or a pre-built image.
+  const backupDir = existsSync(DIST_DIR) ? `${DIST_DIR}.bak-${Date.now()}` : null;
+  if (backupDir) {
+    await rename(DIST_DIR, backupDir);
+  }
+  await mkdir(DIST_DIR, { recursive: true });
   await writeFile(
-    distIndexPath,
+    DIST_INDEX_PATH,
     '<!doctype html><html><head></head><body><script>window.__ROUTER_BASENAME__="__PLACEHOLDER__"</script></body></html>',
   );
 
@@ -193,6 +220,9 @@ test('GET / and /index.html serve the built SPA with the router-basename injecte
       }
     });
   } finally {
-    await rm(distDir, { recursive: true, force: true });
+    await rm(DIST_DIR, { recursive: true, force: true });
+    if (backupDir) {
+      await rename(backupDir, DIST_DIR);
+    }
   }
 });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -52,29 +52,26 @@ test('listSkills: discovers SKILL.md files across sources and skips malformed on
       '---\nname: good-skill\ndescription: A good skill\n---\nBody',
       'utf8',
     );
-    // An unreadable SKILL.md (not merely missing frontmatter, which falls
-    // back to the directory name rather than throwing) is what actually
-    // exercises listSkills' per-skill try/catch — it must not let one broken
-    // skill hide the others.
+    // Malformed YAML frontmatter (not merely a missing `name` field, which
+    // falls back to the directory name rather than throwing) is what actually
+    // exercises listSkills' per-skill try/catch — a real parse failure from
+    // gray-matter/js-yaml, independent of file permissions (a chmod-based
+    // "unreadable" file doesn't work here: the local-ci container runs as
+    // root, which ignores permission bits entirely). It must not let one
+    // broken skill hide the others.
     const badSkillPath = path.join(globalDir, 'bad-skill', 'SKILL.md');
-    await writeFile(badSkillPath, 'unreadable', 'utf8');
-    await chmod(badSkillPath, 0o000);
+    await writeFile(badSkillPath, '---\nname: [unclosed\n---\nBody', 'utf8');
 
-    try {
-      const provider = new TestSkillsProvider();
-      provider.sources = [
-        { rootDir: globalDir, recursive: true, scope: 'user', commandPrefix: '/' } as ProviderSkillSource,
-      ];
+    const provider = new TestSkillsProvider();
+    provider.sources = [
+      { rootDir: globalDir, recursive: true, scope: 'user', commandPrefix: '/' } as ProviderSkillSource,
+    ];
 
-      const skills = await provider.listSkills({ workspacePath: projectDir });
-      assert.equal(skills.length, 1);
-      assert.equal(skills[0].name, 'good-skill');
-      assert.equal(skills[0].command, '/good-skill');
-      assert.equal(skills[0].scope, 'user');
-    } finally {
-      // Restore permissions so the outer temp-dir rm() can clean up.
-      await chmod(badSkillPath, 0o644);
-    }
+    const skills = await provider.listSkills({ workspacePath: projectDir });
+    assert.equal(skills.length, 1);
+    assert.equal(skills[0].name, 'good-skill');
+    assert.equal(skills[0].command, '/good-skill');
+    assert.equal(skills[0].scope, 'user');
   });
 });
 
