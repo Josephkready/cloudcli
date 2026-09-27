@@ -217,8 +217,6 @@ app.use('/api/projects', authenticateToken, projectModuleRoutes);
 // Chat image asset upload/serving (global ~/.cloudcli/assets store, protected)
 app.use('/api/assets', authenticateToken, assetsRoutes);
 
-// Git API Routes (protected)
-
 // Commands API Routes (protected)
 app.use('/api/commands', authenticateToken, commandsRoutes);
 
