@@ -198,3 +198,164 @@ test('an archived session with no lastActivity renders no age instead of a blank
   assert.ok(markup.includes('Never active'), 'expected the archived row to render');
   assert.ok(!markup.includes('>3hr<'), 'no age should be derived from a null lastActivity');
 });
+
+test('the archived overlay shows a loading state while the archive is fetched', () => {
+  const markup = render({ sidebarOverlay: 'archived', isArchivedSessionsLoading: true });
+
+  assert.ok(markup.includes('Loading archive...'), 'expected the archive loading title');
+});
+
+test('the archived overlay shows a no-matching-sessions message when a search filters everything out', () => {
+  const markup = render({ sidebarOverlay: 'archived', archivedSessionsCount: 2 });
+
+  assert.ok(markup.includes('No matching archived items'), 'expected the filtered-empty state');
+  assert.ok(markup.includes('Try a different search term.'));
+});
+
+test('an archived project with sessions renders its sessions, provider, and restore action', () => {
+  const markup = render({
+    sidebarOverlay: 'archived',
+    archivedProjects: [
+      {
+        projectId: 'archived-proj-1',
+        displayName: 'Old Project',
+        fullPath: '/tmp/old-project',
+        isArchived: true,
+        sessions: [
+          {
+            id: 'sess-1',
+            summary: 'A summarized chat',
+            provider: 'codex',
+            created_at: '2026-07-16T06:00:00Z',
+            updated_at: '2026-07-16T09:00:00Z',
+          },
+        ],
+      } as never,
+    ],
+    projectListProps: { ...projectListProps, currentTime: new Date('2026-07-16T12:00:00Z') },
+  });
+
+  assert.ok(markup.includes('Old Project'), 'expected the archived project name');
+  assert.ok(markup.includes('Project archived'));
+  assert.ok(markup.includes('A summarized chat'), 'expected the session summary as its title');
+  assert.ok(markup.includes('Restore workspace'));
+});
+
+test('an archived project session falls back to its name, then its id, when no summary exists', () => {
+  const markup = render({
+    sidebarOverlay: 'archived',
+    archivedProjects: [
+      {
+        projectId: 'archived-proj-2',
+        displayName: 'Named-only project',
+        fullPath: '/tmp/named',
+        isArchived: true,
+        sessions: [{ id: 'sess-named', name: 'A named session' }],
+      } as never,
+      {
+        projectId: 'archived-proj-3',
+        displayName: 'Id-only project',
+        fullPath: '/tmp/idonly',
+        isArchived: true,
+        sessions: [{ id: 'sess-id-only' }],
+      } as never,
+    ],
+  });
+
+  assert.ok(markup.includes('A named session'));
+  assert.ok(markup.includes('sess-id-only'));
+});
+
+test('grouped archived sessions (no owning project row) render with a restore and delete action', () => {
+  const markup = render({
+    sidebarOverlay: 'archived',
+    archivedSessions: [
+      {
+        sessionId: 'grouped-1',
+        provider: 'antigravity',
+        projectId: null,
+        projectPath: '/tmp/gone',
+        projectDisplayName: 'Deleted project',
+        sessionTitle: 'Orphaned chat',
+        createdAt: null,
+        updatedAt: null,
+        lastActivity: '2026-07-16T09:00:00Z',
+        isProjectArchived: false,
+      },
+    ],
+    archivedSessionsCount: 1,
+    projectListProps: { ...projectListProps, currentTime: new Date('2026-07-16T12:00:00Z') },
+  });
+
+  assert.ok(markup.includes('Deleted project'));
+  assert.ok(markup.includes('Orphaned chat'));
+  assert.ok(markup.includes('Restore session'));
+  assert.ok(markup.includes('Delete permanently'));
+  assert.ok(!markup.includes('Project archived'), 'ungrouped sessions have no owning project row');
+});
+
+test('the search overlay shows a searching spinner before any partial results arrive', () => {
+  const markup = render({
+    sidebarOverlay: 'search',
+    searchFilter: 'hello',
+    isSearching: true,
+    conversationResults: null,
+    searchProgress: { scannedProjects: 2, totalProjects: 5 },
+  });
+
+  assert.ok(markup.includes('search.searching'));
+  assert.ok(markup.includes('2') && markup.includes('5'));
+});
+
+test('the search overlay shows a no-results message once a completed search finds nothing', () => {
+  const markup = render({
+    sidebarOverlay: 'search',
+    searchFilter: 'hello',
+    isSearching: false,
+    conversationResults: { results: [], totalMatches: 0, query: 'hello' },
+  });
+
+  assert.ok(markup.includes('search.noResults'));
+  assert.ok(markup.includes('search.tryDifferentQuery'));
+});
+
+test('the search overlay renders partial results with matches, highlights, and a progress bar', () => {
+  const markup = render({
+    sidebarOverlay: 'search',
+    searchFilter: 'hello',
+    isSearching: true,
+    searchProgress: { scannedProjects: 1, totalProjects: 2 },
+    conversationResults: {
+      query: 'hello',
+      totalMatches: 1,
+      results: [
+        {
+          projectId: 'proj-1',
+          projectName: 'proj-1',
+          projectDisplayName: 'Proj One',
+          sessions: [
+            {
+              sessionId: 'sess-1',
+              sessionSummary: 'A summary',
+              provider: 'codex',
+              matches: [
+                {
+                  role: 'user',
+                  snippet: 'say hello world',
+                  highlights: [{ start: 4, end: 9 }],
+                  timestamp: '2026-07-16T09:00:00Z',
+                  provider: 'codex',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  assert.ok(markup.includes('Proj One'));
+  assert.ok(markup.includes('A summary'));
+  assert.ok(markup.includes('<mark'), 'expected the matched substring to be highlighted');
+  assert.ok(markup.includes('CODEX'.toLowerCase()) || markup.includes('codex'));
+});
