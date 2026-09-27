@@ -103,6 +103,22 @@ export const MOCK_ASSISTANT_FRAME_COUNT = ASSISTANT_TEXT_PARTS.length;
  */
 export const MOCK_ECHO_PREFIX = 'echo:';
 
+/**
+ * Prefix that makes the run *stream*: the reply arrives as
+ * `MOCK_STREAM_CHUNKS` `stream_delta` frames spaced `MOCK_STREAM_CHUNK_DELAY_MS`
+ * apart, then `stream_end`, then one `text` frame holding the whole reply — the
+ * frame order real providers produce.
+ *
+ * The fixed reply finishes in a single tick, so it can never exercise anything
+ * that happens *while* a run is live. This one keeps the run open for about a
+ * second with its first chunk already sent, which is what a `chat.subscribe`
+ * replay needs to race it (#541: a new session's subscribes re-sent that first
+ * chunk and it rendered four times). The rest of the prompt is ignored.
+ */
+export const MOCK_STREAM_PREFIX = 'stream:';
+export const MOCK_STREAM_CHUNKS = ['one ', 'two ', 'three ', 'four ', 'five ', 'six '];
+export const MOCK_STREAM_CHUNK_DELAY_MS = 200;
+
 /** Cumulative token snapshot the run reports via a `token_budget` status frame. */
 export const MOCK_TOKEN_BUDGET = {
   inputTokens: 100,
@@ -121,11 +137,12 @@ export const MOCK_TOKEN_BUDGET = {
  *    This is the seam the Playwright e2e suite drives so a full browser chat turn
  *    (send -> streamed frames -> terminal `complete`) runs with no real CLI/SDK.
  *
- * @param {string} message - The user's task message. Logged, and inspected for two
+ * @param {string} message - The user's task message. Logged, and inspected for three
  *        independent test hooks: `MOCK_CODE_BLOCK_SENTINEL` anywhere in it swaps the
- *        prose reply for one made of code surfaces, and a leading `MOCK_ECHO_PREFIX`
+ *        prose reply for one made of code surfaces, a leading `MOCK_ECHO_PREFIX`
  *        makes the remainder the assistant's reply instead of the fixed
- *        `ASSISTANT_TEXT_PARTS`. The sentinel wins if a spec somehow asks for both.
+ *        `ASSISTANT_TEXT_PARTS`, and a leading `MOCK_STREAM_PREFIX` streams a fixed
+ *        reply chunk by chunk. The sentinel wins if a spec somehow asks for more than one.
  * @param {{ sessionId?: string|null, provider?: string }} [options] - Run options;
  *        `sessionId` seeds the emitted session id when provided (a fresh unique id
  *        is minted otherwise so concurrent app sessions never share a provider id),
@@ -152,9 +169,10 @@ export async function runMockAgentProvider(message, options = {}, writer) {
   // A non-assistant frame that must NOT appear in getAssistantMessages().
   writer.send(createNormalizedMessage({ kind: 'status', text: 'thinking', sessionId, provider }));
 
-  // Two independent hooks, checked in precedence order. The sentinel swaps in the
+  // Three independent hooks, checked in precedence order. The sentinel swaps in the
   // code-surface fixture; `echo:` replies with the rest of the prompt as ONE frame,
-  // because a spec that chooses the assistant's markdown wants it whole, not chunked.
+  // because a spec that chooses the assistant's markdown wants it whole, not chunked;
+  // `stream:` (handled below) streams a fixed reply over about a second.
   const wantsCodeSurfaces = String(message || '').includes(MOCK_CODE_BLOCK_SENTINEL);
   const textParts = wantsCodeSurfaces
     ? CODE_SURFACE_TEXT_PARTS
@@ -162,8 +180,23 @@ export async function runMockAgentProvider(message, options = {}, writer) {
       ? [message.slice(MOCK_ECHO_PREFIX.length)]
       : ASSISTANT_TEXT_PARTS;
 
-  for (const content of textParts) {
-    writer.send(createNormalizedMessage({ kind: 'text', role: 'assistant', content, sessionId, provider }));
+  if (!wantsCodeSurfaces && typeof message === 'string' && message.startsWith(MOCK_STREAM_PREFIX)) {
+    for (const content of MOCK_STREAM_CHUNKS) {
+      writer.send(createNormalizedMessage({ kind: 'stream_delta', content, sessionId, provider }));
+      await new Promise((resolve) => setTimeout(resolve, MOCK_STREAM_CHUNK_DELAY_MS));
+    }
+    writer.send(createNormalizedMessage({ kind: 'stream_end', sessionId, provider }));
+    writer.send(createNormalizedMessage({
+      kind: 'text',
+      role: 'assistant',
+      content: MOCK_STREAM_CHUNKS.join(''),
+      sessionId,
+      provider,
+    }));
+  } else {
+    for (const content of textParts) {
+      writer.send(createNormalizedMessage({ kind: 'text', role: 'assistant', content, sessionId, provider }));
+    }
   }
 
   if (wantsCodeSurfaces) {

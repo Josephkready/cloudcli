@@ -5,6 +5,8 @@ import {
   MOCK_ASSISTANT_FRAME_COUNT,
   MOCK_ASSISTANT_TEXT,
   MOCK_ECHO_PREFIX,
+  MOCK_STREAM_CHUNKS,
+  MOCK_STREAM_PREFIX,
   runMockAgentProvider,
 } from '../mock-agent-provider.js';
 
@@ -86,5 +88,21 @@ describe('runMockAgentProvider', () => {
     await runMockAgentProvider(undefined, {}, writer);
 
     assert.equal(writer.text().join(''), MOCK_ASSISTANT_TEXT);
+  });
+
+  it('streams a `stream:` prompt as deltas, then stream_end, then the whole reply as one text frame', async () => {
+    const writer = collectingWriter();
+
+    await runMockAgentProvider(`${MOCK_STREAM_PREFIX}go`, {}, writer);
+
+    const kinds = writer.frames.map((frame) => frame.kind);
+    const deltas = writer.frames.filter((frame) => frame.kind === 'stream_delta');
+    assert.deepEqual(deltas.map((frame) => frame.content), MOCK_STREAM_CHUNKS);
+    assert.ok(kinds.indexOf('stream_end') > kinds.lastIndexOf('stream_delta'));
+    // The final text equals the joined stream, exactly as a real provider's does,
+    // so the client's stream-to-text echo dedupe has something to match.
+    assert.deepEqual(writer.text(), [MOCK_STREAM_CHUNKS.join('')]);
+    assert.ok(kinds.indexOf('text') > kinds.indexOf('stream_end'));
+    assert.equal(writer.frames.at(-1).kind, 'complete');
   });
 });
