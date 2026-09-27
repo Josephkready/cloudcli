@@ -345,6 +345,9 @@ function ChatInterface({
     );
   }
 
+  // Mirrors ChatComposer's render condition for the `@` file list.
+  const fileListOpen = showFileDropdown && filteredFiles.length > 0;
+
   return (
     <PermissionContext.Provider value={permissionContextValue}>
       <div className="flex h-full min-h-0 flex-col">
@@ -394,7 +397,17 @@ function ChatInterface({
             resumeLabel={t('interruptedRun.resume', { defaultValue: 'Resume' })}
           />
 
-          {isUserScrolledUp && chatMessages.length > 0 && (
+          {/*
+            Hidden while the `@` file list is open (#542). Both float over the
+            same strip above the composer, and they cannot be ordered by
+            z-index: the list lives inside `.chat-composer-shell`, whose
+            `contain: layout` makes it a stacking context that ranks below this
+            `z-20` wrapper. Lifting the whole shell would also lift its activity
+            indicator over this button, and flattening it would let the list
+            compete with app-level overlays. So the button stands aside while
+            the list is showing, and a tap on a suggestion always lands on it.
+          */}
+          {isUserScrolledUp && chatMessages.length > 0 && !fileListOpen && (
             <div className="pointer-events-none absolute -top-11 left-0 right-0 z-20 flex justify-center">
               <button
                 type="button"

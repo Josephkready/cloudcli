@@ -264,12 +264,7 @@ export default function ChatComposer({
       : t('input.send');
 
   return (
-    // `z-30` because `.chat-composer-shell` has `contain: layout`, which makes
-    // it a stacking context: the popovers inside it (the `@` file list is
-    // `z-50`) can only rank as high as the shell itself does. Without a z-index
-    // of its own the shell painted under ChatInterface's `z-20` scroll-to-bottom
-    // button, which then swallowed taps on the middle of a suggestion (#542).
-    <div className="chat-composer-shell relative z-30 flex-shrink-0 px-2 pb-2 pt-0 sm:px-4 sm:pb-4 md:px-4 md:pb-6">
+    <div className="chat-composer-shell relative flex-shrink-0 px-2 pb-2 pt-0 sm:px-4 sm:pb-4 md:px-4 md:pb-6">
       {!hasPendingPermissions && (
         <div className="pointer-events-none absolute bottom-full left-1/2 z-10 w-[calc(100%-1rem)] max-w-[54.25rem] -translate-x-1/2 translate-y-px bg-transparent sm:w-[calc(100%-2rem)]">
           <ActivityIndicator activity={activity} onAbort={onAbortSession} isInputFocused={isInputFocused} />

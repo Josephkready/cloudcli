@@ -24,6 +24,8 @@ import {
   MOCK_DIFF_FILE,
   MOCK_DIFF_NEW,
   MOCK_DIFF_OLD,
+  MOCK_HOLD_RUN_MS,
+  MOCK_HOLD_RUN_SENTINEL,
   MOCK_LONG_CODE_LINE,
   MOCK_LONG_INLINE_TOKEN,
   MOCK_WIDE_BASH_COMMAND,
@@ -151,6 +153,12 @@ export async function runMockAgentProvider(message, options = {}, writer) {
   //
   // A non-assistant frame that must NOT appear in getAssistantMessages().
   writer.send(createNormalizedMessage({ kind: 'status', text: 'thinking', sessionId, provider }));
+
+  // Holds the run in progress, so a spec can inspect the running-turn UI
+  // (activity indicator, Stop) before the reply lands.
+  if (String(message || '').includes(MOCK_HOLD_RUN_SENTINEL)) {
+    await new Promise((resolve) => setTimeout(resolve, MOCK_HOLD_RUN_MS));
+  }
 
   // Two independent hooks, checked in precedence order. The sentinel swaps in the
   // code-surface fixture; `echo:` replies with the rest of the prompt as ONE frame,
