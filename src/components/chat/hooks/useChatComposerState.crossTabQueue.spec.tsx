@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Project, ProjectSession } from '../../../types/app';
 import { queuedMessageKey, readQueuedMessages, writeQueuedMessages } from '../utils/chatStorage';
 
-import { reconcileQueuedDraftsFromStorage, useChatComposerState, type QueuedDraft } from './useChatComposerState';
+import { useChatComposerState } from './useChatComposerState';
 
 /**
  * #459 item 3 (loss direction): two tabs on ONE session share the single
@@ -54,75 +54,9 @@ vi.mock('./useFileMentions', () => ({
 
 const SESSION_ID = 'session-459-3';
 
-// --- pure reconcile helper -------------------------------------------------
-
-const draft = (id: string, content: string): QueuedDraft => ({ id, content, images: [] });
-let idSeq = 0;
-const makeId = () => `new_${idSeq++}`;
-
-describe('reconcileQueuedDraftsFromStorage', () => {
-  beforeEach(() => {
-    idSeq = 0;
-  });
-
-  it('returns null when in-memory and storage already match, so no state churn', () => {
-    const current = [draft('a', 'one'), draft('b', 'two')];
-    const stored = [{ content: 'one' }, { content: 'two' }];
-    expect(reconcileQueuedDraftsFromStorage(current, stored, makeId)).toBeNull();
-  });
-
-  it('adopts a message another tab appended, preserving existing ids by content', () => {
-    const current = [draft('a', 'one')];
-    const stored = [{ content: 'one' }, { content: 'two', options: { model: 'x' } }];
-
-    const result = reconcileQueuedDraftsFromStorage(current, stored, makeId);
-
-    expect(result).not.toBeNull();
-    expect(result?.map((d) => d.content)).toEqual(['one', 'two']);
-    expect(result?.[0].id).toBe('a'); // survivor keeps its stable React id
-    expect(result?.[1].id).toBe('new_0'); // the new item gets a fresh id
-    expect(result?.[1].options).toEqual({ model: 'x' });
-  });
-
-  it('adopts a drain another tab made (message removed from storage)', () => {
-    const current = [draft('a', 'one'), draft('b', 'two')];
-    const stored = [{ content: 'two' }];
-
-    const result = reconcileQueuedDraftsFromStorage(current, stored, makeId);
-
-    expect(result?.map((d) => d.content)).toEqual(['two']);
-    expect(result?.[0].id).toBe('b'); // the surviving draft keeps its id
-  });
-
-  it('preserves in-memory image attachments for a surviving message', () => {
-    const image = new File(['x'], 'x.png', { type: 'image/png' });
-    const current: QueuedDraft[] = [{ id: 'a', content: 'one', images: [image] }];
-    const stored = [{ content: 'one' }, { content: 'two' }];
-
-    const result = reconcileQueuedDraftsFromStorage(current, stored, makeId);
-
-    expect(result?.[0].images).toEqual([image]); // images never persist, kept from memory
-    expect(result?.[1].images).toEqual([]);
-  });
-
-  it('keeps the image-bearing survivor when a duplicate-content draft is removed', () => {
-    // Storage carries no id, so which of two identical "foo" drafts the other tab
-    // removed is ambiguous; the surviving one must keep its attachment, not drop it.
-    const image = new File(['x'], 'x.png', { type: 'image/png' });
-    const current: QueuedDraft[] = [
-      { id: 'a', content: 'foo', images: [] },
-      { id: 'c', content: 'foo', images: [image] },
-    ];
-    const stored = [{ content: 'foo' }];
-
-    const result = reconcileQueuedDraftsFromStorage(current, stored, makeId);
-
-    expect(result?.map((d) => d.content)).toEqual(['foo']);
-    expect(result?.[0].images).toEqual([image]); // the attachment survives
-  });
-});
-
 // --- hook-level cross-tab sync ---------------------------------------------
+// The pure reconcile helper (reconcileQueuedDraftsFromStorage) has its own
+// node:test unit tests in ../utils/queuedDrafts.test.ts.
 
 type ComposerArgs = Parameters<typeof useChatComposerState>[0];
 
