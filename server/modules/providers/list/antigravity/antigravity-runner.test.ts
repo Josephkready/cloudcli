@@ -5,23 +5,32 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
+import { markShutdownDraining, resetShutdownDrainingForTests } from '@/shared/shutdown-drain.js';
+import type { ProviderModelsDefinition, ProviderModelsResult } from '@/shared/types.js';
+
 import {
   abortAntigravitySession,
   resolveAntigravityEffort,
   resolveAntigravityPermissionArgs,
   spawnAntigravity,
   terminateAntigravityChild,
-} from './antigravity-cli.js';
-import { providerModelsService } from './modules/providers/services/provider-models.service.js';
-import { markShutdownDraining, resetShutdownDrainingForTests } from './shared/shutdown-drain.js';
+} from './antigravity-runner.js';
 
 // Drive spawnAntigravity's effort path with a deterministic catalog instead of
 // the real ~/.cloudcli-cached one, so the model/effort gating is hermetic.
-async function withStubbedAntigravityCatalog(models, fn) {
+async function withStubbedAntigravityCatalog(
+  models: ProviderModelsDefinition,
+  fn: () => Promise<void>,
+): Promise<void> {
   const origGetModels = providerModelsService.getProviderModels;
   const origResolveModel = providerModelsService.resolveResumeModel;
-  providerModelsService.getProviderModels = async () => ({ models });
-  providerModelsService.resolveResumeModel = async (_provider, _sessionId, requested) => requested;
+  providerModelsService.getProviderModels = async (): Promise<ProviderModelsResult> => ({
+    models,
+    cache: { updatedAt: new Date(0).toISOString(), expiresAt: new Date(0).toISOString(), source: 'memory' },
+  });
+  providerModelsService.resolveResumeModel = async (_provider, _sessionId, requested) =>
+    requested ?? undefined;
   try {
     await fn();
   } finally {
@@ -30,10 +39,10 @@ async function withStubbedAntigravityCatalog(models, fn) {
   }
 }
 
-const findEnvKey = (name) =>
+const findEnvKey = (name: string) =>
   Object.keys(process.env).find((key) => key.toLowerCase() === name.toLowerCase()) || name;
 
-async function createFakeAgy(binDir) {
+async function createFakeAgy(binDir: string): Promise<string> {
   // The stub below is CommonJS, and a bare `.js` file's module system is decided
   // by the nearest package.json — which lives OUTSIDE this temp dir, wherever
   // `os.tmpdir()` happens to point. Under `/tmp` there is none, so it loaded as
@@ -102,7 +111,7 @@ if (process.env.AGY_FAKE_MODE === 'hang') {
   return commandPath;
 }
 
-async function withFakeAgy(run) {
+async function withFakeAgy(run: (tempRoot: string) => Promise<void>): Promise<void> {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'antigravity-runtime-'));
   const binDir = path.join(tempRoot, 'bin');
   const pathKey = findEnvKey('PATH');
@@ -137,15 +146,15 @@ async function withFakeAgy(run) {
 }
 
 function createWriter() {
-  const messages = [];
+  const messages: Array<Record<string, unknown>> = [];
   return {
     messages,
-    sessionId: null,
+    sessionId: null as string | null,
     userId: null,
-    send(message) {
+    send(message: Record<string, unknown>) {
       messages.push(message);
     },
-    setSessionId(sessionId) {
+    setSessionId(sessionId: string) {
       this.sessionId = sessionId;
     },
   };
@@ -163,12 +172,13 @@ test('permission modes map onto agy flags', () => {
 // tier the model's catalog entry lists. This is the guard the split model/effort
 // selectors rely on (#492).
 test('resolveAntigravityEffort only passes a tier the model actually supports', () => {
-  const catalog = {
+  const catalog: ProviderModelsDefinition = {
     OPTIONS: [
-      { value: 'gemini-3.8-flash', effort: { default: 'medium', values: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }] } },
-      { value: 'gemini-3.1-pro', effort: { default: 'high', values: [{ value: 'low' }, { value: 'high' }] } },
-      { value: 'claude-sonnet-4-6' }, // no effort object
+      { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', effort: { default: 'medium', values: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }] } },
+      { value: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', effort: { default: 'high', values: [{ value: 'low' }, { value: 'high' }] } },
+      { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' }, // no effort object
     ],
+    DEFAULT: 'gemini-3.8-flash',
   };
 
   // Supported tier passes through.
@@ -244,14 +254,14 @@ test('spawnAntigravity drops --effort for a tier the selected model does not off
 
 test('Antigravity abort escalates to SIGKILL when a child ignores SIGTERM', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const child = new EventEmitter();
-  const signals = [];
-  child.kill = (signal) => {
+  const child = new EventEmitter() as EventEmitter & { kill: (signal: string) => boolean };
+  const signals: string[] = [];
+  child.kill = (signal: string) => {
     signals.push(signal);
     return true;
   };
 
-  assert.equal(terminateAntigravityChild(child, 25), true);
+  assert.equal(terminateAntigravityChild(child as never, 25), true);
   assert.deepEqual(signals, ['SIGTERM']);
   t.mock.timers.tick(25);
   assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
@@ -259,14 +269,14 @@ test('Antigravity abort escalates to SIGKILL when a child ignores SIGTERM', (t) 
 
 test('Antigravity abort cancels escalation when the child closes during grace', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const child = new EventEmitter();
-  const signals = [];
-  child.kill = (signal) => {
+  const child = new EventEmitter() as EventEmitter & { kill: (signal: string) => boolean };
+  const signals: string[] = [];
+  child.kill = (signal: string) => {
     signals.push(signal);
     return true;
   };
 
-  assert.equal(terminateAntigravityChild(child, 25), true);
+  assert.equal(terminateAntigravityChild(child as never, 25), true);
   child.emit('close', null, 'SIGTERM');
   t.mock.timers.tick(25);
   assert.deepEqual(signals, ['SIGTERM']);
@@ -422,7 +432,7 @@ test('abortAntigravitySession terminates a live process with one aborted complet
 test('a SIGTERM that is not a user abort is a failure during the shutdown drain, not an abort (#535)', { concurrency: false }, async () => {
   await withFakeAgy(async (tempRoot) => {
     process.env.AGY_FAKE_MODE = 'self-sigterm';
-    const run = async ({ expectFailure }) => {
+    const run = async ({ expectFailure }: { expectFailure: boolean }) => {
       const writer = createWriter();
       const spawned = spawnAntigravity('Wait', { cwd: tempRoot, model: 'gemini-test-model' }, writer);
       if (expectFailure) {
