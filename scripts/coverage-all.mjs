@@ -10,15 +10,18 @@
 //     - node:test (`coverage/server.lcov`, `coverage/unit.lcov`) only reports
 //       files a test actually loaded, counts EVERY physical line (LF == wc -l,
 //       blanks and comments included), and also reports the test files.
-//     - vitest v8 (`coverage/component/lcov.info`) instruments every file that
-//       matches `coverage.include` in vitest.config.ts — tested or not — and
-//       counts only executable lines.
+//     - vitest v8 instruments every file that matches `coverage.include` in
+//       vitest.config.ts — tested or not — and counts only executable lines.
+//       With COVERAGE_WHOLE_APP=1 that include spans src/, server/ and
+//       shared/ and the report lands in `coverage/whole-app/lcov.info`.
 //   So vitest's per-file line set is the denominator: it exists for every
 //   source file and is the only one that ignores blanks/comments. A line is
 //   covered when ANY suite hit it (node:test DA lines are mapped back to the
 //   original source by tsx's source maps, so line numbers agree).
 //
-// USAGE (after `npm run test:coverage`)
+// USAGE (after the three coverage runs:
+//   npm run test:server:coverage && npm run test:unit:coverage &&
+//   COVERAGE_WHOLE_APP=1 node_modules/.bin/vitest run --coverage)
 //   node scripts/coverage-all.mjs                 # summary + worst files
 //   (no npm alias on purpose: editing package.json invalidates local-ci's baked image)
 //   node scripts/coverage-all.mjs --floor 80      # also exit 1 below 80%
@@ -30,7 +33,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const ROOT = process.cwd();
-const BASE_REPORT = 'coverage/component/lcov.info';
+const BASE_REPORT = 'coverage/whole-app/lcov.info';
 const EXTRA_REPORTS = ['coverage/server.lcov', 'coverage/unit.lcov'];
 
 /** Parse LCOV text into Map<relPath, Map<line, hits>>. Paths are normalized
@@ -91,6 +94,20 @@ export function mergeCoverage(base, extras) {
   return { rows, lf, lh, pct: lf === 0 ? 0 : (lh / lf) * 100 };
 }
 
+/** App files a node:test report saw but the base report did not. They are left
+ *  out of the total (there is no executable-line count for them), so main()
+ *  warns — a file type vitest's `coverage.include` misses would otherwise drop
+ *  out of the whole-app number silently. */
+export function extrasMissingFromBase(base, extras) {
+  const missing = new Set();
+  for (const extra of extras) {
+    for (const file of extra.keys()) {
+      if (isAppSource(file) && !base.has(file)) missing.add(file);
+    }
+  }
+  return [...missing].sort();
+}
+
 function summarizeByArea(rows) {
   const areas = new Map();
   for (const row of rows) {
@@ -122,6 +139,13 @@ function runSelfTests() {
   assert(extra.has('src/a.ts'), 'absolute SF paths normalize to repo-relative');
   assert(!isAppSource('src/vite-env.d.ts'), '.d.ts excluded');
   assert(!isAppSource('e2e/foo.ts'), 'non-app trees excluded');
+
+  const zeroLine = mergeCoverage(parseLcovLines('SF:src/empty.ts\nend_of_record'), []);
+  assert(zeroLine.rows[0].lf === 0 && zeroLine.rows[0].pct === 100, 'a file with no executable lines is 100%');
+  const empty = mergeCoverage(new Map(), []);
+  assert(empty.lf === 0 && empty.pct === 0, 'an empty base report totals 0%, not 100%');
+  const orphans = extrasMissingFromBase(base, [parseLcovLines('SF:server/only-node.js\nDA:1,1\nend_of_record')]);
+  assert(orphans.length === 1 && orphans[0] === 'server/only-node.js', 'files only in node:test reports are surfaced');
   console.log('coverage-all self-tests passed');
 }
 
@@ -137,7 +161,7 @@ function main() {
   const jsonOut = jsonIdx >= 0 ? argv[jsonIdx + 1] : null;
 
   if (!existsSync(BASE_REPORT)) {
-    console.error(`missing ${BASE_REPORT} — run \`npm run test:coverage\` first`);
+    console.error(`missing ${BASE_REPORT} — run \`COVERAGE_WHOLE_APP=1 node_modules/.bin/vitest run --coverage\` first`);
     process.exit(2);
   }
   const base = parseLcovLines(readFileSync(BASE_REPORT, 'utf8'));
@@ -147,6 +171,9 @@ function main() {
     return false;
   }).map((p) => parseLcovLines(readFileSync(p, 'utf8')));
 
+  for (const file of extrasMissingFromBase(base, extras)) {
+    console.warn(`warning: ${file} is in a node:test report but not ${BASE_REPORT} — not counted (widen coverage.include in vitest.config.ts)`);
+  }
   const merged = mergeCoverage(base, extras);
   merged.rows.sort((a, b) => (b.lf - b.lh) - (a.lf - a.lh));
 

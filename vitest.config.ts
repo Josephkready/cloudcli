@@ -16,6 +16,15 @@ import viteConfig from './vite.config.js';
  * `react-syntax-highlighter/dist/esm/styles/prism` (the Markdown chain) can be
  * tested here but crash the raw Node ESM loader used by `tsx --test`.
  */
+/**
+ * `COVERAGE_WHOLE_APP=1` swaps the coverage scope for scripts/coverage-all.mjs:
+ * every app file in src/, server/ and shared/ gets an executable-line count
+ * (vitest instruments files it never executes), written to its own directory
+ * so the component floor gate's `coverage/component` report keeps measuring
+ * the vitest suite alone.
+ */
+const wholeApp = process.env.COVERAGE_WHOLE_APP === '1';
+
 export default defineConfig((configEnv) =>
   mergeConfig(viteConfig(configEnv), {
     test: {
@@ -27,14 +36,12 @@ export default defineConfig((configEnv) =>
       css: false,
       coverage: {
         provider: 'v8',
-        // `server/` and `shared/` are listed so every app file gets an
-        // executable-line count even when no vitest spec loads it; that line
-        // set is the denominator scripts/coverage-all.mjs uses to merge all
-        // three suites into one whole-app number.
-        include: ['src/**/*.{ts,tsx}', 'server/**/*.{ts,js}', 'shared/**/*.{ts,js}'],
+        include: wholeApp
+          ? ['src/**/*.{ts,tsx,js,jsx}', 'server/**/*.{ts,js}', 'shared/**/*.{ts,js}']
+          : ['src/**/*.{ts,tsx}'],
         exclude: [
-          '**/*.spec.{ts,tsx}',
-          '**/*.test.{ts,tsx,js}',
+          '**/*.spec.{ts,tsx,js,jsx}',
+          '**/*.test.{ts,tsx,js,jsx}',
           '**/*.d.ts',
           'src/test/**',
         ],
@@ -44,7 +51,7 @@ export default defineConfig((configEnv) =>
         // the machine-readable report the coverage floor gate parses (see
         // scripts/check-coverage-floor.mjs).
         reporter: ['text-summary', 'html', 'lcov'],
-        reportsDirectory: 'coverage/component',
+        reportsDirectory: wholeApp ? 'coverage/whole-app' : 'coverage/component',
       },
     },
   }),

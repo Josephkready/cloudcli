@@ -96,6 +96,27 @@ an unrelated PR isn't blocked by noise. Never lower a floor just to make a red
 run pass — investigate the regression instead. The LCOV parser has self-tests
 (`npm run coverage:floor:selftest`) that the lane runs before trusting the gate.
 
+### Whole-app coverage
+
+The per-suite floors each see only a slice of the app. For one number across
+every file in `src/`, `server/` and `shared/` (including files no test loads),
+run the suites and then merge their reports:
+
+```bash
+npm run test:server:coverage && npm run test:unit:coverage
+COVERAGE_WHOLE_APP=1 node_modules/.bin/vitest run --coverage   # -> coverage/whole-app
+node scripts/coverage-all.mjs            # area totals + the 25 biggest gaps
+node scripts/coverage-all.mjs --files    # every file, most uncovered lines first
+node scripts/coverage-all.mjs --floor 80 # exit 1 below 80%
+```
+
+`COVERAGE_WHOLE_APP=1` widens vitest's coverage scope to `server/` and
+`shared/` and writes to a separate directory, so the component floor above
+keeps measuring the vitest suite alone. The script uses that run's
+executable-line set as the denominator and counts a line as covered when any
+suite hit it. There is deliberately no npm alias: editing
+`package.json` changes local-ci's bake key and forces a full image rebuild.
+
 ## Two test runners, split by filename
 
 | Suite | Files | Runner | Command |
