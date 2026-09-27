@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import http from 'node:http';
-import { tmpdir } from 'node:os';
+import os, { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { mock } from 'node:test';
 
@@ -192,6 +192,147 @@ test('GET /api/projects?sync=1 opts back into awaiting the scan', async () => {
     } finally {
       mock.restoreAll();
     }
+  });
+});
+
+test('GET /api/projects/archived lists archived projects only', async () => {
+  await withSeededDatabase(async (server) => {
+    const archived = projectsDb.createProjectPath('/workspace/archived-proj', 'Archived Project');
+    await requestText(server.port, 'DELETE', `/api/projects/${archived.project?.project_id}`);
+
+    const body = await getJson(server.port, '/api/projects/archived') as {
+      success: boolean;
+      data: { projects: Array<{ displayName: string }> };
+    };
+    assert.equal(body.success, true);
+    assert.equal(body.data.projects.length, 1);
+    assert.equal(body.data.projects[0]?.displayName, 'Archived Project');
+  });
+});
+
+test('GET /api/projects/:projectId/sessions paginates with limit/offset and validates them', async () => {
+  await withSeededDatabase(async (server) => {
+    const project = projectsDb.getProjectPath('/workspace/indexed-proj');
+    const page = await getJson(
+      server.port,
+      `/api/projects/${project?.project_id}/sessions?limit=5&offset=0`,
+    ) as { sessions: Array<{ id: string }> };
+    assert.deepEqual(page.sessions.map((s) => s.id), ['indexed-sess']);
+
+    const badLimit = await requestText(
+      server.port,
+      'GET',
+      `/api/projects/${project?.project_id}/sessions?limit=-1`,
+    );
+    assert.equal(badLimit.statusCode, 400);
+  });
+});
+
+test('GET /api/projects/:projectId/sessions/:sessionId/token-usage reports usage for a real session', async () => {
+  await withSeededDatabase(async (server) => {
+    const usage = await getJson(server.port, '/api/projects/proj1/sessions/indexed-sess/token-usage') as {
+      totalTokens?: number;
+    };
+    assert.equal(typeof usage, 'object');
+  });
+});
+
+test('POST /api/projects/create-project rejects legacy workspaceType and github clone params', async () => {
+  await withSeededDatabase(async (server) => {
+    const legacyWorkspace = await requestText(server.port, 'POST', '/api/projects/create-project', {
+      path: '/workspace/new-proj',
+      workspaceType: 'git',
+    });
+    assert.equal(legacyWorkspace.statusCode, 400);
+    assert.match(legacyWorkspace.body, /workspaceType is no longer supported/);
+
+    const withGithub = await requestText(server.port, 'POST', '/api/projects/create-project', {
+      path: '/workspace/new-proj',
+      githubUrl: 'https://github.com/foo/bar',
+    });
+    assert.equal(withGithub.statusCode, 400);
+    assert.match(withGithub.body, /Repository cloning is not supported/);
+  });
+});
+
+test('POST /api/projects/create-project creates a new project', async () => {
+  await withSeededDatabase(async (server) => {
+    // createProject validates the path is under WORKSPACES_ROOT, which -- since
+    // WORKSPACES_ROOT is captured from the environment at module import time,
+    // long before this test file can override it -- resolves to the real
+    // os.homedir() here. So the fixture directory has to live there too.
+    const newProjectDir = await mkdtemp(path.join(os.homedir(), '.cloudcli-projects-routes-test-'));
+    try {
+      const response = await requestText(server.port, 'POST', '/api/projects/create-project', {
+        path: newProjectDir,
+        customName: 'Brand New',
+      });
+      assert.equal(response.statusCode, 200);
+      const body = JSON.parse(response.body);
+      assert.equal(body.success, true);
+      assert.equal(body.project.customName, 'Brand New');
+      assert.match(body.message, /Project created successfully/);
+    } finally {
+      await rm(newProjectDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test('POST /api/projects/migrate-legacy-stars applies legacy starred ids', async () => {
+  await withSeededDatabase(async (server) => {
+    const project = projectsDb.getProjectPath('/workspace/indexed-proj');
+    const response = await requestText(server.port, 'POST', '/api/projects/migrate-legacy-stars', {
+      projectIds: [project?.project_id],
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.success, true);
+    assert.equal(body.updated, 1);
+  });
+});
+
+test('PUT /api/projects/:projectId/rename updates the display name', async () => {
+  await withSeededDatabase(async (server) => {
+    const project = projectsDb.getProjectPath('/workspace/indexed-proj');
+    const response = await requestText(
+      server.port,
+      'PUT',
+      `/api/projects/${project?.project_id}/rename`,
+      { displayName: 'Renamed Project' },
+    );
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(JSON.parse(response.body), { success: true });
+    assert.equal(projectsDb.getProjectPath('/workspace/indexed-proj')?.custom_project_name, 'Renamed Project');
+  });
+});
+
+test('POST /api/projects/:projectId/toggle-star flips the starred flag', async () => {
+  await withSeededDatabase(async (server) => {
+    const project = projectsDb.getProjectPath('/workspace/indexed-proj');
+    const first = await requestText(server.port, 'POST', `/api/projects/${project?.project_id}/toggle-star`);
+    assert.equal(first.statusCode, 200);
+    const firstBody = JSON.parse(first.body);
+    assert.equal(firstBody.success, true);
+
+    const second = await requestText(server.port, 'POST', `/api/projects/${project?.project_id}/toggle-star`);
+    const secondBody = JSON.parse(second.body);
+    assert.equal(secondBody.isStarred, !firstBody.isStarred);
+  });
+});
+
+test('DELETE then POST .../restore round-trips an archived project back to active', async () => {
+  await withSeededDatabase(async (server) => {
+    const project = projectsDb.getProjectPath('/workspace/indexed-proj');
+    const del = await requestText(server.port, 'DELETE', `/api/projects/${project?.project_id}`);
+    assert.equal(del.statusCode, 200);
+    assert.equal(projectsDb.getProjectPath('/workspace/indexed-proj')?.isArchived, 1);
+
+    const restore = await requestText(server.port, 'POST', `/api/projects/${project?.project_id}/restore`);
+    assert.equal(restore.statusCode, 200);
+    const restoreBody = JSON.parse(restore.body);
+    assert.equal(restoreBody.success, true);
+    assert.equal(restoreBody.data.isArchived, false);
+    assert.equal(projectsDb.getProjectPath('/workspace/indexed-proj')?.isArchived, 0);
   });
 });
 

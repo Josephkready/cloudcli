@@ -34,7 +34,7 @@ const router = express.Router();
  * 2. API key mode (default): For self-hosted deployments where users authenticate
  *    via API keys created in the UI. Keys are validated against the local database.
  */
-const validateExternalApiKey = (req, res, next) => {
+export const validateExternalApiKey = (req, res, next) => {
   // Platform mode: Authentication is handled externally (e.g., by a proxy layer).
   // Trust the request and use the default user context.
   if (IS_PLATFORM) {
@@ -73,7 +73,7 @@ const validateExternalApiKey = (req, res, next) => {
  * @param {string} repoPath - Path to the git repository
  * @returns {Promise<string>} - Remote URL of the repository
  */
-async function getGitRemoteUrl(repoPath) {
+export async function getGitRemoteUrl(repoPath) {
   return new Promise((resolve, reject) => {
     const gitProcess = spawn('git', ['config', '--get', 'remote.origin.url'], {
       cwd: repoPath,
@@ -110,7 +110,7 @@ async function getGitRemoteUrl(repoPath) {
  * @param {string} url - GitHub URL
  * @returns {string} - Normalized URL
  */
-function normalizeGitHubUrl(url) {
+export function normalizeGitHubUrl(url) {
   // Remove .git suffix
   let normalized = redactGitHubUrlCredentials(url).replace(/\.git$/, '');
   // Convert SSH to HTTPS format for comparison
@@ -125,7 +125,7 @@ function normalizeGitHubUrl(url) {
  * @param {string} url - GitHub URL (HTTPS or SSH)
  * @returns {{owner: string, repo: string}} - Parsed owner and repo
  */
-function parseGitHubUrl(url) {
+export function parseGitHubUrl(url) {
   // Handle HTTPS URLs: https://github.com/owner/repo or https://github.com/owner/repo.git
   // Handle SSH URLs: git@github.com:owner/repo or git@github.com:owner/repo.git
   const match = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
@@ -143,7 +143,7 @@ function parseGitHubUrl(url) {
  * @param {string} message - The agent message
  * @returns {string} - Generated branch name
  */
-function autogenerateBranchName(message) {
+export function autogenerateBranchName(message) {
   // Convert to lowercase, replace spaces/special chars with hyphens
   let branchName = message
     .toLowerCase()
@@ -192,7 +192,7 @@ function autogenerateBranchName(message) {
  * @param {string} branchName - Branch name to validate
  * @returns {{valid: boolean, error?: string}} - Validation result
  */
-function validateBranchName(branchName) {
+export function validateBranchName(branchName) {
   if (!branchName || branchName.trim() === '') {
     return { valid: false, error: 'Branch name cannot be empty' };
   }
@@ -231,7 +231,7 @@ function validateBranchName(branchName) {
  * @param {number} limit - Number of commits to retrieve (default: 5)
  * @returns {Promise<string[]>} - Array of commit messages
  */
-async function getCommitMessages(projectPath, limit = 5) {
+export async function getCommitMessages(projectPath, limit = 5) {
   return new Promise((resolve, reject) => {
     const gitProcess = spawn('git', ['log', `-${limit}`, '--pretty=format:%s'], {
       cwd: projectPath,
@@ -273,7 +273,7 @@ async function getCommitMessages(projectPath, limit = 5) {
  * @param {string} baseBranch - Base branch to branch from (default: 'main')
  * @returns {Promise<void>}
  */
-async function createGitHubBranch(octokit, owner, repo, branchName, baseBranch = 'main') {
+export async function createGitHubBranch(octokit, owner, repo, branchName, baseBranch = 'main') {
   try {
     // Get the SHA of the base branch
     const { data: ref } = await octokit.git.getRef({
@@ -313,7 +313,7 @@ async function createGitHubBranch(octokit, owner, repo, branchName, baseBranch =
  * @param {string} baseBranch - Base branch (default: 'main')
  * @returns {Promise<{number: number, url: string}>} - PR number and URL
  */
-async function createGitHubPR(octokit, owner, repo, branchName, title, body, baseBranch = 'main') {
+export async function createGitHubPR(octokit, owner, repo, branchName, title, body, baseBranch = 'main') {
   const { data: pr } = await octokit.pulls.create({
     owner,
     repo,
@@ -338,7 +338,7 @@ async function createGitHubPR(octokit, owner, repo, branchName, title, body, bas
  * @param {string} projectPath - Path for cloning the repository
  * @returns {Promise<string>} - Path to the cloned repository
  */
-async function cloneGitHubRepo(githubUrl, githubToken = null, projectPath) {
+export async function cloneGitHubRepo(githubUrl, githubToken = null, projectPath) {
   return new Promise(async (resolve, reject) => {
     try {
       const safeGitHubUrl = validateGitHubCloneUrl(githubUrl);
@@ -346,9 +346,20 @@ async function cloneGitHubRepo(githubUrl, githubToken = null, projectPath) {
       const cloneDir = path.resolve(projectPath);
 
       // Check if directory already exists
+      let cloneDirExists = true;
       try {
         await fs.access(cloneDir);
-        // Directory exists - check if it's a git repo with the same URL
+      } catch (accessError) {
+        cloneDirExists = false;
+      }
+
+      if (cloneDirExists) {
+        // Directory exists - check if it's a git repo with the same URL. Any
+        // failure here (mismatched remote, or not a git repo at all) must
+        // propagate as a real error instead of being treated the same as
+        // "directory doesn't exist, proceed with clone" -- otherwise git
+        // clone is attempted into a non-empty directory and fails with a
+        // confusing low-level error instead of the actionable one below.
         try {
           const existingUrl = await getGitRemoteUrl(cloneDir);
           const normalizedExisting = normalizeGitHubUrl(existingUrl);
@@ -361,10 +372,11 @@ async function cloneGitHubRepo(githubUrl, githubToken = null, projectPath) {
             throw new Error(`Directory ${cloneDir} already exists with a different repository (${redactGitHubUrlCredentials(existingUrl)}). Expected: ${safeGitHubUrl}`);
           }
         } catch (gitError) {
+          if (gitError.message && gitError.message.includes('already exists with a different repository')) {
+            throw gitError;
+          }
           throw new Error(`Directory ${cloneDir} already exists but is not a valid git repository or git command failed`);
         }
-      } catch (accessError) {
-        // Directory doesn't exist - proceed with clone
       }
 
       // Ensure parent directory exists
@@ -417,7 +429,7 @@ async function cloneGitHubRepo(githubUrl, githubToken = null, projectPath) {
  * @param {string} projectPath - Path to the project directory
  * @param {string} sessionId - Session ID to clean up
  */
-async function cleanupProject(projectPath, sessionId = null) {
+export async function cleanupProject(projectPath, sessionId = null) {
   try {
     // Only clean up projects in the external-projects directory
     if (!projectPath.includes('.claude/external-projects')) {
@@ -448,7 +460,7 @@ async function cleanupProject(projectPath, sessionId = null) {
 /**
  * SSE Stream Writer - Adapts SDK/CLI output to Server-Sent Events
  */
-class SSEStreamWriter {
+export class SSEStreamWriter {
   constructor(res, userId = null) {
     this.res = res;
     this.sessionId = null;

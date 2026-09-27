@@ -353,8 +353,39 @@ async function main() {
     }
 }
 
-// Run the CLI
-main().catch(error => {
-    console.error('\n❌ Error:', error.message);
-    process.exit(1);
-});
+// Run the CLI -- but only when this file is the actual entrypoint, not when a
+// test imports it to exercise parseArgs/showStatus/showUsage/etc directly.
+// import.meta.url vs. process.argv[1] is the standard ESM "is this main"
+// check; behaviour for real invocations (`node server/cli.js ...` /
+// `tsx server/cli.js ...`) is unchanged.
+function isMainModule() {
+    if (!process.argv[1]) {
+        return false;
+    }
+    try {
+        return import.meta.url === `file://${path.resolve(process.argv[1])}`;
+    } catch {
+        return false;
+    }
+}
+
+if (isMainModule()) {
+    main().catch(error => {
+        console.error('\n❌ Error:', error.message);
+        process.exit(1);
+    });
+}
+
+export {
+    parseArgs,
+    showStatus,
+    showUsage,
+    showHelp,
+    showVersion,
+    formatLastUsed,
+    getDatabasePath,
+    getInstallDir,
+    loadEnvFile,
+    main,
+    isMainModule,
+};
