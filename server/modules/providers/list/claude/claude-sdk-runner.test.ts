@@ -6,7 +6,8 @@ import {
   registerClaudeQueryAbort,
   resolveToolApproval,
   waitForToolApproval,
-} from './claude-sdk.js';
+} from './claude-sdk-runner.js';
+import type { ClaudeSdkWriter } from './claude-sdk-runner.js';
 
 // The spawn-retry (#43) hinges on classifying the transient "the `claude` bin
 // briefly vanished" errors apart from genuine failures. Only the former may be
@@ -43,19 +44,20 @@ test('is false for null/undefined', () => {
 });
 
 test('Claude query abort wiring interrupts the query and clears after settlement', async () => {
-  let installedAbort = null;
+  let installedAbort: (() => Promise<boolean> | boolean) | null = null;
   let clears = 0;
   let interrupts = 0;
   const writer = {
-    setAbortHandler(handler) { installedAbort = handler; },
+    setAbortHandler(handler: () => Promise<boolean> | boolean) { installedAbort = handler; },
     clearAbortHandler() { clears += 1; },
-  };
+  } as ClaudeSdkWriter;
   const queryInstance = {
     async interrupt() { interrupts += 1; },
   };
 
   const clear = registerClaudeQueryAbort(writer, queryInstance);
-  assert.equal(await installedAbort(), true);
+  const abortHandler = installedAbort as (() => Promise<boolean> | boolean) | null;
+  assert.equal(await abortHandler?.(), true);
   assert.equal(interrupts, 1);
   clear();
   assert.equal(clears, 1);

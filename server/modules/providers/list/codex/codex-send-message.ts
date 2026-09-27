@@ -18,7 +18,7 @@
  * object straight to `ws.send`; the try/catch keeps a transport error from
  * aborting the run. See #126.
  */
-export function sendMessage(ws, data) {
+export function sendMessage(ws: { send?: (data: unknown) => void } | null | undefined, data: unknown): void {
   try {
     if (typeof ws?.send === 'function') {
       ws.send(data);

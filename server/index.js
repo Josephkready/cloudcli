@@ -37,15 +37,15 @@ import {
     getPendingApprovalsForSession,
     startStaleToolApprovalReaper,
     stopStaleToolApprovalReaper,
-} from './claude-sdk.js';
+} from './modules/providers/list/claude/claude-sdk-runner.js';
 import {
     queryCodex,
     abortCodexSession,
-} from './openai-codex.js';
+} from './modules/providers/list/codex/codex-runner.js';
 import {
     spawnAntigravity,
     abortAntigravitySession,
-} from './antigravity-cli.js';
+} from './modules/providers/list/antigravity/antigravity-runner.js';
 import {
     stripAnsiSequences,
     normalizeDetectedUrl,

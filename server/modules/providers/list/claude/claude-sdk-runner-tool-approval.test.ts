@@ -6,7 +6,7 @@ import {
   denyResultForDecision,
   resolveToolApproval,
   waitForToolApproval,
-} from './claude-sdk.js';
+} from './claude-sdk-runner.js';
 
 /*
  * Regression lock for #62 — tool-approval timeout semantics.
@@ -66,7 +66,7 @@ test('a user denial preserves the user message, falling back to a default', () =
 /* ── waitForToolApproval: abort / cancel wiring behind permission_cancelled ── */
 
 test('an already-aborted signal resolves cancelled immediately and fires onCancel', async () => {
-  const reasons = [];
+  const reasons: string[] = [];
   const controller = new AbortController();
   controller.abort();
 
@@ -80,7 +80,7 @@ test('an already-aborted signal resolves cancelled immediately and fires onCance
 });
 
 test('aborting mid-wait resolves cancelled and fires onCancel("cancelled")', async () => {
-  const reasons = [];
+  const reasons: string[] = [];
   const controller = new AbortController();
   const approval = waitForToolApproval('req-mid-abort', {
     timeoutMs: 0,
@@ -95,7 +95,7 @@ test('aborting mid-wait resolves cancelled and fires onCancel("cancelled")', asy
 });
 
 test('a finite timeout fires onCancel("timeout") before auto-denying (null)', async () => {
-  const reasons = [];
+  const reasons: string[] = [];
   const decision = await waitForToolApproval('req-timeout-cb', {
     timeoutMs: 15,
     onCancel: (reason) => reasons.push(reason),

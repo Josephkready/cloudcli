@@ -9,7 +9,7 @@ import {
   parseMsEnv,
   startStaleToolApprovalReaper,
   stopStaleToolApprovalReaper,
-} from './claude-sdk.js';
+} from './claude-sdk-runner.js';
 
 // Reaper for runs abandoned mid tool-approval (#86). Since #62 made approvals
 // wait indefinitely, an abandoned run leaks its child process forever; the
@@ -19,10 +19,10 @@ import {
 const MINUTE = 60 * 1000;
 
 /** Builds a fake pending-approvals map: resolvers with the metadata the real code attaches. */
-function fakePending(entries) {
-  const map = new Map();
+function fakePending(entries: Record<string, Record<string, unknown>>) {
+  const map = new Map<string, ((decision: unknown) => void) & Record<string, unknown>>();
   for (const [requestId, meta] of Object.entries(entries)) {
-    const resolver = () => {};
+    const resolver = (() => {}) as unknown as ((decision: unknown) => void) & Record<string, unknown>;
     Object.assign(resolver, meta);
     map.set(requestId, resolver);
   }
@@ -106,7 +106,7 @@ test('reapStaleToolApprovals force-denies a stale approval and leaves fresh ones
   } finally {
     // Always clean up the still-pending fresh entry so a mid-test failure can't
     // leak a permanently-pending entry into the module-global approvals map.
-    resolveToolApproval('reap-test-fresh', { approved: true });
+    resolveToolApproval('reap-test-fresh', { approved: true } as any);
   }
   assert.deepEqual(await freshPromise, { approved: true });
 });
@@ -132,9 +132,9 @@ test('parseMsEnv reads a valid value and falls back on unset/blank', () => {
 test('parseMsEnv warns and falls back on a malformed or negative value', () => {
   const NAME = 'CLOUDCLI_TEST_MS_ENV';
   const original = process.env[NAME];
-  const warnings = [];
+  const warnings: string[] = [];
   const originalWarn = console.warn;
-  console.warn = (msg) => warnings.push(String(msg));
+  console.warn = (msg: unknown) => warnings.push(String(msg));
   try {
     // Unit-suffixed typos (the classic "45m" instead of 2700000) and floats
     // must warn, not silently truncate to a bogus ms value.
@@ -184,7 +184,7 @@ test('startStaleToolApprovalReaper fires the reaper on its interval; stop halts 
     await Promise.resolve(); // drain microtasks so a stray resolution would be observed
     assert.equal(survivorSettled, false, 'stop() must halt the reaper — no tick fires after stop');
     // Clean up the still-pending survivor so it can't leak into the module-global map.
-    resolveToolApproval('reaper-timer-survivor', { approved: true });
+    resolveToolApproval('reaper-timer-survivor', { approved: true } as any);
     assert.deepEqual(await survivor, { approved: true });
   } finally {
     stopStaleToolApprovalReaper();

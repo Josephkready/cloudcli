@@ -13,9 +13,10 @@ import {
   pushSubscriptionsDb,
   sessionsDb,
   userDb,
-} from '../../modules/database/index.js';
-import { notifyRunFailed, notifyRunStopped } from '../notification-orchestrator.js';
-import { markShutdownDraining, resetShutdownDrainingForTests } from '../../shared/shutdown-drain.js';
+} from '../../database/index.js';
+import { markShutdownDraining, resetShutdownDrainingForTests } from '../../../shared/shutdown-drain.js';
+
+import { notifyRunFailed, notifyRunStopped } from './notification-orchestrator.service.js';
 
 async function withIsolatedDatabase(runTest) {
   const previousDatabasePath = process.env.DATABASE_PATH;

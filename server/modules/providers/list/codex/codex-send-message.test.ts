@@ -5,8 +5,8 @@ import { sendMessage } from './codex-send-message.js';
 
 // A stand-in writer that records exactly what it received.
 const fakeWriter = () => {
-  const received = [];
-  return { received, send(data) { received.push(data); } };
+  const received: unknown[] = [];
+  return { received, send(data: unknown) { received.push(data); } };
 };
 
 test('hands the object straight to ws.send (never stringified)', () => {
@@ -32,7 +32,7 @@ test('works regardless of legacy writer flags (no allow-list)', () => {
     tokenBudget: { inputTokens: 5 },
   });
 
-  const sseLike = { isSSEStreamWriter: true, received: [], send(d) { this.received.push(d); } };
+  const sseLike = { isSSEStreamWriter: true, received: [] as unknown[], send(d: unknown) { this.received.push(d); } };
   sendMessage(sseLike, { kind: 'complete', success: true });
   assert.deepEqual(sseLike.received[0], { kind: 'complete', success: true });
 });

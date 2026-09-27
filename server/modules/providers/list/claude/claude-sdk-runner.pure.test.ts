@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { CLAUDE_FALLBACK_MODELS } from './modules/providers/list/claude/claude-models.provider.js';
-import { extractTokenBudget, isMainThreadMessage, mapCliOptionsToSDK } from './claude-sdk.js';
+import { CLAUDE_FALLBACK_MODELS } from '@/modules/providers/list/claude/claude-models.provider.js';
+
+import { extractTokenBudget, isMainThreadMessage, mapCliOptionsToSDK } from './claude-sdk-runner.js';
+import type { TokenBudget } from './claude-sdk-runner.js';
 
 // Pure-function coverage for the two option/usage mappers the SDK bridge runs on
 // every turn (#104). Both take plain objects, so they are exercised here without
 // spawning the Claude CLI.
+
+/** `extractTokenBudget`, asserted non-null — the tests below cover the "has usage" branches only. */
+function requireBudget(message: unknown): TokenBudget {
+  const budget = extractTokenBudget(message);
+  assert.ok(budget, 'expected a non-null token budget');
+  return budget;
+}
 
 // ---------------------------------------------------------------------------
 // isMainThreadMessage
@@ -51,7 +60,7 @@ test('extractTokenBudget sums cache tokens into inputTokens without double count
   // buckets: `input_tokens` explicitly excludes anything read from or written to
   // the prompt cache. So the context-window occupancy is their sum, and the
   // uncached figure must never be counted twice.
-  const budget = extractTokenBudget({
+  const budget = requireBudget({
     type: 'assistant',
     message: {
       usage: {
@@ -73,7 +82,7 @@ test('extractTokenBudget sums cache tokens into inputTokens without double count
 });
 
 test('extractTokenBudget reads result-level usage when there is no nested message', () => {
-  const budget = extractTokenBudget({
+  const budget = requireBudget({
     type: 'result',
     usage: { input_tokens: 10, output_tokens: 7 },
   });
@@ -85,7 +94,7 @@ test('extractTokenBudget reads result-level usage when there is no nested messag
 });
 
 test('extractTokenBudget prefers the nested message usage over the result-level one', () => {
-  const budget = extractTokenBudget({
+  const budget = requireBudget({
     message: { usage: { input_tokens: 11, output_tokens: 0 } },
     usage: { input_tokens: 999, output_tokens: 999 },
   });
@@ -95,7 +104,7 @@ test('extractTokenBudget prefers the nested message usage over the result-level 
 });
 
 test('extractTokenBudget accepts camelCase usage keys', () => {
-  const budget = extractTokenBudget({
+  const budget = requireBudget({
     usage: {
       inputTokens: 5,
       cacheCreationInputTokens: 6,
@@ -110,7 +119,7 @@ test('extractTokenBudget accepts camelCase usage keys', () => {
 });
 
 test('extractTokenBudget coerces missing/garbage counters to zero rather than NaN', () => {
-  const budget = extractTokenBudget({ usage: { input_tokens: 'not-a-number' } });
+  const budget = requireBudget({ usage: { input_tokens: 'not-a-number' } });
 
   assert.equal(budget.inputTokens, 0);
   assert.equal(budget.outputTokens, 0);
@@ -122,10 +131,10 @@ test('extractTokenBudget defaults the context window to 160k and honours CONTEXT
   const previous = process.env.CONTEXT_WINDOW;
   delete process.env.CONTEXT_WINDOW;
   try {
-    assert.equal(extractTokenBudget({ usage: { input_tokens: 1 } }).total, 160_000);
+    assert.equal(requireBudget({ usage: { input_tokens: 1 } }).total, 160_000);
 
     process.env.CONTEXT_WINDOW = '1000000';
-    assert.equal(extractTokenBudget({ usage: { input_tokens: 1 } }).total, 1_000_000);
+    assert.equal(requireBudget({ usage: { input_tokens: 1 } }).total, 1_000_000);
   } finally {
     if (previous === undefined) {
       delete process.env.CONTEXT_WINDOW;
@@ -136,7 +145,7 @@ test('extractTokenBudget defaults the context window to 160k and honours CONTEXT
 });
 
 test('extractTokenBudget falls back to modelUsage when no usage payload exists', () => {
-  const budget = extractTokenBudget({
+  const budget = requireBudget({
     type: 'result',
     modelUsage: {
       'claude-sonnet-4-6': { inputTokens: 120, outputTokens: 40 },
@@ -149,7 +158,7 @@ test('extractTokenBudget falls back to modelUsage when no usage payload exists',
 });
 
 test('extractTokenBudget prefers cumulative modelUsage counters', () => {
-  const budget = extractTokenBudget({
+  const budget = requireBudget({
     modelUsage: {
       'claude-sonnet-4-6': {
         inputTokens: 1,
@@ -168,7 +177,7 @@ test('extractTokenBudget folds cache tokens into the modelUsage branch too', () 
   // Regression (#104): the legacy branch used to drop cache creation/read
   // entirely, so the very same run reported a far smaller `used` depending only
   // on which branch the SDK message happened to hit.
-  const budget = extractTokenBudget({
+  const budget = requireBudget({
     modelUsage: {
       'claude-sonnet-4-6': {
         inputTokens: 100,
@@ -187,7 +196,7 @@ test('extractTokenBudget folds cache tokens into the modelUsage branch too', () 
 });
 
 test('extractTokenBudget reports identical totals for the usage and modelUsage branches', () => {
-  const viaUsage = extractTokenBudget({
+  const viaUsage = requireBudget({
     usage: {
       input_tokens: 100,
       cache_creation_input_tokens: 2_000,
@@ -195,7 +204,7 @@ test('extractTokenBudget reports identical totals for the usage and modelUsage b
       output_tokens: 500,
     },
   });
-  const viaModelUsage = extractTokenBudget({
+  const viaModelUsage = requireBudget({
     modelUsage: {
       'claude-sonnet-4-6': {
         inputTokens: 100,
@@ -213,7 +222,7 @@ test('extractTokenBudget sums every model in modelUsage, not just the first', ()
   // Regression (#104): a run that delegated to a subagent records one entry per
   // model. Reading `Object.keys(modelUsage)[0]` reported whichever model was
   // inserted first — often the tiny subagent — as the whole run's usage.
-  const budget = extractTokenBudget({
+  const budget = requireBudget({
     modelUsage: {
       'claude-haiku-4-5': { inputTokens: 10, outputTokens: 5 },
       'claude-sonnet-4-6': { inputTokens: 4_000, outputTokens: 1_000 },
@@ -226,7 +235,7 @@ test('extractTokenBudget sums every model in modelUsage, not just the first', ()
 });
 
 test('extractTokenBudget skips malformed modelUsage entries but keeps the valid ones', () => {
-  const budget = extractTokenBudget({
+  const budget = requireBudget({
     modelUsage: {
       broken: null,
       alsoBroken: 'nope',
@@ -341,8 +350,8 @@ test('mapCliOptionsToSDK does not duplicate plan tools already in the allow-list
     toolsSettings: { allowedTools: ['Read', 'WebSearch'], disallowedTools: [], skipPermissions: false },
   });
 
-  assert.equal(sdkOptions.allowedTools.filter((tool) => tool === 'Read').length, 1);
-  assert.equal(sdkOptions.allowedTools.filter((tool) => tool === 'WebSearch').length, 1);
+  assert.equal(sdkOptions.allowedTools.filter((tool: string) => tool === 'Read').length, 1);
+  assert.equal(sdkOptions.allowedTools.filter((tool: string) => tool === 'WebSearch').length, 1);
 });
 
 test('mapCliOptionsToSDK leaves the allow-list untouched outside plan mode', () => {
@@ -397,7 +406,7 @@ test('mapCliOptionsToSDK resolves effort against a caller-supplied model catalog
     model: 'custom-model',
     effort: 'turbo',
     effortModels: {
-      OPTIONS: [{ value: 'custom-model', effort: { values: [{ value: 'turbo' }] } }],
+      OPTIONS: [{ value: 'custom-model', label: 'Custom Model', effort: { values: [{ value: 'turbo' }] } }],
       DEFAULT: 'custom-model',
     },
   });

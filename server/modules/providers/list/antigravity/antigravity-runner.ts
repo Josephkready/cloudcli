@@ -1,19 +1,52 @@
+import type { ChildProcess } from 'node:child_process';
+
 import crossSpawn from 'cross-spawn';
 
-import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
-import { providerModelsService } from './modules/providers/services/provider-models.service.js';
-import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
-import { isShutdownDraining } from './shared/shutdown-drain.js';
+import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index.js';
+import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
+import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
+import { isShutdownDraining } from '@/shared/shutdown-drain.js';
+import type { NormalizedMessage, ProviderModelsDefinition } from '@/shared/types.js';
 import {
   buildProviderCliEnv,
   createCompleteMessage,
   createNormalizedMessage,
   flattenPromptForWindowsShell,
   resolveProviderCliExecutable,
-} from './shared/utils.js';
+} from '@/shared/utils.js';
 
-const activeAntigravityProcesses = new Map();
-const abortEscalationTimers = new WeakMap();
+/** `agy`'s permission-mode flag names, mirroring claude/codex's shared vocabulary. */
+type AntigravityPermissionMode = 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions';
+
+/**
+ * Minimal writer surface `spawnAntigravity` needs from its caller (the real
+ * implementation is `ChatSessionWriter`). Kept local rather than importing the
+ * concrete class so this runner stays a plain module with no websocket-layer
+ * dependency.
+ */
+type AntigravityRunWriter = {
+  userId?: string | number | null;
+  send(message: NormalizedMessage): void;
+  setSessionId?(sessionId: string): void;
+  setAbortHandler?(handler: () => boolean | Promise<boolean>): void;
+  clearAbortHandler?(): void;
+};
+
+type SpawnAntigravityOptions = {
+  sessionId?: string | null;
+  projectPath?: string;
+  cwd?: string;
+  model?: string;
+  effort?: unknown;
+  sessionSummary?: string;
+  permissionMode?: AntigravityPermissionMode;
+};
+
+/** A tracked `agy` child process, tagged with abort state once cancellation begins. */
+type AntigravityChildProcess = ChildProcess & { aborted?: boolean };
+
+const activeAntigravityProcesses = new Map<string, AntigravityChildProcess>();
+const abortEscalationTimers = new WeakMap<AntigravityChildProcess, ReturnType<typeof setTimeout>>();
 const ANTIGRAVITY_ABORT_GRACE_MS = 5000;
 
 /**
@@ -21,7 +54,10 @@ const ANTIGRAVITY_ABORT_GRACE_MS = 5000;
  * ignored. The timer retains the child until it exits, so it cannot become an
  * untracked orphan during shutdown/abort cleanup.
  */
-export function terminateAntigravityChild(child, graceMs = ANTIGRAVITY_ABORT_GRACE_MS) {
+export function terminateAntigravityChild(
+  child: AntigravityChildProcess,
+  graceMs: number = ANTIGRAVITY_ABORT_GRACE_MS,
+): boolean {
   child.aborted = true;
   if (abortEscalationTimers.has(child)) {
     return true;
@@ -38,7 +74,7 @@ export function terminateAntigravityChild(child, graceMs = ANTIGRAVITY_ABORT_GRA
     try {
       child.kill('SIGKILL');
     } catch (error) {
-      console.error('[Antigravity] Failed to force-kill aborted process:', error?.message || error);
+      console.error('[Antigravity] Failed to force-kill aborted process:', (error as Error)?.message || error);
     }
   }, graceMs);
   timer.unref?.();
@@ -53,13 +89,13 @@ export function terminateAntigravityChild(child, graceMs = ANTIGRAVITY_ABORT_GRA
     return signalled;
   } catch (error) {
     clearEscalation();
-    console.error('[Antigravity] Failed to terminate process:', error?.message || error);
+    console.error('[Antigravity] Failed to terminate process:', (error as Error)?.message || error);
     return false;
   }
 }
 const MAX_PROVIDER_ERROR_LENGTH = 2_000;
 
-function sanitizeAntigravityError(value) {
+function sanitizeAntigravityError(value: unknown): string {
   const message = readString(value) || 'Antigravity CLI failed';
   return message
     .replace(/(authorization\s*:\s*bearer\s+)\S+/gi, '$1[REDACTED]')
@@ -74,7 +110,7 @@ function sanitizeAntigravityError(value) {
     .slice(0, MAX_PROVIDER_ERROR_LENGTH);
 }
 
-export function resolveAntigravityPermissionArgs(permissionMode) {
+export function resolveAntigravityPermissionArgs(permissionMode?: AntigravityPermissionMode | string): string[] {
   switch (permissionMode) {
     case 'plan':
       return ['--mode', 'plan'];
@@ -95,11 +131,15 @@ export function resolveAntigravityPermissionArgs(permissionMode) {
  * `resolveClaudeEffort`/codex: the synthetic `'default'` and any unknown tier
  * fall through to `undefined`.
  *
- * @param {string} model - the resolved base model (e.g. `gemini-3.8-flash`)
- * @param {unknown} effort - the requested tier
- * @param {{ OPTIONS?: Array<{ value: string, effort?: { values?: Array<{ value: string }> } }> }} modelsDefinition
+ * @param model - the resolved base model (e.g. `gemini-3.8-flash`)
+ * @param effort - the requested tier
+ * @param modelsDefinition - the provider's model catalog
  */
-export function resolveAntigravityEffort(model, effort, modelsDefinition) {
+export function resolveAntigravityEffort(
+  model: string | undefined,
+  effort: unknown,
+  modelsDefinition: Pick<ProviderModelsDefinition, 'OPTIONS'> | null | undefined,
+): string | undefined {
   const selectedModel = modelsDefinition?.OPTIONS?.find((option) => option.value === model) || null;
   const allowedEfforts = selectedModel?.effort?.values?.map((value) => value.value) || [];
   return typeof effort === 'string' && effort !== 'default' && allowedEfforts.includes(effort)
@@ -107,27 +147,46 @@ export function resolveAntigravityEffort(model, effort, modelsDefinition) {
     : undefined;
 }
 
-function readString(value) {
+function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function readAgyStreamEvent(line) {
+/**
+ * One decoded line of `agy`'s `--output-format stream-json` NDJSON stream.
+ * Left loosely typed (SDK/CLI boundary): the shape varies by `event`, and this
+ * runner only ever reads a handful of optional fields off of it.
+ */
+type AntigravityStreamEvent = {
+  event?: string;
+  conversation_id?: unknown;
+  init?: { conversation_id?: unknown };
+  step_update?: { conversation_id?: unknown; text_delta?: unknown };
+  result?: {
+    conversation_id?: unknown;
+    status?: string;
+    error?: unknown;
+    message?: unknown;
+    response?: unknown;
+  };
+};
+
+function readAgyStreamEvent(line: string): AntigravityStreamEvent | null {
   try {
     const parsed = JSON.parse(line);
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    return parsed && typeof parsed === 'object' ? parsed as AntigravityStreamEvent : null;
   } catch {
     return null;
   }
 }
 
-function getEventConversationId(event) {
+function getEventConversationId(event: AntigravityStreamEvent | null): string | null {
   return readString(event?.conversation_id)
     || readString(event?.init?.conversation_id)
     || readString(event?.step_update?.conversation_id)
     || readString(event?.result?.conversation_id);
 }
 
-function getEventTextDelta(event) {
+function getEventTextDelta(event: AntigravityStreamEvent | null): string | null {
   const delta = event?.step_update?.text_delta;
   if (event?.event === 'step_update' && typeof delta === 'string' && delta.length > 0) {
     return delta;
@@ -135,7 +194,7 @@ function getEventTextDelta(event) {
   return null;
 }
 
-function getResultError(event) {
+function getResultError(event: AntigravityStreamEvent | null): string | null {
   if (event?.event !== 'result' || event?.result?.status === 'SUCCESS') {
     return null;
   }
@@ -144,7 +203,7 @@ function getResultError(event) {
     || `Antigravity run ended with status ${event?.result?.status || 'UNKNOWN'}`);
 }
 
-function announceConversation(writer, conversationId, isResume) {
+function announceConversation(writer: AntigravityRunWriter, conversationId: string | null, isResume: boolean): void {
   if (!conversationId) {
     return;
   }
@@ -162,7 +221,11 @@ function announceConversation(writer, conversationId, isResume) {
 /**
  * Runs one Antigravity CLI turn using its newline-delimited structured stream.
  */
-export async function spawnAntigravity(command, options = {}, writer) {
+export async function spawnAntigravity(
+  command: string,
+  options: SpawnAntigravityOptions = {},
+  writer: AntigravityRunWriter,
+): Promise<void> {
   const {
     sessionId,
     projectPath,
@@ -176,7 +239,7 @@ export async function spawnAntigravity(command, options = {}, writer) {
   const resumeConversationId = readString(sessionId);
   const resolvedModel = await providerModelsService.resolveResumeModel(
     'antigravity',
-    resumeConversationId,
+    resumeConversationId ?? undefined,
     model,
   );
 
@@ -186,13 +249,13 @@ export async function spawnAntigravity(command, options = {}, writer) {
   // same way claude/codex do — an unsupported or 'default' tier is omitted and
   // `agy` applies its own default. Only fetch the catalog when a real tier was
   // requested, so ordinary sends don't pay for it.
-  let resolvedEffort;
+  let resolvedEffort: string | undefined;
   if (typeof effort === 'string' && effort !== 'default' && effort.length > 0) {
     const catalog = (await providerModelsService.getProviderModels('antigravity')).models;
     resolvedEffort = resolveAntigravityEffort(resolvedModel, effort, catalog);
   }
 
-  const args = [];
+  const args: string[] = [];
   if (resumeConversationId) {
     args.push('--conversation', resumeConversationId);
   }
@@ -213,17 +276,17 @@ export async function spawnAntigravity(command, options = {}, writer) {
       cwd: workingDirectory,
       env: buildProviderCliEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const processKeys = new Set();
+    }) as AntigravityChildProcess;
+    const processKeys = new Set<string>();
     let conversationId = resumeConversationId;
     let stdoutBuffer = '';
     let stderrBuffer = '';
     let emittedText = false;
     let terminalSent = false;
-    let resultError = null;
+    let resultError: string | null = null;
     let settled = false;
 
-    const registerProcessKey = (key) => {
+    const registerProcessKey = (key: string | null | undefined) => {
       if (!key) {
         return;
       }
@@ -240,7 +303,7 @@ export async function spawnAntigravity(command, options = {}, writer) {
       }
     };
 
-    const sendComplete = (exitCode, aborted = false) => {
+    const sendComplete = (exitCode: number, aborted = false) => {
       if (terminalSent) {
         return;
       }
@@ -254,7 +317,7 @@ export async function spawnAntigravity(command, options = {}, writer) {
       }));
     };
 
-    const processLine = (line) => {
+    const processLine = (line: string) => {
       const trimmed = line.trim();
       if (!trimmed) {
         return;
@@ -316,7 +379,7 @@ export async function spawnAntigravity(command, options = {}, writer) {
       }
     };
 
-    child.stdout.on('data', (chunk) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
       stdoutBuffer += chunk.toString();
       const lines = stdoutBuffer.split(/\r?\n/);
       stdoutBuffer = lines.pop() || '';
@@ -325,13 +388,13 @@ export async function spawnAntigravity(command, options = {}, writer) {
       }
     });
 
-    child.stderr.on('data', (chunk) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       if (stderrBuffer.length < MAX_PROVIDER_ERROR_LENGTH * 2) {
         stderrBuffer += chunk.toString();
       }
     });
 
-    child.on('error', async (error) => {
+    child.on('error', async (error: Error) => {
       writer.clearAbortHandler?.();
       cleanup();
       if (settled) {
@@ -362,7 +425,7 @@ export async function spawnAntigravity(command, options = {}, writer) {
       reject(error);
     });
 
-    child.on('close', (code, signal) => {
+    child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
       writer.clearAbortHandler?.();
       cleanup();
       if (settled) {
@@ -432,7 +495,7 @@ export async function spawnAntigravity(command, options = {}, writer) {
   });
 }
 
-export function abortAntigravitySession(sessionId) {
+export function abortAntigravitySession(sessionId: string): boolean {
   const child = activeAntigravityProcesses.get(sessionId);
   if (!child) {
     return false;
