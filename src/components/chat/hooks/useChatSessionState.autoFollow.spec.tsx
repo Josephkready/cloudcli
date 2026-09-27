@@ -312,7 +312,9 @@ describe('useChatSessionState — mobile auto-follow (#333)', () => {
     const { deliverMessage } = renderChat(container);
     settleInitialScroll(container);
 
+    touch(container, 'touchstart');
     scrollTo(container, 120);
+    touch(container, 'touchend');
 
     deliverMessage();
     act(() => {
@@ -339,7 +341,9 @@ describe('useChatSessionState — mobile auto-follow (#333)', () => {
     renderChat(container);
     settleInitialScroll(container);
 
+    touch(container, 'touchstart');
     scrollTo(container, 120);
+    touch(container, 'touchend');
     growContent();
 
     expect(container.scrollTop).toBe(120);
@@ -415,5 +419,57 @@ describe('useChatSessionState — mobile auto-follow (#333)', () => {
     });
 
     expect(container.scrollTop).toBe(SCROLL_HEIGHT);
+  });
+
+  /*
+   * #540: the app moves the pane too — the virtualizer corrects `scrollTop` as
+   * it re-measures rows, and a reply can land as one tall message before the
+   * follow catches up. Neither has the reader's input behind it, so neither may
+   * stop the follow. (A bare `scrollTo` here is exactly that: a write and its
+   * scroll event, with no touch, wheel, pointer or key around it.)
+   */
+  it('keeps following after an app-originated nudge a few pixels off the bottom (#540)', () => {
+    const { deliverMessage } = renderChat(container);
+    settleInitialScroll(container);
+
+    scrollTo(container, AT_BOTTOM - 7);
+
+    deliverMessage();
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+
+    expect(container.scrollTop).toBe(SCROLL_HEIGHT);
+  });
+
+  it('keeps tracking growth after an app-originated move well off the bottom (#540)', () => {
+    renderChat(container);
+    settleInitialScroll(container);
+
+    scrollTo(container, 120);
+    growContent();
+
+    expect(container.scrollTop).toBe(SCROLL_HEIGHT);
+  });
+
+  it('raises the scroll-to-bottom state as content grows under a reader who stopped just short (#540)', () => {
+    const { result } = renderChat(container);
+    settleInitialScroll(container);
+
+    // A short read-up: following suspends, but 20px is inside the 50px band,
+    // so the button correctly stays down.
+    touch(container, 'touchstart');
+    scrollTo(container, AT_BOTTOM - 20);
+    touch(container, 'touchend');
+    expect(result.current.isUserScrolledUp).toBe(false);
+
+    // The run then grows the content below them while they hold still. That
+    // fires no scroll event, and the scroll handler used to be the only place
+    // the button's state was computed.
+    Object.defineProperty(container, 'scrollHeight', { get: () => SCROLL_HEIGHT + 600, configurable: true });
+    growContent();
+
+    expect(container.scrollTop).toBe(AT_BOTTOM - 20);
+    expect(result.current.isUserScrolledUp).toBe(true);
   });
 });

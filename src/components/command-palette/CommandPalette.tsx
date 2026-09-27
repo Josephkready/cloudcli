@@ -65,7 +65,6 @@ export type CommandPaletteProps = {
 
 const NAV_TABS: Array<{ id: AppTab; label: string; keywords: string }> = [
   { id: 'chat', label: 'Go to Chat', keywords: 'chat messages conversation' },
-  { id: 'shell', label: 'Go to Shell', keywords: 'shell terminal console' },
   { id: 'git', label: 'Go to Git', keywords: 'git diff branches' },
 ];
 
@@ -305,7 +304,7 @@ export default function CommandPalette({
                   <CommandItem
                     key={f.path}
                     value={f.path}
-                    onSelect={() => run(() => ops.openFile(f.path))}
+                    onSelect={() => run(() => ops.openFileInEditor(f.path))}
                   >
                     <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
                     <span className="flex-1 truncate">{f.name}</span>
