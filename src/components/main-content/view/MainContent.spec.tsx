@@ -13,10 +13,6 @@ vi.mock('./subcomponents/MainContentHeader', () => ({
   default: () => <div data-testid="main-content-header" />,
 }));
 
-vi.mock('../../file-tree/view/FileTree', () => ({
-  default: () => <div data-testid="file-tree" />,
-}));
-
 vi.mock('../../git-panel/view/GitPanel', () => ({
   default: () => <div data-testid="git-panel" />,
 }));
@@ -62,14 +58,14 @@ const baseProps = (overrides: Partial<MainContentProps> = {}): MainContentProps 
   }) as MainContentProps;
 
 describe('MainContent — the other tabs stay cheap', () => {
-  it('unmounts the files surface on tab-away', async () => {
-    const { rerender } = render(<MainContent {...baseProps({ activeTab: 'files' })} />);
-    await screen.findByTestId('file-tree');
-
-    rerender(<MainContent {...baseProps({ activeTab: 'git' })} />);
-
+  it('unmounts the git surface on tab-away', async () => {
+    const { rerender } = render(<MainContent {...baseProps({ activeTab: 'git' })} />);
     await screen.findByTestId('git-panel');
-    expect(screen.queryByTestId('file-tree')).toBeNull();
+
+    rerender(<MainContent {...baseProps({ activeTab: 'chat' })} />);
+
+    await screen.findByTestId('chat-interface');
+    expect(screen.queryByTestId('git-panel')).toBeNull();
   });
 
   it('keeps chat mounted but hidden while another tab is active', async () => {

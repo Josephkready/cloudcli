@@ -1,7 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import McpServerFormModal from '../mcp/view/modals/McpServerFormModal';
 import NewBranchModal from '../git-panel/view/modals/NewBranchModal';
 
 /**
@@ -37,22 +36,6 @@ function centringContainer(dialog: HTMLElement): HTMLElement {
 }
 
 describe('hand-rolled overlays clear the soft keyboard (#357)', () => {
-  it('MCP server form offsets its centring container', () => {
-    render(
-      <McpServerFormModal
-        provider="claude"
-        isOpen
-        editingServer={null}
-        currentProjects={[]}
-        onClose={vi.fn()}
-        onSubmit={vi.fn().mockResolvedValue(undefined)}
-      />,
-    );
-
-    const container = centringContainer(screen.getByRole('dialog'));
-    expect(container.style.bottom).toBe('var(--keyboard-height, 0px)');
-  });
-
   it('new-branch modal offsets its centring container but not its backdrop', () => {
     render(
       <NewBranchModal

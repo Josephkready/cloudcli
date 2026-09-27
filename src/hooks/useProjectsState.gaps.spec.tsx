@@ -80,6 +80,16 @@ describe('useProjectsState — session/project handlers', () => {
     projectsFetch.mockReset();
     projectSessionsFetch.mockReset();
     sessionDetailsFetch.mockReset();
+    localStorage.clear();
+  });
+
+  it('falls back to chat when a stale persisted activeTab names the removed Files tab', async () => {
+    localStorage.setItem('activeTab', 'files');
+    respondWith('p1', ['s1']);
+    const { result } = mountHook();
+    await waitFor(() => expect(result.current.isLoadingProjects).toBe(false));
+
+    expect(result.current.activeTab).toBe('chat');
   });
 
   it('handleProjectSelect selects a project, clears the session and navigates home', async () => {
@@ -157,7 +167,7 @@ describe('useProjectsState — session/project handlers', () => {
     await waitFor(() => expect(result.current.isLoadingProjects).toBe(false));
 
     act(() => {
-      result.current.setActiveTab('files');
+      result.current.setActiveTab('git');
     });
     const before = result.current.newSessionTrigger;
 

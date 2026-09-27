@@ -61,9 +61,9 @@ describe('MainContentTitle — mobile title de-duplication (#364)', () => {
   });
 
   it('mobile still shows the tab title (not the project) on non-chat tabs', () => {
-    // The collapse is gated on activeTab === 'chat'; a Files tab must keep its title.
-    renderTitle(true, { activeTab: 'files' });
-    expect(screen.getByText('Project Files')).toBeTruthy();
+    // The collapse is gated on activeTab === 'chat'; a Git tab must keep its title.
+    renderTitle(true, { activeTab: 'git' });
+    expect(screen.getByText('Source Control')).toBeTruthy();
   });
 
   it('mobile still shows "New Session" when no session is selected', () => {

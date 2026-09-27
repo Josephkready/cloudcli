@@ -1,4 +1,4 @@
-import { MessageSquare, Folder, GitBranch, type LucideIcon } from 'lucide-react';
+import { MessageSquare, GitBranch, type LucideIcon } from 'lucide-react';
 import type { Dispatch, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -21,14 +21,12 @@ type BuiltInTab = {
 
 const BASE_TABS: BuiltInTab[] = [
   { kind: 'builtin', id: 'chat',  labelKey: 'tabs.chat',  icon: MessageSquare },
-  { kind: 'builtin', id: 'files', labelKey: 'tabs.files', icon: Folder },
   { kind: 'builtin', id: 'git',   labelKey: 'tabs.git',   icon: GitBranch },
 ];
 
 /** Usage keys for the built-in tabs (issue #248). */
 const TAB_USAGE_KEYS: Partial<Record<AppTab, FeatureKey>> = {
   chat: 'tab.chat',
-  files: 'tab.files',
   git: 'tab.git',
 };
 

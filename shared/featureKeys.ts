@@ -24,7 +24,6 @@
 export const FEATURE_KEYS = [
   // --- Tabs -----------------------------------------------------------------
   'tab.chat',
-  'tab.files',
   'tab.git',
 
   // --- Chat -----------------------------------------------------------------
@@ -40,11 +39,9 @@ export const FEATURE_KEYS = [
   'chat.permission_mode_change',
 
   // --- Files ----------------------------------------------------------------
-  'files.open_editor',
+  // Recorded by the kept in-chat editor sidebar (useCodeEditorDocument), not
+  // by the removed Files tab.
   'files.save',
-  'files.upload',
-  'files.context_menu',
-  'files.search',
 
   // --- Git ------------------------------------------------------------------
   'git.commit',
@@ -78,8 +75,6 @@ export const FEATURE_KEYS = [
   'settings.tab.notifications',
   'settings.tab.data',
   'settings.tab.about',
-  'mcp.server_add',
-  'skills.install',
   'notifications.push',
 
   // --- Feedback -------------------------------------------------------------

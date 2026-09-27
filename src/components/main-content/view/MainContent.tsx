@@ -18,7 +18,6 @@ import ErrorBoundary from './ErrorBoundary';
 // tab — and the editor side panel — is demand-loaded (issue #267): shipping
 // CodeMirror (~660 KB) to a session that only ever reads chat was the single
 // largest main-thread task on a cold mobile load.
-const FileTree = lazySurface(() => import('../../file-tree/view/FileTree'));
 const GitPanel = lazySurface(() => import('../../git-panel/view/GitPanel'));
 const EditorSidebar = lazySurface(loadEditorSidebar);
 
@@ -55,7 +54,6 @@ function MainContent({
     editingFile,
     editorWidth,
     editorExpanded,
-    hasManualWidth,
     resizeHandleRef,
     handleFileOpen,
     handleCloseEditor,
@@ -71,10 +69,6 @@ function MainContent({
   const resolvedFileOpen = useFileOpenResolver(selectedProject, handleFileOpen);
 
   usePaletteOpsRegister({
-    openFile: (filePath: string) => {
-      setActiveTab('files');
-      handleFileOpen(filePath);
-    },
     // Opens the editor side panel in place, keeping the current tab (e.g. chat).
     openFileInEditor: (filePath: string) => {
       resolvedFileOpen(filePath);
@@ -143,14 +137,6 @@ function MainContent({
             </ErrorBoundary>
           </div>
 
-          {activeTab === 'files' && (
-            <div className="h-full overflow-hidden">
-              <LazySurface>
-                <FileTree selectedProject={selectedProject} onFileOpen={handleFileOpen} />
-              </LazySurface>
-            </div>
-          )}
-
           {activeTab === 'git' && (
             <div className="h-full overflow-hidden">
               <LazySurface>
@@ -186,13 +172,11 @@ function MainContent({
               isMobile={isMobile}
               editorExpanded={editorExpanded}
               editorWidth={editorWidth}
-              hasManualWidth={hasManualWidth}
               resizeHandleRef={resizeHandleRef}
               onResizeStart={handleResizeStart}
               onCloseEditor={handleCloseEditor}
               onToggleEditorExpand={handleToggleEditorExpand}
               projectPath={selectedProject.path}
-              fillSpace={activeTab === 'files'}
             />
           </LazySurface>
         )}
