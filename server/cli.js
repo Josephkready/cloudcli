@@ -16,6 +16,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { pathToFileURL } from 'url';
 import { findAppRoot, getModuleDir } from './utils/runtime-paths.js';
 
 const __dirname = getModuleDir(import.meta.url);
@@ -356,14 +357,17 @@ async function main() {
 // Run the CLI -- but only when this file is the actual entrypoint, not when a
 // test imports it to exercise parseArgs/showStatus/showUsage/etc directly.
 // import.meta.url vs. process.argv[1] is the standard ESM "is this main"
-// check; behaviour for real invocations (`node server/cli.js ...` /
-// `tsx server/cli.js ...`) is unchanged.
+// check, but Node resolves import.meta.url through symlinks while
+// path.resolve(process.argv[1]) does not -- so a symlinked invocation (e.g.
+// a globally-linked `cloudcli` bin) would silently skip main(). Comparing
+// realpaths on both sides makes the check symlink-safe for plain `node` and
+// `tsx` invocations alike.
 function isMainModule() {
     if (!process.argv[1]) {
         return false;
     }
     try {
-        return import.meta.url === `file://${path.resolve(process.argv[1])}`;
+        return pathToFileURL(fs.realpathSync(process.argv[1])).href === import.meta.url;
     } catch {
         return false;
     }

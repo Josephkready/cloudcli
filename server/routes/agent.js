@@ -34,6 +34,7 @@ const router = express.Router();
  * 2. API key mode (default): For self-hosted deployments where users authenticate
  *    via API keys created in the UI. Keys are validated against the local database.
  */
+// Exported for tests only — not part of the router's API.
 export const validateExternalApiKey = (req, res, next) => {
   // Platform mode: Authentication is handled externally (e.g., by a proxy layer).
   // Trust the request and use the default user context.

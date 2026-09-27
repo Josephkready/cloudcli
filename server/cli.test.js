@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, symlink } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -132,6 +134,25 @@ test('getInstallDir returns the resolved app root', () => {
 
 test('isMainModule is false for this test process (argv[1] is the test runner, not cli.js)', () => {
   assert.equal(isMainModule(), false);
+});
+
+// import.meta.url is resolved through symlinks by Node, but
+// path.resolve(process.argv[1]) is not -- comparing those directly (the old
+// implementation) made a symlinked invocation silently skip main(). Invoke
+// cli.js through a symlink with plain `node` and confirm it still runs.
+test('invoking cli.js through a symlink still runs main() (help output)', async (t) => {
+  const cliPath = fileURLToPath(new URL('./cli.js', import.meta.url));
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'cli-symlink-'));
+  const linkPath = path.join(tempDir, 'cloudcli-link.js');
+  try {
+    await symlink(cliPath, linkPath);
+    const result = spawnSync(process.execPath, [linkPath, 'help'], { encoding: 'utf8' });
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Commands:/);
+    assert.match(result.stdout, /cloudcli usage/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
