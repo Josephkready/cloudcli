@@ -27,8 +27,17 @@ export default defineConfig((configEnv) =>
       css: false,
       coverage: {
         provider: 'v8',
-        include: ['src/**/*.{ts,tsx}'],
-        exclude: ['src/**/*.spec.{ts,tsx}', 'src/**/*.test.{ts,tsx}', 'src/test/**'],
+        // `server/` and `shared/` are listed so every app file gets an
+        // executable-line count even when no vitest spec loads it; that line
+        // set is the denominator scripts/coverage-all.mjs uses to merge all
+        // three suites into one whole-app number.
+        include: ['src/**/*.{ts,tsx}', 'server/**/*.{ts,js}', 'shared/**/*.{ts,js}'],
+        exclude: [
+          '**/*.spec.{ts,tsx}',
+          '**/*.test.{ts,tsx,js}',
+          '**/*.d.ts',
+          'src/test/**',
+        ],
         // `text-summary` keeps CI logs readable while the suite is young (a
         // per-file `text` table would be ~370 rows of 0%); the HTML report is
         // there for local drill-down; `lcov` writes `coverage/component/lcov.info`,
