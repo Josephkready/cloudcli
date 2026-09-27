@@ -160,6 +160,14 @@ function shouldPersistKind(kind: unknown): boolean {
  */
 const COMPLETION_REFRESH_HEADROOM = 40;
 
+/**
+ * How many handled `${id}#${seq}` keys to remember per session for replay
+ * dedupe (#541). Must cover the server's replay buffer
+ * (`MAX_BUFFERED_EVENTS_PER_RUN` in chat-run-registry.service.ts, 5000), or a
+ * long run could forget a key the server can still replay.
+ */
+const MAX_HANDLED_FRAMES_PER_SESSION = 5000;
+
 const isActionablePermissionRequest = (request: { toolName?: unknown } | null | undefined): boolean => {
   return request?.toolName !== 'ExitPlanMode' && request?.toolName !== 'exit_plan_mode';
 };
@@ -267,6 +275,18 @@ export function useChatRealtimeHandlers({
   // for stale ones.
   const tokenBudgetSeqRef = useRef<Map<string, number>>(new Map());
 
+  // Sequenced frames already handled, per session, keyed `${id}#${seq}` (#541).
+  // `chat.subscribe` replays a running run's buffered frames after the
+  // subscriber's `lastSeq`, and a replay is the identical buffered event, so
+  // any subscribe carrying a stale `lastSeq` re-sends frames this client
+  // already rendered. A new session sent three of those within ~100ms, and
+  // every copy of a `stream_delta` was appended. The pair is what identifies a
+  // replay: `seq` alone cannot, because the server restarts it at 1 for each
+  // run, and `id` alone cannot, because a provider may legitimately re-emit an
+  // id under a new `seq`. Cleared on the run's `complete` and on an idle
+  // `chat_subscribed` ack, the points where no replay of the run can follow.
+  const handledFramesRef = useRef<Map<string, Set<string>>>(new Map());
+
   useEffect(() => {
     const handleEvent = (msg: ServerEvent) => {
       if (!msg.kind) {
@@ -281,6 +301,26 @@ export function useChatRealtimeHandlers({
         const known = lastSeqRef.current.get(sid) ?? 0;
         if (msg.seq > known) {
           lastSeqRef.current.set(sid, msg.seq);
+        }
+
+        if (typeof msg.id === 'string' && msg.id) {
+          const frameKey = `${msg.id}#${msg.seq}`;
+          let handled = handledFramesRef.current.get(sid);
+          if (!handled) {
+            handled = new Set();
+            handledFramesRef.current.set(sid, handled);
+          }
+          if (handled.has(frameKey)) {
+            return;
+          }
+          handled.add(frameKey);
+          // A run that never completes (the stale-run reaper aside) must not
+          // grow this without bound. Sets iterate in insertion order, so the
+          // first entry is the oldest.
+          if (handled.size > MAX_HANDLED_FRAMES_PER_SESSION) {
+            const oldest = handled.values().next().value;
+            if (oldest !== undefined) handled.delete(oldest);
+          }
         }
       }
 
@@ -321,6 +361,7 @@ export function useChatRealtimeHandlers({
             // proves nothing from the old seq generation is still in flight,
             // same as the `complete` reset below.
             tokenBudgetSeqRef.current.delete(sid);
+            handledFramesRef.current.delete(sid);
           }
 
           const isViewedSession = sid === activeViewSessionId;
@@ -452,6 +493,7 @@ export function useChatRealtimeHandlers({
           // must not compare a future run's low seq against this one's high one.
           if (sid) {
             tokenBudgetSeqRef.current.delete(sid);
+            handledFramesRef.current.delete(sid);
           }
 
           // Flush any remaining streaming state
