@@ -2,8 +2,9 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { createRef } from 'react';
 
-import EditorSidebar from './EditorSidebar';
 import type { CodeEditorFile } from '../types/types';
+
+import EditorSidebar from './EditorSidebar';
 
 // CodeEditor pulls in CodeMirror/Monaco machinery that isn't relevant here -
 // this spec only cares about the sizing wrapper EditorSidebar renders around it.
