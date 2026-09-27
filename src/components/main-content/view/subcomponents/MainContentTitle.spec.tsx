@@ -12,10 +12,6 @@ import type { Project, ProjectSession } from '@/types/app';
  * project name; desktop keeps the editable session title.
  */
 
-vi.mock('@/contexts/PluginsContext', () => ({
-  usePlugins: () => ({ plugins: [], loading: false, pluginsError: null, refreshPlugins: () => {} }),
-}));
-
 const project = {
   projectId: 'p1',
   projectPath: '/repos/p1',
@@ -62,12 +58,6 @@ describe('MainContentTitle — mobile title de-duplication (#364)', () => {
     expect(screen.queryByRole('button', { name: new RegExp(LONG_TITLE) })).toBeNull();
     // Also catch a re-introduction of a JS-truncated prefix, not just the full title.
     expect(screen.queryByText(/Show me a long/)).toBeNull();
-  });
-
-  it('mobile still shows the tab title (not the project) on non-chat tabs', () => {
-    // The collapse is gated on activeTab === 'chat'; a Files tab must keep its title.
-    renderTitle(true, { activeTab: 'files' });
-    expect(screen.getByText('Project Files')).toBeTruthy();
   });
 
   it('mobile still shows "New Session" when no session is selected', () => {

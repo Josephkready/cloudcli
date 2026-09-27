@@ -138,9 +138,9 @@ test('terminating is logged, and names the socket', () => {
   }
 
   assert.equal(ws.terminated, 1);
-  // Without this line a heartbeat kill is invisible: the shell and plugin
-  // paths log nothing at all on close, so an operator debugging "my socket
-  // keeps dropping" would have no trace of the cause.
+  // Without this line a heartbeat kill is invisible: the shell path logs
+  // nothing at all on close, so an operator debugging "my socket keeps
+  // dropping" would have no trace of the cause.
   assert.equal(warnings.length, 1);
   assert.match(warnings[0] ?? '', /Heartbeat/);
   assert.match(warnings[0] ?? '', /\/shell/);

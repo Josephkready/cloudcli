@@ -343,8 +343,8 @@ export const removeSessionFromProject = (project: Project, sessionIdToDelete: st
   return updatedProject;
 };
 
-const VALID_TABS: Set<string> = new Set(['chat', 'files', 'shell']);
+const VALID_TABS: Set<string> = new Set(['chat']);
 
 export const isValidTab = (tab: string): tab is AppTab => {
-  return VALID_TABS.has(tab) || tab.startsWith('plugin:');
+  return VALID_TABS.has(tab);
 };

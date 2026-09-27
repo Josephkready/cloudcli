@@ -69,8 +69,6 @@ const LAYOUT_TRANSITION_ALLOWLIST: Record<string, string> = {
   'shared/view/ui/Collapsible.tsx': 'grid-template-rows is the height-agnostic disclosure trick',
   'components/chat/tools/components/ContentRenderers/TaskListContent.tsx': 'todo progress bar fill',
   'components/chat/tools/components/InteractiveRenderers/AskUserQuestionPanel.tsx': 'step dot widens to mark the current question',
-  'components/file-tree/view/FileTreeHeader.tsx': 'upload progress bar fill',
-  'components/file-tree/view/FileTreeUploadProgress.tsx': 'upload progress bar fill',
   'components/sidebar/view/subcomponents/SidebarContent.tsx': 'search progress bar fill',
   'components/sidebar/view/subcomponents/SidebarProjectsState.tsx': 'project-load progress bar fill',
 };
@@ -80,7 +78,6 @@ const LIST_ROWS = [
   'components/sidebar/view/subcomponents/SidebarProjectItem.tsx',
   'components/sidebar/view/subcomponents/SidebarSessionItem.tsx',
   'components/sidebar/view/subcomponents/SidebarConversationsList.tsx',
-  'components/file-tree/view/FileTreeNode.tsx',
 ];
 
 function collectSourceFiles(directory: string, out: string[] = []): string[] {

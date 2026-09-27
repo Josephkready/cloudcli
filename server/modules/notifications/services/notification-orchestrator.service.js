@@ -44,6 +44,18 @@ function isDuplicate(event) {
   return false;
 }
 
+/**
+ * @param {{
+ *   provider: string,
+ *   sessionId?: string | null,
+ *   kind?: string,
+ *   code?: string,
+ *   meta?: Record<string, unknown>,
+ *   severity?: string,
+ *   dedupeKey?: string | null,
+ *   requiresUserAction?: boolean,
+ * }} params
+ */
 function createNotificationEvent({
   provider,
   sessionId = null,
@@ -213,6 +225,9 @@ const notificationChannels = [
   }
 ];
 
+/**
+ * @param {{ userId: number | string | null | undefined, event: object | null | undefined }} params
+ */
 function notifyUserIfEnabled({ userId, event }) {
   if (!userId || !event) {
     return;
@@ -238,6 +253,15 @@ function notifyUserIfEnabled({ userId, event }) {
   }
 }
 
+/**
+ * @param {{
+ *   userId: number | string | null | undefined,
+ *   provider: string,
+ *   sessionId?: string | null,
+ *   stopReason?: 'completed' | 'aborted',
+ *   sessionName?: string | null,
+ * }} params
+ */
 function notifyRunStopped({ userId, provider, sessionId = null, stopReason = 'completed', sessionName = null }) {
   notifyUserIfEnabled({
     userId,
@@ -253,6 +277,15 @@ function notifyRunStopped({ userId, provider, sessionId = null, stopReason = 'co
   });
 }
 
+/**
+ * @param {{
+ *   userId: number | string | null | undefined,
+ *   provider: string,
+ *   sessionId?: string | null,
+ *   error: unknown,
+ *   sessionName?: string | null,
+ * }} params
+ */
 function notifyRunFailed({ userId, provider, sessionId = null, error, sessionName = null }) {
   // A run that fails once the server is shutting down was killed by the
   // shutdown, not by a real error; it resumes after the restart, so a

@@ -25,12 +25,10 @@ const ENTRY = join(ROOT, 'src/main.jsx');
 
 /** Libraries that must only ever be reachable through a dynamic import. */
 const DEMAND_LOADED_PACKAGES = [
-  { prefix: '@xterm/', reason: 'the terminal (~400 KB) belongs to the shell tab' },
+  { prefix: '@xterm/', reason: 'the terminal (~400 KB) belongs to the standalone shell surface' },
   { prefix: '@codemirror/', reason: 'the editor (~690 KB) belongs to the code editor' },
   { prefix: '@uiw/react-codemirror', reason: 'the editor (~690 KB) belongs to the code editor' },
   { prefix: '@replit/codemirror-minimap', reason: 'the editor minimap belongs to the code editor' },
-  { prefix: 'jszip', reason: 'zip export belongs to the files tab' },
-  { prefix: 'dompurify', reason: 'SVG sanitising belongs to the plugin icon fetch path' },
   // #287. Both were reachable from the chat composer, so they loaded on boot
   // for every session — including ones with no code block and no attachment.
   {
@@ -89,7 +87,6 @@ describe('entry chunk static import graph (#267)', () => {
       'src/components/code-editor/view/CodeEditor.tsx',
       'src/components/code-editor/view/EditorSidebar.tsx',
       'src/components/settings/view/Settings.tsx',
-      'src/components/file-tree/view/FileTree.tsx',
       'src/components/project-creation-wizard/ProjectCreationWizard.tsx',
       'src/components/onboarding/view/Onboarding.tsx',
       // #287: the highlighted code block. Its unhighlighted stand-in

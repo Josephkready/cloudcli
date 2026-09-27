@@ -43,11 +43,19 @@ const KEYBOARD_SPECS =
  * message. Pinning it on only one engine would leave half the report uncovered,
  * and WebKit is the only engine here that can speak to an iPhone report.
  *
+ * `mention-dropdown-stacking` (#542) is a paint-order bug from CSS containment,
+ * which every engine implements, so it is pinned on all three rather than
+ * trusted to one engine's reading of `contain`.
+ *
+ * `autofollow-stall` (#540) was found on Android Chrome but its cause — the
+ * virtualizer moving `scrollTop` itself — is engine-agnostic, and the fix
+ * leans on touch/wheel input events whose timing differs per engine.
+ *
  * Same anchoring rules as above — the leading separator and trailing `$` are
  * load-bearing, because these are matched against absolute paths and the
  * worktree directory is named after the task being developed.
  */
-const CROSS_ENGINE_SPECS = /[\\/]composer-focus\.spec\.ts$/;
+const CROSS_ENGINE_SPECS = /[\\/](composer-focus|mention-dropdown-stacking|autofollow-stall)\.spec\.ts$/;
 
 /**
  * Transcript scroll stability (#495) — WebKit under an iPhone UA, and *only*

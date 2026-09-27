@@ -1,7 +1,12 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import McpServerFormModal from '../mcp/view/modals/McpServerFormModal';
+vi.mock('../project-creation-wizard/data/workspaceApi', () => ({
+  browseFilesystemFolders: vi.fn().mockResolvedValue({ path: '~', suggestions: [] }),
+  createFolderInFilesystem: vi.fn(),
+}));
+
+import FolderBrowserModal from '../project-creation-wizard/components/FolderBrowserModal';
 
 /**
  * The overlay element itself carries the keyboard offset (#357).
@@ -36,17 +41,17 @@ function centringContainer(dialog: HTMLElement): HTMLElement {
 }
 
 describe('hand-rolled overlays clear the soft keyboard (#357)', () => {
-  it('MCP server form offsets its centring container', () => {
+  it('folder browser modal offsets its centring container', async () => {
     render(
-      <McpServerFormModal
-        provider="claude"
+      <FolderBrowserModal
         isOpen
-        editingServer={null}
-        currentProjects={[]}
+        autoAdvanceOnSelect={false}
         onClose={vi.fn()}
-        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onFolderSelected={vi.fn()}
       />,
     );
+
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
 
     const container = centringContainer(screen.getByRole('dialog'));
     expect(container.style.bottom).toBe('var(--keyboard-height, 0px)');

@@ -4,7 +4,6 @@
     "account": "Account",
     "permissions": "Permissions",
     "mcpServers": "MCP Servers",
-    "skills": "Skills",
     "appearance": "Appearance"
   },
   "account": {
@@ -117,7 +116,7 @@
     },
     "bulkArchive": {
       "label": "Archive old conversations",
-      "description": "Move conversations older than a chosen age into the archive to declutter the list. This is reversible from the sidebar’s Archived view."
+      "description": "Move conversations older than a chosen age into the archive to declutter the list. This is reversible from the sidebar\u2019s Archived view."
     }
   },
   "notifications": {
@@ -188,55 +187,6 @@
       }
     }
   },
-  "mcpForm": {
-    "title": {
-      "add": "Add MCP Server",
-      "edit": "Edit MCP Server"
-    },
-    "importMode": {
-      "form": "Form Input",
-      "json": "JSON Import"
-    },
-    "scope": {
-      "label": "Scope",
-      "userGlobal": "User (Global)",
-      "projectLocal": "Project (Local)",
-      "userDescription": "User scope: Available across all projects on your machine",
-      "projectDescription": "Local scope: Only available in the selected project",
-      "cannotChange": "Scope cannot be changed when editing an existing server"
-    },
-    "fields": {
-      "serverName": "Server Name",
-      "transportType": "Transport Type",
-      "command": "Command",
-      "arguments": "Arguments (one per line)",
-      "jsonConfig": "JSON Configuration",
-      "url": "URL",
-      "envVars": "Environment Variables (KEY=value, one per line)",
-      "headers": "Headers (KEY=value, one per line)",
-      "selectProject": "Select a project..."
-    },
-    "placeholders": {
-      "serverName": "my-server"
-    },
-    "validation": {
-      "missingType": "Missing required field: type",
-      "stdioRequiresCommand": "stdio type requires a command field",
-      "httpRequiresUrl": "{{type}} type requires a url field",
-      "invalidJson": "Invalid JSON format",
-      "jsonHelp": "Paste your MCP server configuration in JSON format. Example formats:",
-      "jsonExampleStdio": "• stdio: {\"type\":\"stdio\",\"command\":\"npx\",\"args\":[\"@upstash/context7-mcp\"]}",
-      "jsonExampleHttp": "• http/sse: {\"type\":\"http\",\"url\":\"https://api.example.com/mcp\"}"
-    },
-    "configDetails": "Configuration Details (from {{configFile}})",
-    "projectPath": "Path: {{path}}",
-    "actions": {
-      "cancel": "Cancel",
-      "saving": "Saving...",
-      "addServer": "Add Server",
-      "updateServer": "Update Server"
-    }
-  },
   "saveStatus": {
     "success": "Settings saved successfully!",
     "error": "Failed to save settings",
@@ -250,7 +200,7 @@
     "title": "API Keys",
     "description": "Generate API keys to access the external API from other applications.",
     "newKey": {
-      "alertTitle": "⚠️ Save Your API Key",
+      "alertTitle": "\u26a0\ufe0f Save Your API Key",
       "alertMessage": "This is the only time you'll see this key. Store it securely.",
       "iveSavedIt": "I've saved it"
     },
@@ -281,7 +231,7 @@
         "descriptionPlaceholder": "Description (optional)",
         "addButton": "Add Token",
         "cancelButton": "Cancel",
-        "howToCreate": "How to create a GitHub Personal Access Token →"
+        "howToCreate": "How to create a GitHub Personal Access Token \u2192"
       },
       "empty": "No GitHub tokens added yet.",
       "added": "Added:",
@@ -291,7 +241,7 @@
     "documentation": {
       "title": "External API Documentation",
       "description": "Learn how to use the external API to trigger Claude, Codex, and Antigravity sessions from your applications.",
-      "viewLink": "View API Documentation →"
+      "viewLink": "View API Documentation \u2192"
     },
     "loading": "Loading..."
   },
@@ -409,7 +359,6 @@
       "codex": "Model Context Protocol servers provide additional tools and data sources to Codex",
       "antigravity": "Model Context Protocol servers provide additional tools and data sources to Antigravity"
     },
-    "addButton": "Add MCP Server",
     "empty": "No MCP servers configured",
     "serverType": "Type",
     "scope": {
@@ -428,7 +377,6 @@
       "more": "+{{count}} more"
     },
     "actions": {
-      "edit": "Edit server",
       "delete": "Delete server"
     },
     "managed": {

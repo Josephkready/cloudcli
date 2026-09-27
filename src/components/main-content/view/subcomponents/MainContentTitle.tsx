@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import type { AppTab, Project, ProjectSession } from '../../../../types/app';
-import { usePlugins } from '../../../../contexts/PluginsContext';
 import { resolveTitleCommit } from '../../utils/titleRename';
 
 import CliOriginBadge from './CliOriginBadge';
@@ -16,15 +15,7 @@ type MainContentTitleProps = {
   isMobile?: boolean;
 };
 
-function getTabTitle(activeTab: AppTab, t: (key: string) => string, pluginDisplayName?: string) {
-  if (activeTab.startsWith('plugin:') && pluginDisplayName) {
-    return pluginDisplayName;
-  }
-
-  if (activeTab === 'files') {
-    return t('mainContent.projectFiles');
-  }
-
+function getTabTitle(_activeTab: AppTab, _t: (key: string) => string) {
   return 'Project';
 }
 
@@ -40,7 +31,6 @@ export default function MainContentTitle({
   isMobile = false,
 }: MainContentTitleProps) {
   const { t } = useTranslation();
-  const { plugins } = usePlugins();
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -75,10 +65,6 @@ export default function MainContentTitle({
       void onRenameSession(selectedSession.id, nextTitle);
     }
   };
-
-  const pluginDisplayName = activeTab.startsWith('plugin:')
-    ? plugins.find((p) => p.name === activeTab.replace('plugin:', ''))?.displayName
-    : undefined;
 
   // On mobile the open-session strip directly below the header already carries
   // the session title (with its own provider logo) at nearly full width, so the
@@ -149,7 +135,7 @@ export default function MainContentTitle({
         ) : (
           <div className="min-w-0">
             <h2 className="text-sm font-semibold leading-tight text-foreground">
-              {getTabTitle(activeTab, t, pluginDisplayName)}
+              {getTabTitle(activeTab, t)}
             </h2>
             <div className="truncate text-[11px] leading-tight text-muted-foreground">{selectedProject.displayName}</div>
           </div>

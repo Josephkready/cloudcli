@@ -12,10 +12,6 @@ import type { Project, ProjectSession } from '@/types/app';
  * that session's id to the shared archive handler with no confirmation step.
  */
 
-vi.mock('@/contexts/PluginsContext', () => ({
-  usePlugins: () => ({ plugins: [], loading: false, pluginsError: null, refreshPlugins: () => {} }),
-}));
-
 // This spec exercises the header's archive action, not the stale-tab version check. The
 // header always mounts BugReportDialog (closed), which reads the shared version state; mock
 // it so these tests neither need a VersionCheckProvider nor hit the network.
