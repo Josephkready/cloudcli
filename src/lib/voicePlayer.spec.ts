@@ -26,6 +26,15 @@ class FakeAudio {
 
 let currentAudio: FakeAudio;
 
+// Drains the microtask queue enough times for a chain of resolved promises
+// (synthesizeVoice -> .finally -> res.blob() -> audio.play()) to settle,
+// without depending on real timers/wall-clock waits.
+async function flushMicrotasks(times = 10) {
+  for (let i = 0; i < times; i++) {
+    await Promise.resolve();
+  }
+}
+
 // `voicePlayer` is a module-level singleton that lazily caches its
 // `HTMLAudioElement` the first time it's used, so tests can't share one
 // import across the file (a later test would silently reuse the first
@@ -73,10 +82,17 @@ describe('voicePlayer', () => {
   });
 
   describe('unlock', () => {
-    it('primes the audio element by playing then immediately pausing it, only once', async () => {
+    it('primes the audio element by playing then pausing it once play() resolves, only once', async () => {
       const { voicePlayer } = await freshModules();
       voicePlayer.unlock();
       expect(currentAudio.play).toHaveBeenCalledTimes(1);
+      // pause() must not fire until the play() promise actually resolves -
+      // pins down the async timing, not just the eventual call count.
+      expect(currentAudio.pause).not.toHaveBeenCalled();
+
+      // pause() only happens once the play() promise resolves.
+      await Promise.resolve();
+      await Promise.resolve();
       expect(currentAudio.pause).toHaveBeenCalledTimes(1);
 
       voicePlayer.unlock();
@@ -84,7 +100,7 @@ describe('voicePlayer', () => {
       expect(currentAudio.play).toHaveBeenCalledTimes(1);
     });
 
-    it('swallows a synchronous throw from audio.play() during priming', async () => {
+    it('swallows a synchronous throw from audio.play() during priming and stays locked', async () => {
       const { voicePlayer } = await freshModules();
       currentAudio.play = vi.fn(() => {
         throw new Error('NotAllowedError');
@@ -92,6 +108,34 @@ describe('voicePlayer', () => {
 
       expect(() => voicePlayer.unlock()).not.toThrow();
       expect(currentAudio.pause).not.toHaveBeenCalled();
+
+      // Since priming failed, a later unlock() call should retry rather than
+      // treat us as already unlocked.
+      currentAudio.play = vi.fn(() => {
+        currentAudio.paused = false;
+        return Promise.resolve();
+      });
+      voicePlayer.unlock();
+      expect(currentAudio.play).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not mark itself unlocked when audio.play() returns a rejected promise', async () => {
+      const { voicePlayer } = await freshModules();
+      currentAudio.play = vi.fn(() => Promise.reject(new Error('NotAllowedError')));
+
+      voicePlayer.unlock();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(currentAudio.pause).not.toHaveBeenCalled();
+
+      // Still locked, so a later unlock() call retries instead of being a no-op.
+      currentAudio.play = vi.fn(() => {
+        currentAudio.paused = false;
+        return Promise.resolve();
+      });
+      voicePlayer.unlock();
+      expect(currentAudio.play).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -283,12 +327,16 @@ describe('voicePlayer', () => {
       }) as unknown as Response);
 
       // Play 25 distinct pieces of content sequentially so the LRU cache
-      // (capped at 24) evicts the very first one.
+      // (capped at 24) evicts the very first one. All promises involved
+      // (synthesizeVoice, blob(), audio.play()) resolve immediately with no
+      // real timers, so a fixed number of microtask flushes deterministically
+      // drives each play to completion instead of polling with vi.waitFor.
       for (let i = 0; i < 25; i++) {
         const content = `clip number ${i}`;
         voicePlayer.toggle(content);
         const id = voiceId(content);
-        await vi.waitFor(() => expect(voicePlayer.getSnapshot(id).state).toBe('playing'));
+        await flushMicrotasks();
+        expect(voicePlayer.getSnapshot(id).state).toBe('playing');
         voicePlayer.stop();
       }
 
