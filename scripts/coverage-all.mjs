@@ -20,6 +20,7 @@
 //
 // USAGE (after `npm run test:coverage`)
 //   node scripts/coverage-all.mjs                 # summary + worst files
+//   (no npm alias on purpose: editing package.json invalidates local-ci's baked image)
 //   node scripts/coverage-all.mjs --floor 80      # also exit 1 below 80%
 //   node scripts/coverage-all.mjs --files         # every file, worst first
 //   node scripts/coverage-all.mjs --json out.json # machine-readable per-file
