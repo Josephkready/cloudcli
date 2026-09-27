@@ -26,6 +26,15 @@ class FakeAudio {
 
 let currentAudio: FakeAudio;
 
+// Drains the microtask queue enough times for a chain of resolved promises
+// (synthesizeVoice -> .finally -> res.blob() -> audio.play()) to settle,
+// without depending on real timers/wall-clock waits.
+async function flushMicrotasks(times = 10) {
+  for (let i = 0; i < times; i++) {
+    await Promise.resolve();
+  }
+}
+
 // `voicePlayer` is a module-level singleton that lazily caches its
 // `HTMLAudioElement` the first time it's used, so tests can't share one
 // import across the file (a later test would silently reuse the first
@@ -315,12 +324,16 @@ describe('voicePlayer', () => {
       }) as unknown as Response);
 
       // Play 25 distinct pieces of content sequentially so the LRU cache
-      // (capped at 24) evicts the very first one.
+      // (capped at 24) evicts the very first one. All promises involved
+      // (synthesizeVoice, blob(), audio.play()) resolve immediately with no
+      // real timers, so a fixed number of microtask flushes deterministically
+      // drives each play to completion instead of polling with vi.waitFor.
       for (let i = 0; i < 25; i++) {
         const content = `clip number ${i}`;
         voicePlayer.toggle(content);
         const id = voiceId(content);
-        await vi.waitFor(() => expect(voicePlayer.getSnapshot(id).state).toBe('playing'));
+        await flushMicrotasks();
+        expect(voicePlayer.getSnapshot(id).state).toBe('playing');
         voicePlayer.stop();
       }
 
