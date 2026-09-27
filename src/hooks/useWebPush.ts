@@ -67,13 +67,21 @@ export function useWebPush(): WebPushState {
   useEffect(() => {
     if (permission === 'unsupported') return;
 
-    navigator.serviceWorker.ready.then((registration) => {
+    let cancelled = false;
+
+    navigator.serviceWorker.ready.then((registration) => (
       registration.pushManager.getSubscription().then((sub) => {
-        setIsSubscribed(sub !== null);
-      });
-    }).catch(() => {
-      // SW not ready yet
+        if (!cancelled) {
+          setIsSubscribed(sub !== null);
+        }
+      })
+    )).catch(() => {
+      // SW not ready yet, or getSubscription() rejected
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [permission]);
 
   const subscribe = useCallback(async () => {
