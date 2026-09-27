@@ -57,12 +57,6 @@ const EXEMPT = new Map<string, string>([
     'the fixed inset-0 element is a pointer-events-none decorative backdrop; the ' +
       'onboarding fields are laid out in normal flow beneath it',
   ],
-  [
-    'components/file-tree/view/FileTree.tsx',
-    'the two are unrelated in this file: the fixed inset-0 overlay is a delete ' +
-      'confirmation with no field, and the Input is the inline new-item row inside ' +
-      'the ScrollArea, in normal flow. Revisit if that overlay ever gains a field',
-  ],
 ]);
 
 function walk(dir: string, out: string[] = []): string[] {

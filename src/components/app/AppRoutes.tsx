@@ -7,7 +7,7 @@ import NotFound from './NotFound';
  * The application's route table.
  *
  * Extracted from `App` so the routing itself is testable without standing up
- * the auth / websocket / plugins provider stack around it.
+ * the auth / websocket provider stack around it.
  */
 export default function AppRoutes() {
   return (

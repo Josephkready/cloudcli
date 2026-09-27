@@ -11,8 +11,6 @@ import { parseArchiveByAgeDays, parseArchiveByAgeDaysQuery } from '@/modules/pro
 import {
   parseChangeActiveModelPayload,
   parseMcpScope,
-  parseMcpUpsertPayload,
-  parseProviderSkillCreatePayload,
   parseSessionRenameSummary,
 } from '@/modules/providers/provider.body.parsers.js';
 import {
@@ -74,27 +72,6 @@ router.get(
   }),
 );
 
-router.post(
-  '/:provider/skills',
-  asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
-    const input = parseProviderSkillCreatePayload(req.body);
-    const skills = await providerSkillsService.addProviderSkills(provider, input);
-    res.json(createApiSuccessResponse({ provider, skills }));
-  }),
-);
-
-router.delete(
-  '/:provider/skills/:directoryName',
-  asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
-    const result = await providerSkillsService.removeProviderSkill(provider, {
-      directoryName: readPathParam(req.params.directoryName, 'directoryName'),
-    });
-    res.json(createApiSuccessResponse(result));
-  }),
-);
-
 // ----------------- MCP routes -----------------
 router.get(
   '/:provider/mcp/servers',
@@ -114,16 +91,6 @@ router.get(
   }),
 );
 
-router.post(
-  '/:provider/mcp/servers',
-  asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
-    const payload = parseMcpUpsertPayload(req.body);
-    const server = await providerMcpService.upsertProviderMcpServer(provider, payload);
-    res.status(201).json(createApiSuccessResponse({ server }));
-  }),
-);
-
 router.delete(
   '/:provider/mcp/servers/:name',
   asyncHandler(async (req: Request, res: Response) => {
@@ -136,25 +103,6 @@ router.delete(
       workspacePath,
     });
     res.json(createApiSuccessResponse(result));
-  }),
-);
-
-router.post(
-  '/mcp/servers/global',
-  asyncHandler(async (req: Request, res: Response) => {
-    const payload = parseMcpUpsertPayload(req.body);
-    if (payload.scope === 'local') {
-      throw new AppError('Global MCP add supports only "user" or "project" scopes.', {
-        code: 'INVALID_GLOBAL_MCP_SCOPE',
-        statusCode: 400,
-      });
-    }
-
-    const results = await providerMcpService.addMcpServerToAllProviders({
-      ...payload,
-      scope: payload.scope === 'user' ? 'user' : 'project',
-    });
-    res.status(201).json(createApiSuccessResponse({ results }));
   }),
 );
 

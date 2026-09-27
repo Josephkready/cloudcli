@@ -40,9 +40,20 @@ async function scrollUntilArrowShows(page: Page): Promise<Locator> {
   await expect(pane).toBeVisible();
   const scrollToBottom = page.getByRole('button', { name: 'Scroll to bottom' });
   // Repeated because landing and paging can re-pin the pane while history settles.
+  // The wheel event is what makes this the *reader's* scroll: a bare `scrollTop`
+  // write is indistinguishable from the app moving itself, which no longer stops
+  // auto-follow (#540), so the next resize would pull the pane straight back down.
   await expect(async () => {
-    await pane.evaluate((el) => { el.scrollTop = Math.max(0, el.scrollTop - 1500); });
+    await pane.evaluate((el) => {
+      el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1500, bubbles: true }));
+      el.scrollTop = Math.max(0, el.scrollTop - 1500);
+    });
     await expect(scrollToBottom).toBeVisible({ timeout: 1_000 });
+    // And still there a moment later. Sending schedules a scroll to the bottom
+    // 100ms out, and the landing pass re-pins for up to a second after opening;
+    // a read-up inside either window shows the button only to lose it again.
+    await page.waitForTimeout(500);
+    await expect(scrollToBottom).toBeVisible({ timeout: 100 });
   }).toPass({ timeout: 15_000 });
   return scrollToBottom;
 }

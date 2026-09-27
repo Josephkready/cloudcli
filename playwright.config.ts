@@ -47,11 +47,15 @@ const KEYBOARD_SPECS =
  * which every engine implements, so it is pinned on all three rather than
  * trusted to one engine's reading of `contain`.
  *
+ * `autofollow-stall` (#540) was found on Android Chrome but its cause — the
+ * virtualizer moving `scrollTop` itself — is engine-agnostic, and the fix
+ * leans on touch/wheel input events whose timing differs per engine.
+ *
  * Same anchoring rules as above — the leading separator and trailing `$` are
  * load-bearing, because these are matched against absolute paths and the
  * worktree directory is named after the task being developed.
  */
-const CROSS_ENGINE_SPECS = /[\\/](composer-focus|mention-dropdown-stacking)\.spec\.ts$/;
+const CROSS_ENGINE_SPECS = /[\\/](composer-focus|mention-dropdown-stacking|autofollow-stall)\.spec\.ts$/;
 
 /**
  * Transcript scroll stability (#495) — WebKit under an iPhone UA, and *only*

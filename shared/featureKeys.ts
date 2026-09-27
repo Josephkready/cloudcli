@@ -24,13 +24,7 @@
 export const FEATURE_KEYS = [
   // --- Tabs -----------------------------------------------------------------
   'tab.chat',
-  'tab.shell',
-  'tab.files',
   'tab.git',
-  // Aggregate across every drop-installed plugin tab (docs/plugins.md). There is
-  // no per-plugin key on purpose: the question this answers is "is the plugin
-  // subsystem worth keeping at all", not "which plugin is popular".
-  'tab.plugin',
 
   // --- Chat -----------------------------------------------------------------
   'chat.send',
@@ -45,11 +39,9 @@ export const FEATURE_KEYS = [
   'chat.permission_mode_change',
 
   // --- Files ----------------------------------------------------------------
-  'files.open_editor',
+  // Recorded by the kept in-chat editor sidebar (useCodeEditorDocument), not
+  // by the removed Files tab.
   'files.save',
-  'files.upload',
-  'files.context_menu',
-  'files.search',
 
   // --- Git ------------------------------------------------------------------
   'git.commit',
@@ -83,8 +75,6 @@ export const FEATURE_KEYS = [
   'settings.tab.notifications',
   'settings.tab.data',
   'settings.tab.about',
-  'mcp.server_add',
-  'skills.install',
   'notifications.push',
 
   // --- Feedback -------------------------------------------------------------

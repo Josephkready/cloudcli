@@ -1,0 +1,463 @@
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
+import { markShutdownDraining, resetShutdownDrainingForTests } from '@/shared/shutdown-drain.js';
+import type { ProviderModelsDefinition, ProviderModelsResult } from '@/shared/types.js';
+
+import {
+  abortAntigravitySession,
+  resolveAntigravityEffort,
+  resolveAntigravityPermissionArgs,
+  spawnAntigravity,
+  terminateAntigravityChild,
+} from './antigravity-runner.js';
+
+// Drive spawnAntigravity's effort path with a deterministic catalog instead of
+// the real ~/.cloudcli-cached one, so the model/effort gating is hermetic.
+async function withStubbedAntigravityCatalog(
+  models: ProviderModelsDefinition,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const origGetModels = providerModelsService.getProviderModels;
+  const origResolveModel = providerModelsService.resolveResumeModel;
+  providerModelsService.getProviderModels = async (): Promise<ProviderModelsResult> => ({
+    models,
+    cache: { updatedAt: new Date(0).toISOString(), expiresAt: new Date(0).toISOString(), source: 'memory' },
+  });
+  providerModelsService.resolveResumeModel = async (_provider, _sessionId, requested) =>
+    requested ?? undefined;
+  try {
+    await fn();
+  } finally {
+    providerModelsService.getProviderModels = origGetModels;
+    providerModelsService.resolveResumeModel = origResolveModel;
+  }
+}
+
+const findEnvKey = (name: string) =>
+  Object.keys(process.env).find((key) => key.toLowerCase() === name.toLowerCase()) || name;
+
+async function createFakeAgy(binDir: string): Promise<string> {
+  // The stub below is CommonJS, and a bare `.js` file's module system is decided
+  // by the nearest package.json — which lives OUTSIDE this temp dir, wherever
+  // `os.tmpdir()` happens to point. Under `/tmp` there is none, so it loaded as
+  // CommonJS and this was invisible. Run with TMPDIR inside the checkout (which
+  // is what the local-ci lanes do) and the repo's own `"type": "module"` wins,
+  // every spawn dies on `require is not defined`, and all six spawn tests fail
+  // for a reason that has nothing to do with the code under test.
+  //
+  // Pinning the module system next to the script makes the stub mean the same
+  // thing wherever the temp dir lands.
+  await writeFile(path.join(binDir, 'package.json'), '{"type":"commonjs"}\n', 'utf8');
+
+  const scriptPath = path.join(binDir, 'agy.js');
+  await writeFile(scriptPath, `
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args[0] === '--version') process.exit(0);
+if (args[0] === 'models') { console.log('gemini-test-model'); process.exit(0); }
+if (process.env.AGY_ARGS_CAPTURE) {
+  fs.writeFileSync(process.env.AGY_ARGS_CAPTURE, JSON.stringify({ args, cwd: process.cwd() }));
+}
+const id = process.env.AGY_FAKE_CONVERSATION_ID || 'agy-native-session';
+console.log(JSON.stringify({ event: 'init', conversation_id: id, init: { model: 'gemini-test-model' } }));
+if (process.env.AGY_FAKE_MODE === 'hang') {
+  setInterval(() => {}, 1000);
+} else if (process.env.AGY_FAKE_MODE === 'self-sigterm') {
+  // Stands in for the server's own stop signal reaching the child (#535).
+  setTimeout(() => process.kill(process.pid, 'SIGTERM'), 20);
+  setInterval(() => {}, 1000);
+} else if (process.env.AGY_FAKE_MODE === 'result-only') {
+  console.log(JSON.stringify({ event: 'result', result: {
+    conversation_id: id, status: 'SUCCESS', response: 'Only response'
+  }}));
+} else if (process.env.AGY_FAKE_MODE === 'error-result') {
+  console.log(JSON.stringify({ event: 'result', result: {
+    conversation_id: id, status: 'ERROR',
+    error: 'Agy request failed Authorization: Bearer top-secret'
+  }}));
+} else if (process.env.AGY_FAKE_MODE === 'stderr-error') {
+  console.error('Agy stderr failure');
+  process.exitCode = 1;
+} else {
+  setTimeout(() => {
+    console.log(JSON.stringify({ event: 'step_update', step_update: {
+      conversation_id: id, step_type: 'agent_response', text_delta: 'Hello '
+    }}));
+  }, 10);
+  setTimeout(() => {
+    console.log(JSON.stringify({ event: 'step_update', step_update: {
+      conversation_id: id, step_type: 'agent_response', text_delta: 'world'
+    }}));
+    console.log(JSON.stringify({ event: 'result', result: {
+      conversation_id: id, status: 'SUCCESS', response: 'Hello world'
+    }}));
+  }, 20);
+}
+`, 'utf8');
+
+  const commandPath = path.join(binDir, process.platform === 'win32' ? 'agy.cmd' : 'agy');
+  if (process.platform === 'win32') {
+    await writeFile(commandPath, '@echo off\r\nnode "%~dp0agy.js" %*\r\n', 'utf8');
+  } else {
+    await writeFile(commandPath, '#!/bin/sh\nexec node "$(dirname "$0")/agy.js" "$@"\n', 'utf8');
+    await chmod(commandPath, 0o755);
+  }
+  return commandPath;
+}
+
+async function withFakeAgy(run: (tempRoot: string) => Promise<void>): Promise<void> {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'antigravity-runtime-'));
+  const binDir = path.join(tempRoot, 'bin');
+  const pathKey = findEnvKey('PATH');
+  const previousPath = process.env[pathKey];
+  const previousPrefix = process.env.npm_config_prefix;
+  const previousCapture = process.env.AGY_ARGS_CAPTURE;
+  const previousConversation = process.env.AGY_FAKE_CONVERSATION_ID;
+  const previousMode = process.env.AGY_FAKE_MODE;
+  const previousExecutable = process.env.ANTIGRAVITY_CLI_PATH;
+
+  try {
+    await mkdir(binDir);
+    process.env.ANTIGRAVITY_CLI_PATH = await createFakeAgy(binDir);
+    process.env[pathKey] = `${binDir}${path.delimiter}${previousPath || ''}`;
+    process.env.npm_config_prefix = tempRoot;
+    await run(tempRoot);
+  } finally {
+    if (previousPath === undefined) delete process.env[pathKey];
+    else process.env[pathKey] = previousPath;
+    if (previousPrefix === undefined) delete process.env.npm_config_prefix;
+    else process.env.npm_config_prefix = previousPrefix;
+    if (previousCapture === undefined) delete process.env.AGY_ARGS_CAPTURE;
+    else process.env.AGY_ARGS_CAPTURE = previousCapture;
+    if (previousConversation === undefined) delete process.env.AGY_FAKE_CONVERSATION_ID;
+    else process.env.AGY_FAKE_CONVERSATION_ID = previousConversation;
+    if (previousMode === undefined) delete process.env.AGY_FAKE_MODE;
+    else process.env.AGY_FAKE_MODE = previousMode;
+    if (previousExecutable === undefined) delete process.env.ANTIGRAVITY_CLI_PATH;
+    else process.env.ANTIGRAVITY_CLI_PATH = previousExecutable;
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+function createWriter() {
+  const messages: Array<Record<string, unknown>> = [];
+  return {
+    messages,
+    sessionId: null as string | null,
+    userId: null,
+    send(message: Record<string, unknown>) {
+      messages.push(message);
+    },
+    setSessionId(sessionId: string) {
+      this.sessionId = sessionId;
+    },
+  };
+}
+
+test('permission modes map onto agy flags', () => {
+  assert.deepEqual(resolveAntigravityPermissionArgs('plan'), ['--mode', 'plan']);
+  assert.deepEqual(resolveAntigravityPermissionArgs('acceptEdits'), ['--mode', 'accept-edits']);
+  assert.deepEqual(resolveAntigravityPermissionArgs('bypassPermissions'), ['--dangerously-skip-permissions']);
+  assert.deepEqual(resolveAntigravityPermissionArgs('default'), []);
+});
+
+// `agy` rejects an effort tier its model does not offer (verified: `gemini-3.1-pro
+// --effort medium` errors "no medium effort"), so the send path must only pass a
+// tier the model's catalog entry lists. This is the guard the split model/effort
+// selectors rely on (#492).
+test('resolveAntigravityEffort only passes a tier the model actually supports', () => {
+  const catalog: ProviderModelsDefinition = {
+    OPTIONS: [
+      { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', effort: { default: 'medium', values: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }] } },
+      { value: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', effort: { default: 'high', values: [{ value: 'low' }, { value: 'high' }] } },
+      { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' }, // no effort object
+    ],
+    DEFAULT: 'gemini-3.8-flash',
+  };
+
+  // Supported tier passes through.
+  assert.equal(resolveAntigravityEffort('gemini-3.8-flash', 'high', catalog), 'high');
+  // Tier the model does not offer (3.1-pro has no medium) is dropped.
+  assert.equal(resolveAntigravityEffort('gemini-3.1-pro', 'medium', catalog), undefined);
+  assert.equal(resolveAntigravityEffort('gemini-3.1-pro', 'low', catalog), 'low');
+  // A model with no effort object never gets an --effort flag.
+  assert.equal(resolveAntigravityEffort('claude-sonnet-4-6', 'high', catalog), undefined);
+  // The synthetic 'default' tier and unknown models fall through to undefined.
+  assert.equal(resolveAntigravityEffort('gemini-3.8-flash', 'default', catalog), undefined);
+  assert.equal(resolveAntigravityEffort('model-not-in-catalog', 'high', catalog), undefined);
+  assert.equal(resolveAntigravityEffort('gemini-3.8-flash', undefined, catalog), undefined);
+});
+
+test('spawnAntigravity appends --effort for a tier the selected model supports', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    await withStubbedAntigravityCatalog(
+      {
+        OPTIONS: [{ value: 'gemini-x', label: 'Gemini X', effort: { default: 'medium', values: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }] } }],
+        DEFAULT: 'gemini-x',
+      },
+      async () => {
+        const capturePath = path.join(tempRoot, 'args.json');
+        process.env.AGY_ARGS_CAPTURE = capturePath;
+        const writer = createWriter();
+
+        await spawnAntigravity('Hi there', {
+          cwd: tempRoot,
+          model: 'gemini-x',
+          effort: 'high',
+          permissionMode: 'default',
+        }, writer);
+
+        const capture = JSON.parse(await readFile(capturePath, 'utf8'));
+        const modelIndex = capture.args.indexOf('--model');
+        assert.equal(capture.args[modelIndex + 1], 'gemini-x');
+        const effortIndex = capture.args.indexOf('--effort');
+        assert.notEqual(effortIndex, -1);
+        assert.equal(capture.args[effortIndex + 1], 'high');
+      },
+    );
+  });
+});
+
+test('spawnAntigravity drops --effort for a tier the selected model does not offer', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    await withStubbedAntigravityCatalog(
+      {
+        // gemini-x supports only low/high — requesting medium must not reach agy,
+        // which rejects an unsupported tier.
+        OPTIONS: [{ value: 'gemini-x', label: 'Gemini X', effort: { default: 'high', values: [{ value: 'low' }, { value: 'high' }] } }],
+        DEFAULT: 'gemini-x',
+      },
+      async () => {
+        const capturePath = path.join(tempRoot, 'args.json');
+        process.env.AGY_ARGS_CAPTURE = capturePath;
+        const writer = createWriter();
+
+        await spawnAntigravity('Hi there', {
+          cwd: tempRoot,
+          model: 'gemini-x',
+          effort: 'medium',
+          permissionMode: 'default',
+        }, writer);
+
+        const capture = JSON.parse(await readFile(capturePath, 'utf8'));
+        assert.equal(capture.args.includes('--effort'), false);
+      },
+    );
+  });
+});
+
+test('Antigravity abort escalates to SIGKILL when a child ignores SIGTERM', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const child = new EventEmitter() as EventEmitter & { kill: (signal: string) => boolean };
+  const signals: string[] = [];
+  child.kill = (signal: string) => {
+    signals.push(signal);
+    return true;
+  };
+
+  assert.equal(terminateAntigravityChild(child as never, 25), true);
+  assert.deepEqual(signals, ['SIGTERM']);
+  t.mock.timers.tick(25);
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+});
+
+test('Antigravity abort cancels escalation when the child closes during grace', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const child = new EventEmitter() as EventEmitter & { kill: (signal: string) => boolean };
+  const signals: string[] = [];
+  child.kill = (signal: string) => {
+    signals.push(signal);
+    return true;
+  };
+
+  assert.equal(terminateAntigravityChild(child as never, 25), true);
+  child.emit('close', null, 'SIGTERM');
+  t.mock.timers.tick(25);
+  assert.deepEqual(signals, ['SIGTERM']);
+});
+
+test('spawnAntigravity streams NDJSON deltas and captures the native conversation id', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    const capturePath = path.join(tempRoot, 'args.json');
+    process.env.AGY_ARGS_CAPTURE = capturePath;
+    process.env.AGY_FAKE_CONVERSATION_ID = 'agy-native-new';
+    const writer = createWriter();
+
+    await spawnAntigravity('Hi there', {
+      cwd: tempRoot,
+      model: 'gemini-test-model',
+      permissionMode: 'acceptEdits',
+    }, writer);
+
+    assert.equal(writer.sessionId, 'agy-native-new');
+    assert.deepEqual(
+      writer.messages.filter((message) => message.kind === 'stream_delta').map((message) => message.content),
+      ['Hello ', 'world'],
+    );
+    assert.equal(writer.messages.filter((message) => message.kind === 'complete').length, 1);
+    assert.equal(writer.messages.find((message) => message.kind === 'complete')?.success, true);
+
+    const capture = JSON.parse(await readFile(capturePath, 'utf8'));
+    assert.equal(capture.args.includes('--conversation'), false);
+    // No effort requested -> no catalog lookup, no --effort flag.
+    assert.equal(capture.args.includes('--effort'), false);
+    const modelIndex = capture.args.indexOf('--model');
+    assert.equal(capture.args[modelIndex + 1], 'gemini-test-model');
+    assert.ok(capture.args.indexOf('--output-format') < capture.args.indexOf('--print'));
+    assert.deepEqual(capture.args.slice(-2), ['--print', 'Hi there']);
+  });
+});
+
+test('spawnAntigravity resumes with --conversation and does not announce a new session', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    const capturePath = path.join(tempRoot, 'args.json');
+    process.env.AGY_ARGS_CAPTURE = capturePath;
+    process.env.AGY_FAKE_CONVERSATION_ID = 'agy-existing';
+    const writer = createWriter();
+
+    await spawnAntigravity('Continue', {
+      cwd: tempRoot,
+      sessionId: 'agy-existing',
+      model: 'gemini-test-model',
+    }, writer);
+
+    const capture = JSON.parse(await readFile(capturePath, 'utf8'));
+    const conversationIndex = capture.args.indexOf('--conversation');
+    const modelIndex = capture.args.indexOf('--model');
+    assert.equal(capture.args[conversationIndex + 1], 'agy-existing');
+    assert.equal(capture.args[modelIndex + 1], 'gemini-test-model');
+    assert.equal(writer.messages.some((message) => message.kind === 'session_created'), false);
+  });
+});
+
+test('spawnAntigravity emits a response-only result exactly once', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    process.env.AGY_FAKE_MODE = 'result-only';
+    const writer = createWriter();
+
+    await spawnAntigravity('Respond once', {
+      cwd: tempRoot,
+      model: 'gemini-test-model',
+    }, writer);
+
+    assert.deepEqual(
+      writer.messages.filter((message) => message.kind === 'stream_delta').map((message) => message.content),
+      ['Only response'],
+    );
+    assert.equal(writer.messages.filter((message) => message.kind === 'complete').length, 1);
+  });
+});
+
+test('spawnAntigravity reports a failed result once and rejects', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    process.env.AGY_FAKE_MODE = 'error-result';
+    const writer = createWriter();
+
+    await assert.rejects(
+      spawnAntigravity('Fail', { cwd: tempRoot, model: 'gemini-test-model' }, writer),
+      /Agy request failed/,
+    );
+
+    assert.deepEqual(
+      writer.messages.filter((message) => message.kind === 'error').map((message) => message.content),
+      ['Agy request failed Authorization: Bearer [REDACTED]'],
+    );
+    const completions = writer.messages.filter((message) => message.kind === 'complete');
+    assert.equal(completions.length, 1);
+    assert.equal(completions[0].success, false);
+  });
+});
+
+test('spawnAntigravity reports stderr from a nonzero exit once', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    process.env.AGY_FAKE_MODE = 'stderr-error';
+    const writer = createWriter();
+
+    await assert.rejects(
+      spawnAntigravity('Fail', { cwd: tempRoot, model: 'gemini-test-model' }, writer),
+      /Agy stderr failure/,
+    );
+
+    assert.equal(writer.messages.filter((message) => message.kind === 'error').length, 1);
+    assert.equal(writer.messages.filter((message) => message.kind === 'complete').length, 1);
+  });
+});
+
+test('spawnAntigravity handles a missing executable with one terminal failure', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    process.env.ANTIGRAVITY_CLI_PATH = path.join(tempRoot, 'missing-agy');
+    const writer = createWriter();
+
+    await assert.rejects(
+      spawnAntigravity('Fail', { cwd: tempRoot, model: 'gemini-test-model' }, writer),
+      /ENOENT/,
+    );
+
+    assert.equal(writer.messages.filter((message) => message.kind === 'error').length, 1);
+    const completions = writer.messages.filter((message) => message.kind === 'complete');
+    assert.equal(completions.length, 1);
+    assert.equal(completions[0].success, false);
+  });
+});
+
+test('abortAntigravitySession terminates a live process with one aborted completion', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    process.env.AGY_FAKE_MODE = 'hang';
+    process.env.AGY_FAKE_CONVERSATION_ID = 'agy-abort-me';
+    const writer = createWriter();
+    const run = spawnAntigravity('Wait', {
+      cwd: tempRoot,
+      model: 'gemini-test-model',
+    }, writer);
+
+    for (let attempt = 0; attempt < 50 && writer.sessionId !== 'agy-abort-me'; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(writer.sessionId, 'agy-abort-me');
+    assert.equal(abortAntigravitySession('agy-abort-me'), true);
+    await run;
+
+    const completions = writer.messages.filter((message) => message.kind === 'complete');
+    assert.equal(completions.length, 1);
+    assert.equal(completions[0].aborted, true);
+  });
+});
+
+test('a SIGTERM that is not a user abort is a failure during the shutdown drain, not an abort (#535)', { concurrency: false }, async () => {
+  await withFakeAgy(async (tempRoot) => {
+    process.env.AGY_FAKE_MODE = 'self-sigterm';
+    const run = async ({ expectFailure }: { expectFailure: boolean }) => {
+      const writer = createWriter();
+      const spawned = spawnAntigravity('Wait', { cwd: tempRoot, model: 'gemini-test-model' }, writer);
+      if (expectFailure) {
+        await assert.rejects(spawned, /Antigravity CLI failed/);
+      } else {
+        await spawned;
+      }
+      return writer.messages.filter((message) => message.kind === 'complete');
+    };
+
+    // Outside a drain, a bare SIGTERM keeps its historical meaning: aborted.
+    const outside = await run({ expectFailure: false });
+    assert.equal(outside.length, 1);
+    assert.equal(outside[0].aborted, true);
+
+    // During the drain it was the server's own stop signal: a non-aborted
+    // failure, which the run registry keeps resumable.
+    markShutdownDraining();
+    try {
+      const during = await run({ expectFailure: true });
+      assert.equal(during.length, 1);
+      assert.equal(during[0].aborted, false);
+      assert.equal(during[0].success, false);
+    } finally {
+      resetShutdownDrainingForTests();
+    }
+  });
+});

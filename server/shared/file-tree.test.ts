@@ -9,7 +9,6 @@ import {
   getFileTree,
   listDirectChildDirectories,
   permToRwx,
-  validateFilename,
 } from '@/shared/file-tree.js';
 
 async function withTree(runTest: (root: string) => Promise<void>): Promise<void> {
@@ -39,33 +38,6 @@ test('permToRwx renders no permissions as ---', () => {
 
 test('permToRwx renders read+execute without write', () => {
   assert.equal(permToRwx(5), 'r-x');
-});
-
-//----------------- validateFilename ------------
-test('validateFilename rejects an empty name', () => {
-  assert.deepEqual(validateFilename(''), { valid: false, error: 'Filename cannot be empty' });
-});
-
-test('validateFilename rejects a whitespace-only name', () => {
-  assert.equal(validateFilename('   ').valid, false);
-});
-
-test('validateFilename rejects names with invalid characters', () => {
-  assert.equal(validateFilename('foo/bar').valid, false);
-  assert.equal(validateFilename('foo:bar').valid, false);
-});
-
-test('validateFilename rejects Windows-reserved device names', () => {
-  assert.equal(validateFilename('CON').valid, false);
-  assert.equal(validateFilename('lpt1').valid, false);
-});
-
-test('validateFilename rejects dots-only names', () => {
-  assert.equal(validateFilename('...').valid, false);
-});
-
-test('validateFilename accepts an ordinary name', () => {
-  assert.deepEqual(validateFilename('notes.md'), { valid: true });
 });
 
 //----------------- expandWorkspacePath ------------

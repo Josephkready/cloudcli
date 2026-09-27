@@ -7,7 +7,7 @@ import {
   pushSubscriptionsDb,
 } from '../modules/database/index.js';
 import { getPublicKey } from '../services/vapid-keys.js';
-import { createNotificationEvent, notifyUserIfEnabled } from '../services/notification-orchestrator.js';
+import { createNotificationEvent, notifyUserIfEnabled } from '../modules/notifications/services/notification-orchestrator.service.js';
 
 const router = express.Router();
 
