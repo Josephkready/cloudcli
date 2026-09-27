@@ -1,4 +1,5 @@
 import express from 'express';
+
 import { userDb } from '../modules/database/index.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { getSystemGitConfig } from '../utils/gitConfig.js';
@@ -6,6 +7,10 @@ import { spawnAsync } from '../utils/spawnAsync.js';
 
 const router = express.Router();
 
+// The Git panel/settings tab was removed (see #546), but the onboarding
+// identity step (src/components/onboarding/view/Onboarding.tsx) still
+// calls GET/POST /api/user/git-config to read and save the user's git
+// name/email, so these routes and their storage stay.
 router.get('/git-config', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;

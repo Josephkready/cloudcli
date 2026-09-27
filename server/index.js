@@ -53,7 +53,6 @@ import {
     shouldAutoOpenUrlFromOutput,
 } from './utils/url-detection.js';
 import { runMockAgentProvider } from './routes/mock-agent-provider.js';
-import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
 import commandsRoutes from './routes/commands.js';
 import settingsRoutes from './routes/settings.js';
@@ -217,9 +216,6 @@ app.use('/api/projects', authenticateToken, projectModuleRoutes);
 
 // Chat image asset upload/serving (global ~/.cloudcli/assets store, protected)
 app.use('/api/assets', authenticateToken, assetsRoutes);
-
-// Git API Routes (protected)
-app.use('/api/git', authenticateToken, gitRoutes);
 
 // Commands API Routes (protected)
 app.use('/api/commands', authenticateToken, commandsRoutes);

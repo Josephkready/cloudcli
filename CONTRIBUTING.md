@@ -238,10 +238,10 @@ initial read). Keep it in the `.pure.ts` file, but cover that part in a
 ## Demand-loaded surfaces
 
 Only the sidebar and the chat view are on the boot path. Everything else — the
-shell, code editor, git panel, file tree, settings, onboarding, the project
-wizard and the command palette — is behind `React.lazy` and ships in its own
-chunk (issue #267). Before that split, xterm (~400 KB) and CodeMirror (~690 KB)
-were parsed on every cold load even in a session that only read chat.
+code editor, settings, onboarding and the project wizard — is behind
+`React.lazy` and ships in its own chunk (issue #267). Before that split,
+xterm (~400 KB) and CodeMirror (~690 KB) were parsed on every cold load even in
+a session that only read chat.
 
 When you add or move one of these surfaces:
 

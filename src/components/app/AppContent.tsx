@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 
 import Sidebar from '../sidebar/view/Sidebar';
 import MainContent from '../main-content/view/MainContent';
-import CommandPaletteHost from '../command-palette/CommandPaletteHost';
 import { WARMABLE_SURFACES } from '../lazy/surfaceLoaders';
 import { useWarmLazySurfaces } from '../lazy/useWarmLazySurfaces';
 import { useWebSocket } from '../../contexts/WebSocketContext';
@@ -268,13 +267,6 @@ function AppContentInner() {
           onProjectSelect={sidebarSharedProps.onProjectSelect}
         />
       </div>
-
-      <CommandPaletteHost
-        selectedProject={selectedProject}
-        onStartNewChat={handleNewSession}
-        onOpenSettings={() => openSettings()}
-        onShowTab={setActiveTab}
-      />
     </div>
   );
 }

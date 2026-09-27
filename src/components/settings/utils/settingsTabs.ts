@@ -9,7 +9,6 @@ import type { SettingsMainTab } from '../types/types';
 export const KNOWN_MAIN_TABS = [
   'agents',
   'appearance',
-  'git',
   'api',
   'voice',
   'notifications',

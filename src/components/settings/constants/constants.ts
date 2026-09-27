@@ -3,7 +3,6 @@ import {
   Bell,
   Bot,
   Database,
-  GitBranch,
   Info,
   KeyRound,
   Palette,
@@ -25,7 +24,6 @@ export type SettingsMainTabMeta = {
 export const SETTINGS_MAIN_TABS: SettingsMainTabMeta[] = [
   { id: 'agents', label: 'Agents', keywords: 'agents subagents claude code', icon: Bot },
   { id: 'appearance', label: 'Appearance', keywords: 'appearance theme dark light language', icon: Palette },
-  { id: 'git', label: 'Git', keywords: 'git github commits', icon: GitBranch },
   { id: 'api', label: 'API Tokens', keywords: 'api tokens auth keys', icon: KeyRound },
   { id: 'notifications', label: 'Notifications', keywords: 'notifications alerts push', icon: Bell },
   { id: 'data', label: 'Data', keywords: 'data maintenance archive cleanup declutter old conversations', icon: Database },

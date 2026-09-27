@@ -104,7 +104,7 @@ describe('PremiumFeatureCard', () => {
 describe('settings constants', () => {
   it('defines a main tab entry for every top-level settings category', () => {
     const ids = SETTINGS_MAIN_TABS.map((tab) => tab.id);
-    expect(ids).toEqual(['agents', 'appearance', 'git', 'api', 'notifications', 'data', 'about']);
+    expect(ids).toEqual(['agents', 'appearance', 'api', 'notifications', 'data', 'about']);
     for (const tab of SETTINGS_MAIN_TABS) {
       expect(tab.label).toBeTruthy();
       expect(tab.keywords).toBeTruthy();

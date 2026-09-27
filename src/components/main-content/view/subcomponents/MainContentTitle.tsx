@@ -15,11 +15,7 @@ type MainContentTitleProps = {
   isMobile?: boolean;
 };
 
-function getTabTitle(activeTab: AppTab, t: (key: string) => string) {
-  if (activeTab === 'git') {
-    return t('tabs.git');
-  }
-
+function getTabTitle(_activeTab: AppTab, _t: (key: string) => string) {
   return 'Project';
 }
 

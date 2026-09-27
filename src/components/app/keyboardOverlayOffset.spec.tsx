@@ -1,7 +1,12 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import NewBranchModal from '../git-panel/view/modals/NewBranchModal';
+vi.mock('../project-creation-wizard/data/workspaceApi', () => ({
+  browseFilesystemFolders: vi.fn().mockResolvedValue({ path: '~', suggestions: [] }),
+  createFolderInFilesystem: vi.fn(),
+}));
+
+import FolderBrowserModal from '../project-creation-wizard/components/FolderBrowserModal';
 
 /**
  * The overlay element itself carries the keyboard offset (#357).
@@ -11,7 +16,7 @@ import NewBranchModal from '../git-panel/view/modals/NewBranchModal';
  * mentions the offset — it would still pass if the style landed on the wrong
  * element, or on the backdrop instead of the centring container. The e2e sweep
  * measures real geometry but only for surfaces reachable in a browser test;
- * these modals sit behind settings and the git panel.
+ * this modal sits behind settings.
  *
  * So: assert the offset is on the element whose box does the centring.
  */
@@ -36,24 +41,19 @@ function centringContainer(dialog: HTMLElement): HTMLElement {
 }
 
 describe('hand-rolled overlays clear the soft keyboard (#357)', () => {
-  it('new-branch modal offsets its centring container but not its backdrop', () => {
+  it('folder browser modal offsets its centring container', async () => {
     render(
-      <NewBranchModal
+      <FolderBrowserModal
         isOpen
-        currentBranch="main"
-        isCreatingBranch={false}
+        autoAdvanceOnSelect={false}
         onClose={vi.fn()}
-        onCreateBranch={vi.fn().mockResolvedValue(true)}
+        onFolderSelected={vi.fn()}
       />,
     );
 
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+
     const container = centringContainer(screen.getByRole('dialog'));
     expect(container.style.bottom).toBe('var(--keyboard-height, 0px)');
-
-    // The backdrop must stay full-screen, or the area behind the keyboard is
-    // left undimmed — a visible seam rather than a covered one.
-    const backdrop = container.querySelector<HTMLElement>('.fixed.inset-0');
-    expect(backdrop).not.toBeNull();
-    expect(backdrop!.style.bottom).toBe('');
   });
 });

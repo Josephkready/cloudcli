@@ -14,11 +14,10 @@ import MainContentHeader from './subcomponents/MainContentHeader';
 import MainContentStateView from './subcomponents/MainContentStateView';
 import ErrorBoundary from './ErrorBoundary';
 
-// Chat is the tab the app opens on, so it stays in the entry chunk. Every other
-// tab — and the editor side panel — is demand-loaded (issue #267): shipping
-// CodeMirror (~660 KB) to a session that only ever reads chat was the single
-// largest main-thread task on a cold mobile load.
-const GitPanel = lazySurface(() => import('../../git-panel/view/GitPanel'));
+// Chat is the tab the app opens on, so it stays in the entry chunk. The editor
+// side panel is demand-loaded (issue #267): shipping CodeMirror (~660 KB) to a
+// session that only ever reads chat was the single largest main-thread task on
+// a cold mobile load.
 const EditorSidebar = lazySurface(loadEditorSidebar);
 
 function MainContent({
@@ -136,14 +135,6 @@ function MainContent({
               />
             </ErrorBoundary>
           </div>
-
-          {activeTab === 'git' && (
-            <div className="h-full overflow-hidden">
-              <LazySurface>
-                <GitPanel selectedProject={selectedProject} isMobile={isMobile} onFileOpen={handleFileOpen} />
-              </LazySurface>
-            </div>
-          )}
         </div>
 
         {/*

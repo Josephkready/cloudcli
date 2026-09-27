@@ -69,9 +69,6 @@ const LAYOUT_TRANSITION_ALLOWLIST: Record<string, string> = {
   'shared/view/ui/Collapsible.tsx': 'grid-template-rows is the height-agnostic disclosure trick',
   'components/chat/tools/components/ContentRenderers/TaskListContent.tsx': 'todo progress bar fill',
   'components/chat/tools/components/InteractiveRenderers/AskUserQuestionPanel.tsx': 'step dot widens to mark the current question',
-  'components/git-panel/view/GitViewTabs.tsx': 'max-height collapse of the tab strip',
-  'components/git-panel/view/changes/CommitComposer.tsx': 'max-height collapse of the composer',
-  'components/git-panel/view/changes/FileChangeItem.tsx': 'max-height reveal of the inline diff',
   'components/sidebar/view/subcomponents/SidebarContent.tsx': 'search progress bar fill',
   'components/sidebar/view/subcomponents/SidebarProjectsState.tsx': 'project-load progress bar fill',
 };

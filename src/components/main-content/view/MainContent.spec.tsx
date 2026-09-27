@@ -13,10 +13,6 @@ vi.mock('./subcomponents/MainContentHeader', () => ({
   default: () => <div data-testid="main-content-header" />,
 }));
 
-vi.mock('../../git-panel/view/GitPanel', () => ({
-  default: () => <div data-testid="git-panel" />,
-}));
-
 vi.mock('../../code-editor/view/EditorSidebar', () => ({
   default: () => <div data-testid="editor-sidebar" />,
 }));
@@ -56,29 +52,6 @@ const baseProps = (overrides: Partial<MainContentProps> = {}): MainContentProps 
     onArchiveSession: vi.fn(),
     ...overrides,
   }) as MainContentProps;
-
-describe('MainContent — the other tabs stay cheap', () => {
-  it('unmounts the git surface on tab-away', async () => {
-    const { rerender } = render(<MainContent {...baseProps({ activeTab: 'git' })} />);
-    await screen.findByTestId('git-panel');
-
-    rerender(<MainContent {...baseProps({ activeTab: 'chat' })} />);
-
-    await screen.findByTestId('chat-interface');
-    expect(screen.queryByTestId('git-panel')).toBeNull();
-  });
-
-  it('keeps chat mounted but hidden while another tab is active', async () => {
-    const { rerender } = render(<MainContent {...baseProps({ activeTab: 'chat' })} />);
-    const chat = screen.getByTestId('chat-interface');
-    expect(chat.parentElement).toHaveClass('block');
-
-    rerender(<MainContent {...baseProps({ activeTab: 'git' })} />);
-    await screen.findByTestId('git-panel');
-
-    expect(screen.getByTestId('chat-interface').parentElement).toHaveClass('hidden');
-  });
-});
 
 describe('MainContent — state views', () => {
   it('renders the loading view instead of any surface while loading', () => {

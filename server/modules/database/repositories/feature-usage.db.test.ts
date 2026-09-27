@@ -40,14 +40,14 @@ const entryFor = (key: string) =>
 test('the feature_usage migration is idempotent', async () => {
   await withIsolatedDatabase(() => {
     const db = getConnection();
-    featureUsageDb.recordFeatureUses(['git.commit']);
+    featureUsageDb.recordFeatureUses(['chat.model_change']);
 
     // Re-running every migration must not throw and must not wipe the counters
     // an earlier boot recorded.
     runMigrations(db);
     runMigrations(db);
 
-    assert.equal(entryFor('git.commit')?.useCount, 1);
+    assert.equal(entryFor('chat.model_change')?.useCount, 1);
     const tables = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'feature_usage'")
       .all();
@@ -60,14 +60,14 @@ test('recordFeatureUses inserts, then increments, and keeps first/last used corr
     const first = new Date('2026-01-01T10:00:00Z');
     const second = new Date('2026-03-04T18:30:00Z');
 
-    assert.equal(featureUsageDb.recordFeatureUses(['git.commit'], first), 1);
-    const afterInsert = entryFor('git.commit');
+    assert.equal(featureUsageDb.recordFeatureUses(['chat.model_change'], first), 1);
+    const afterInsert = entryFor('chat.model_change');
     assert.equal(afterInsert?.useCount, 1);
     assert.equal(afterInsert?.firstUsedAt, '2026-01-01 10:00:00');
     assert.equal(afterInsert?.lastUsedAt, '2026-01-01 10:00:00');
 
-    assert.equal(featureUsageDb.recordFeatureUses(['git.commit'], second), 1);
-    const afterIncrement = entryFor('git.commit');
+    assert.equal(featureUsageDb.recordFeatureUses(['chat.model_change'], second), 1);
+    const afterIncrement = entryFor('chat.model_change');
     assert.equal(afterIncrement?.useCount, 2);
     // first_used_at is preserved; last_used_at moves forward.
     assert.equal(afterIncrement?.firstUsedAt, '2026-01-01 10:00:00');
@@ -81,7 +81,7 @@ test('a batch is tallied per key and unknown keys are dropped', async () => {
       'chat.send',
       'chat.send',
       'chat.send',
-      'git.stage',
+      'chat.effort_change',
       'not.a.real.key',
       42,
       null,
@@ -89,14 +89,14 @@ test('a batch is tallied per key and unknown keys are dropped', async () => {
 
     assert.equal(recorded, 4);
     assert.equal(entryFor('chat.send')?.useCount, 3);
-    assert.equal(entryFor('git.stage')?.useCount, 1);
+    assert.equal(entryFor('chat.effort_change')?.useCount, 1);
 
     const storedKeys = getConnection()
       .prepare('SELECT feature_key FROM feature_usage')
       .all() as { feature_key: string }[];
     assert.deepEqual(
       storedKeys.map((row) => row.feature_key).sort(),
-      ['chat.send', 'git.stage'],
+      ['chat.effort_change', 'chat.send'],
     );
   });
 });
@@ -149,7 +149,7 @@ test('a closed connection does not propagate out of recordFeatureUses', async ()
 test('listUsage returns every known key, zero-filled and least-used first', async () => {
   await withIsolatedDatabase(() => {
     featureUsageDb.recordFeatureUses(
-      ['chat.send', 'chat.send', 'git.commit'],
+      ['chat.send', 'chat.send', 'chat.model_change'],
       new Date('2026-02-02T09:00:00Z'),
     );
 
@@ -168,7 +168,7 @@ test('listUsage returns every known key, zero-filled and least-used first', asyn
     assert.equal(counts[0], 0);
     assert.equal(entries[entries.length - 1]?.featureKey, 'chat.send');
     assert.equal(entries[entries.length - 1]?.useCount, 2);
-    assert.equal(entries[entries.length - 2]?.featureKey, 'git.commit');
+    assert.equal(entries[entries.length - 2]?.featureKey, 'chat.model_change');
 
     // A never-used key reads as an explicit zero with no timestamps.
     const untouched = entries[0];
@@ -180,20 +180,20 @@ test('listUsage returns every known key, zero-filled and least-used first', asyn
 
 test('among equal counts the stalest feature sorts first', async () => {
   await withIsolatedDatabase(() => {
-    featureUsageDb.recordFeatureUses(['git.revert'], new Date('2026-01-01T00:00:00Z'));
-    featureUsageDb.recordFeatureUses(['git.discard'], new Date('2026-06-01T00:00:00Z'));
+    featureUsageDb.recordFeatureUses(['chat.interrupt'], new Date('2026-01-01T00:00:00Z'));
+    featureUsageDb.recordFeatureUses(['session.archive'], new Date('2026-06-01T00:00:00Z'));
 
     const used = featureUsageDb.listUsage().filter((entry) => entry.useCount > 0);
     assert.deepEqual(
       used.map((entry) => entry.featureKey),
-      ['git.revert', 'git.discard'],
+      ['chat.interrupt', 'session.archive'],
     );
   });
 });
 
 test('clearUsage empties the table but keeps the inventory visible', async () => {
   await withIsolatedDatabase(() => {
-    featureUsageDb.recordFeatureUses(['chat.send', 'git.commit']);
+    featureUsageDb.recordFeatureUses(['chat.send', 'chat.model_change']);
     assert.equal(featureUsageDb.clearUsage(), 2);
 
     const entries = featureUsageDb.listUsage();

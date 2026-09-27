@@ -515,13 +515,13 @@ describe('countLoadedProjectSessions', () => {
 
 describe('isValidTab', () => {
   it('accepts the built-in tabs', () => {
-    for (const tab of ['chat', 'git']) {
+    for (const tab of ['chat']) {
       assert.equal(isValidTab(tab), true, tab);
     }
   });
 
   it('rejects anything else', () => {
-    for (const tab of ['', 'CHAT', 'settings', 'plugin', 'plugin:anything', 'shell', 'files']) {
+    for (const tab of ['', 'CHAT', 'settings', 'plugin', 'plugin:anything', 'shell', 'files', 'git']) {
       assert.equal(isValidTab(tab), false, tab);
     }
   });

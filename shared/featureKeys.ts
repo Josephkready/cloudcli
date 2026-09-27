@@ -24,7 +24,6 @@
 export const FEATURE_KEYS = [
   // --- Tabs -----------------------------------------------------------------
   'tab.chat',
-  'tab.git',
 
   // --- Chat -----------------------------------------------------------------
   'chat.send',
@@ -43,19 +42,7 @@ export const FEATURE_KEYS = [
   // by the removed Files tab.
   'files.save',
 
-  // --- Git ------------------------------------------------------------------
-  'git.commit',
-  'git.stage',
-  'git.discard',
-  'git.branch_create',
-  'git.branch_switch',
-  'git.history_view',
-  'git.revert',
-  'git.ai_commit_message',
-
   // --- Navigation -----------------------------------------------------------
-  'palette.open',
-  'palette.action',
   'sidebar.search',
   'sidebar.archived_view',
   'session.archive',
@@ -69,7 +56,6 @@ export const FEATURE_KEYS = [
   // (the tab ids come from SettingsSidebar's NAV_ITEMS).
   'settings.tab.agents',
   'settings.tab.appearance',
-  'settings.tab.git',
   'settings.tab.api',
   'settings.tab.voice',
   'settings.tab.notifications',

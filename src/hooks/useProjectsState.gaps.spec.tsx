@@ -161,14 +161,13 @@ describe('useProjectsState — session/project handlers', () => {
     expect(result.current.sidebarOpen).toBe(true);
   });
 
-  it('handleNewSession selects the project, clears session, bumps the trigger and switches tab', async () => {
+  it('handleNewSession selects the project, clears session and bumps the trigger, falling back from a stale persisted tab', async () => {
+    localStorage.setItem('activeTab', 'git');
     respondWith('p1', ['s1']);
     const { result, navigate } = mountHook({ isMobile: true });
     await waitFor(() => expect(result.current.isLoadingProjects).toBe(false));
 
-    act(() => {
-      result.current.setActiveTab('git');
-    });
+    expect(result.current.activeTab).toBe('chat');
     const before = result.current.newSessionTrigger;
 
     act(() => {

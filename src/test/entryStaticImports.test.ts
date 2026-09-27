@@ -86,9 +86,7 @@ describe('entry chunk static import graph (#267)', () => {
       'src/components/standalone-shell/view/StandaloneShell.tsx',
       'src/components/code-editor/view/CodeEditor.tsx',
       'src/components/code-editor/view/EditorSidebar.tsx',
-      'src/components/git-panel/view/GitPanel.tsx',
       'src/components/settings/view/Settings.tsx',
-      'src/components/command-palette/CommandPalette.tsx',
       'src/components/project-creation-wizard/ProjectCreationWizard.tsx',
       'src/components/onboarding/view/Onboarding.tsx',
       // #287: the highlighted code block. Its unhighlighted stand-in

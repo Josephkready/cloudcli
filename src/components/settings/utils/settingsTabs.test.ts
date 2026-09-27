@@ -12,7 +12,6 @@ import { KNOWN_MAIN_TABS, normalizeMainTab } from './settingsTabs';
 const ALL_MAIN_TABS: Record<SettingsMainTab, true> = {
   agents: true,
   appearance: true,
-  git: true,
   api: true,
   voice: true,
   notifications: true,

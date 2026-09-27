@@ -306,12 +306,15 @@ describe('no control carrying the shared treatment reacts to hover while disable
     const files = new Set(elements.map((element) => element.file));
 
     // Both a count and a spread: a walk that regressed to one directory, or to
-    // half the sites, would still clear a bare count floor.
+    // half the sites, would still clear a bare count floor. The floor was
+    // lowered after the git panel, command palette, file tree, MCP form and
+    // skills UI were removed (#546/#550/#551/#555), which took real call
+    // sites with them.
     assert.ok(
-      elements.length >= 25,
+      elements.length >= 20,
       `expected to find the controls carrying the shared treatment, found ${elements.length}`,
     );
-    assert.ok(files.size >= 15, `expected the scan to span the codebase, found ${files.size} files`);
+    assert.ok(files.size >= 12, `expected the scan to span the codebase, found ${files.size} files`);
     assert.ok(
       // A fresh matcher per call: TREATMENT is /g and therefore stateful.
       elements.every((element) => new RegExp(TREATMENT.source).test(element.fragment)),
