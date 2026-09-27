@@ -7,6 +7,9 @@ import {
   browseFilesystemFolders,
   buildCloneProgressPayload,
   cloneWorkspaceWithProgress,
+  createFolderInFilesystem,
+  createProjectRequest,
+  fetchGithubTokenCredentials,
 } from './workspaceApi';
 
 /*
@@ -216,6 +219,130 @@ test('clone progress rejects server error events and dropped streams', async (t)
     cloneWorkspaceWithProgress(params, { onProgress: () => {} }),
     /Connection lost during clone/,
   );
+});
+
+/* ── fetchGithubTokenCredentials ─────────────────────────────────────────── */
+
+test('fetchGithubTokenCredentials: returns only active credentials', async (t) => {
+  t.mock.method(api, 'get', async () => jsonResponse({
+    credentials: [
+      { id: 1, credential_name: 'active-one', is_active: true },
+      { id: 2, credential_name: 'disabled-one', is_active: false },
+    ],
+  }));
+
+  const result = await fetchGithubTokenCredentials();
+
+  assert.deepEqual(result.map((c) => c.credential_name), ['active-one']);
+});
+
+test('fetchGithubTokenCredentials: defaults to an empty list when credentials is absent', async (t) => {
+  t.mock.method(api, 'get', async () => jsonResponse({}));
+
+  const result = await fetchGithubTokenCredentials();
+
+  assert.deepEqual(result, []);
+});
+
+test('fetchGithubTokenCredentials: throws the server error message on failure', async (t) => {
+  t.mock.method(api, 'get', async () => jsonResponse({ error: 'Not authorized' }, false));
+
+  await assert.rejects(() => fetchGithubTokenCredentials(), /Not authorized/);
+});
+
+test('fetchGithubTokenCredentials: falls back to a generic message when the server sends none', async (t) => {
+  t.mock.method(api, 'get', async () => jsonResponse({}, false));
+
+  await assert.rejects(() => fetchGithubTokenCredentials(), /Failed to load GitHub tokens/);
+});
+
+/* ── createFolderInFilesystem ─────────────────────────────────────────────── */
+
+test('createFolderInFilesystem: resolves with the server-reported path', async (t) => {
+  t.mock.method(api, 'createFolder', async () => jsonResponse({ success: true, path: '/ws/new-folder' }));
+
+  const result = await createFolderInFilesystem('/ws/new-folder');
+
+  assert.equal(result, '/ws/new-folder');
+});
+
+test('createFolderInFilesystem: falls back to the requested path when the server omits it', async (t) => {
+  t.mock.method(api, 'createFolder', async () => jsonResponse({ success: true }));
+
+  const result = await createFolderInFilesystem('/ws/fallback');
+
+  assert.equal(result, '/ws/fallback');
+});
+
+test('createFolderInFilesystem: throws the server error on failure', async (t) => {
+  t.mock.method(api, 'createFolder', async () => jsonResponse({ error: 'Permission denied' }, false));
+
+  await assert.rejects(() => createFolderInFilesystem('/ws/blocked'), /Permission denied/);
+});
+
+/* ── createProjectRequest ─────────────────────────────────────────────────── */
+
+test('createProjectRequest: resolves with the created project on success', async (t) => {
+  t.mock.method(api, 'createProject', async () => jsonResponse({ success: true, project: { id: 'p1' } }));
+
+  const result = await createProjectRequest({ path: '/ws/demo' });
+
+  assert.deepEqual(result, { id: 'p1' });
+});
+
+test('createProjectRequest: prefers details string over other error fields', async (t) => {
+  t.mock.method(api, 'createProject', async () => jsonResponse({
+    details: 'Disk full',
+    error: 'ignored',
+    message: 'also ignored',
+  }, false));
+
+  await assert.rejects(() => createProjectRequest({ path: '/ws/demo' }), /Disk full/);
+});
+
+test('createProjectRequest: falls back to a string error field', async (t) => {
+  t.mock.method(api, 'createProject', async () => jsonResponse({ error: 'Bad path' }, false));
+
+  await assert.rejects(() => createProjectRequest({ path: '/ws/demo' }), /Bad path/);
+});
+
+test('createProjectRequest: reads nested error.details when present', async (t) => {
+  t.mock.method(api, 'createProject', async () => jsonResponse({
+    error: { details: 'Nested detail message' },
+  }, false));
+
+  await assert.rejects(() => createProjectRequest({ path: '/ws/demo' }), /Nested detail message/);
+});
+
+test('createProjectRequest: reads nested error.message when details is absent', async (t) => {
+  t.mock.method(api, 'createProject', async () => jsonResponse({
+    error: { message: 'Nested message' },
+  }, false));
+
+  await assert.rejects(() => createProjectRequest({ path: '/ws/demo' }), /Nested message/);
+});
+
+test('createProjectRequest: builds a "path already exists" message from error.details.projectPath', async (t) => {
+  t.mock.method(api, 'createProject', async () => jsonResponse({
+    error: { details: { projectPath: '/ws/taken' } },
+  }, false));
+
+  await assert.rejects(
+    () => createProjectRequest({ path: '/ws/taken' }),
+    /Project path already exists: \/ws\/taken/,
+  );
+});
+
+test('createProjectRequest: falls back to the top-level message field', async (t) => {
+  t.mock.method(api, 'createProject', async () => jsonResponse({ message: 'Top-level message' }, false));
+
+  await assert.rejects(() => createProjectRequest({ path: '/ws/demo' }), /Top-level message/);
+});
+
+test('createProjectRequest: falls back to a generic message when nothing usable is present', async (t) => {
+  t.mock.method(api, 'createProject', async () => jsonResponse({}, false));
+
+  await assert.rejects(() => createProjectRequest({ path: '/ws/demo' }), /Failed to create project/);
 });
 
 mock.reset();
