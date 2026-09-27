@@ -34,7 +34,7 @@ vi.mock('@codemirror/merge', () => ({
 }));
 
 const { default: CodeEditor } = await import('./CodeEditor');
-const { PaletteOpsProvider, usePaletteOps } = await import('../../../contexts/PaletteOpsContext');
+const { PaletteOpsProvider, usePaletteOpsRegister } = await import('../../../contexts/PaletteOpsContext');
 const { ThemeProvider } = await import('../../../contexts/ThemeContext');
 
 import type { CodeEditorFile } from '../types/types';
@@ -193,29 +193,27 @@ describe('CodeEditor', () => {
   });
 
   it('opens editor settings through palette ops', async () => {
-    let captured: ReturnType<typeof usePaletteOps> | null = null;
-    function Capture() {
-      captured = usePaletteOps();
+    const openSettings = vi.fn();
+    // Register through the same registry the palette itself uses, so the click
+    // handler's `paletteOps.openSettings('appearance')` call is observable —
+    // mirrors how a real settings-tab consumer wires into PaletteOpsContext.
+    function Register() {
+      usePaletteOpsRegister({ openSettings });
       return null;
     }
-    const openSettings = vi.fn();
 
     render(
       <ThemeProvider>
         <PaletteOpsProvider>
-          <Capture />
+          <Register />
           <CodeEditor file={file()} onClose={vi.fn()} />
         </PaletteOpsProvider>
       </ThemeProvider>,
     );
     await waitFor(() => expect(screen.getByTestId('codemirror-mock')).toBeInTheDocument());
 
-    // Register a spy after mount, mirroring how a real consumer wires openSettings.
-    (captured as unknown as { openSettings: typeof openSettings }).openSettings = openSettings;
     fireEvent.click(screen.getByTitle('Editor Settings'));
-    // openSettings is looked up through the shared ref each call, so registering
-    // it post-mount on the returned object (not the ref) won't be observed —
-    // this at least exercises the click handler and default no-op path safely.
+    expect(openSettings).toHaveBeenCalledWith('appearance');
   });
 
   it('downloads the current buffer', async () => {
@@ -239,13 +237,27 @@ describe('CodeEditor', () => {
     expect(screen.getByText('Binary File')).toBeInTheDocument();
   });
 
-  it('renders as a sidebar panel when isSidebar is set, with pop-out and expand controls', async () => {
+  it('wires pop-out/expand handlers into the toolbar-panel extension only in sidebar mode', async () => {
+    // The pop-out/expand buttons live inside a real CodeMirror panel extension
+    // (mocked away here at the CodeMirror boundary), so the observable surface
+    // from this component is which extensions it hands to CodeMirror. Sidebar
+    // mode with both handlers must add the toolbar-panel extension; without it,
+    // the panel has nothing to show and createEditorToolbarPanelExtension
+    // returns an empty array (see editorToolbarPanel.spec.ts for the button-level
+    // behavior with a real CodeMirror instance).
     const onPopOut = vi.fn();
     const onToggleExpand = vi.fn();
-    renderEditor({ file: file(), isSidebar: true, onPopOut, onToggleExpand, isExpanded: false });
+    const { unmount } = renderEditor({ file: file(), isSidebar: true, onPopOut, onToggleExpand, isExpanded: false });
     await waitFor(() => expect(screen.getByTestId('codemirror-mock')).toBeInTheDocument());
-    // isSidebar wiring flows into extension config used by CodeEditorSurface;
-    // rendering without crashing exercises that branch.
+    const sidebarExtensionCount = (codeMirrorSpy.mock.calls.at(-1)?.[0] as { extensions: unknown[] }).extensions.length;
+    unmount();
+
+    codeMirrorSpy.mockClear();
+    renderEditor({ file: file(), isSidebar: false, onPopOut: null, onToggleExpand: null });
+    await waitFor(() => expect(screen.getByTestId('codemirror-mock')).toBeInTheDocument());
+    const plainExtensionCount = (codeMirrorSpy.mock.calls.at(-1)?.[0] as { extensions: unknown[] }).extensions.length;
+
+    expect(sidebarExtensionCount).toBeGreaterThan(plainExtensionCount);
   });
 
   it('shows a diff toolbar and lets the file be toggled between diff and plain view', async () => {

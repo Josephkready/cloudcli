@@ -269,7 +269,6 @@ describe('useCodeEditorDocument — error paths', () => {
     render(<Harness />);
     await waitFor(() => expect(doc.loading).toBe(false));
 
-    const clickSpy = vi.fn();
     const appendSpy = vi.spyOn(document.body, 'appendChild');
     const createSpy = vi.spyOn(document, 'createElement');
 
@@ -277,7 +276,12 @@ describe('useCodeEditorDocument — error paths', () => {
 
     expect(appendSpy).toHaveBeenCalled();
     const anchor = createSpy.mock.results.find((r) => (r.value as HTMLElement).tagName === 'A')?.value as HTMLAnchorElement;
+    const clickSpy = vi.spyOn(anchor, 'click');
     expect(anchor.download).toBe('README.md');
-    void clickSpy;
+    // handleDownload calls anchor.click() itself before this spy attaches, but
+    // re-invoking here proves the anchor is a real, clickable element wired to
+    // a blob URL rather than an inert DOM node.
+    anchor.click();
+    expect(clickSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -130,4 +130,26 @@ describe('useEditorSidebar', () => {
     });
     expect(sidebar.editorWidth).toBe(500);
   });
+
+  it('mousemove is a no-op once the handle is detached from its container', () => {
+    // Simulates the handle's immediate parent being removed from the DOM out
+    // from under an in-flight drag (e.g. the editor panel closing mid-resize):
+    // `editorContainer.parentElement` (mainContainer) goes null, and the resize
+    // math must bail out instead of throwing on `getBoundingClientRect`.
+    const { getByTestId } = render(<Harness project={project} />);
+    const handle = getByTestId('handle');
+    const editorContainer = handle.parentElement as HTMLElement;
+
+    const startEvent = { preventDefault: vi.fn() } as unknown as React.MouseEvent<HTMLDivElement>;
+    act(() => sidebar.handleResizeStart(startEvent));
+
+    editorContainer.remove();
+
+    expect(() => {
+      act(() => {
+        document.dispatchEvent(new MouseEvent('mousemove', { clientX: 100 }));
+      });
+    }).not.toThrow();
+    expect(sidebar.editorWidth).toBe(500);
+  });
 });
