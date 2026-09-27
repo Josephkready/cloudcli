@@ -207,8 +207,7 @@ describe('AuthContext', () => {
     expect(localStorage.getItem('auth-token')).toBe('new-token');
   });
 
-  it('BUG: a successful login re-triggers the mount status check because ' +
-    'checkAuthStatus depends on `token`, re-fetching /auth/status after login', async () => {
+  it('a successful login does not re-trigger the mount status check, and needsSetup stays false', async () => {
     api.auth.status.mockResolvedValue(jsonResponse({ needsSetup: true }));
     api.auth.login.mockResolvedValue(
       jsonResponse({ token: 'new-token', user: { username: 'jo' } }),
@@ -230,13 +229,11 @@ describe('AuthContext', () => {
       await Promise.resolve();
     });
 
-    // The token changed identity, so the effect re-ran and called status()
-    // again -- which re-reports needsSetup:true and clobbers the just-completed
-    // login's `setNeedsSetup(false)`.
-    await waitFor(() =>
-      expect(api.auth.status.mock.calls.length).toBeGreaterThan(statusCallsBeforeLogin),
-    );
-    await waitFor(() => expect(screen.getByTestId('needsSetup')).toHaveTextContent('true'));
+    // The token changed identity after login, but the mount status check must
+    // not re-run -- it should stay at the same call count and must not
+    // clobber the just-completed login's `setNeedsSetup(false)` back to true.
+    expect(api.auth.status.mock.calls.length).toBe(statusCallsBeforeLogin);
+    expect(screen.getByTestId('needsSetup')).toHaveTextContent('false');
   });
 
   it('surfaces the server error message on a failed login', async () => {
