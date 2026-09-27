@@ -126,6 +126,10 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  // Belt-and-suspenders for the #325 pending-sends test below: if it throws
+  // before its own cleanup line runs, the key must not leak into later tests
+  // in this file (vitest does not reset localStorage between `it`s).
+  localStorage.removeItem('pending_send_s1');
 });
 
 describe('useChatSessionState — message bookkeeping', () => {
@@ -263,21 +267,21 @@ describe('useChatSessionState — scroll helpers', () => {
     expect(result.current.isNearBottom()).toBe(true);
   });
 
-  it('scrollToBottomAndReset resets visibleMessageCount once allMessagesLoaded', async () => {
+  it('scrollToBottomAndReset always pins the container to the bottom', async () => {
+    // The allMessagesLoaded-reset half of this function is covered separately
+    // by "scrollToBottomAndReset re-enables pagination once all messages were
+    // loaded" below, which actually drives that state via loadOlderMessages.
+    // This just pins the unconditional scrollToBottom delegation.
     const sessionStore = makeSessionStore();
-    sessionStore.fetchMore = vi.fn(async () => makeSlot({ hasMore: false, total: 1, serverMessages: [] }));
     const { result } = renderSessionState(sessionStore, {
       selectedSession: { id: 's1' } as ProjectSession,
     });
     await waitFor(() => expect(sessionStore.setActiveSession).toHaveBeenCalled());
-    // Fake the container and force hasMoreMessages true so loadOlderMessages can run.
     const container = fakeContainer(0, 1000, 500);
     setContainer(result.current.scrollContainerRef, container);
 
-    // Drive allMessagesLoaded true through the public loadOlderMessages path is
-    // internal; instead simulate the state it produces isn't exposed directly, so
-    // just verify scrollToBottomAndReset always resets the scroll position.
     act(() => result.current.scrollToBottomAndReset());
+
     expect(container.scrollTop).toBe(1000);
   });
 });

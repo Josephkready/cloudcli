@@ -17,6 +17,9 @@ vi.mock('../../../utils/featureUsage', () => ({
   recordFeatureUse: vi.fn(),
 }));
 
+/** How large a chunk the next FakeMediaRecorder delivers on stop(). Reset per test. */
+let nextRecordedChunkSize = 2000;
+
 /** A MediaRecorder fake with a synchronous `stop()` -> onstop hand-off. */
 class FakeMediaRecorder {
   static isTypeSupported = vi.fn(() => true);
@@ -32,7 +35,7 @@ class FakeMediaRecorder {
   }
   stop() {
     this.state = 'inactive';
-    this.ondataavailable?.({ data: { size: 2000 } });
+    this.ondataavailable?.({ data: { size: nextRecordedChunkSize } });
     this.onstop?.();
   }
 }
@@ -59,6 +62,7 @@ beforeEach(() => {
   mockReadVoiceError.mockReset();
   mockGetUserMedia.mockClear().mockResolvedValue(fakeStream);
   fakeTrack.stop.mockClear();
+  nextRecordedChunkSize = 2000;
 });
 
 describe('useVoiceInput — starting and stopping', () => {
@@ -173,6 +177,27 @@ describe('useVoiceInput — finishing a recording', () => {
     expect(() => act(() => result.current.stop())).not.toThrow();
     expect(result.current.state).toBe('idle');
   });
+
+  it('rejects a recording under the minimum size instead of transcribing silence', async () => {
+    nextRecordedChunkSize = 200; // below the 800-byte floor
+    const onTranscript = vi.fn();
+    const onError = vi.fn();
+    const { result } = renderHook(() => useVoiceInput(onTranscript, onError));
+
+    await act(async () => {
+      result.current.toggle();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      result.current.stop();
+      await Promise.resolve();
+    });
+
+    expect(onError).toHaveBeenCalledWith('Recording too short');
+    expect(mockTranscribeVoice).not.toHaveBeenCalled();
+    expect(onTranscript).not.toHaveBeenCalled();
+    expect(result.current.state).toBe('idle');
+  });
 });
 
 describe('useVoiceInput — mic errors', () => {
@@ -233,5 +258,30 @@ describe('useVoiceInput — unmount safety', () => {
     unmount();
 
     expect(fakeTrack.stop).toHaveBeenCalled();
+  });
+
+  it('stops the stream and creates no recorder when unmounted before getUserMedia resolves', async () => {
+    let resolveGetUserMedia: (stream: typeof fakeStream) => void = () => {};
+    mockGetUserMedia.mockReset().mockImplementation(
+      () =>
+        new Promise<typeof fakeStream>((resolve) => {
+          resolveGetUserMedia = resolve;
+        }),
+    );
+    const { result, unmount } = renderHook(() => useVoiceInput(vi.fn()));
+
+    act(() => {
+      result.current.toggle();
+    });
+    expect(result.current.state).toBe('idle'); // still awaiting the mic grant
+
+    unmount();
+    await act(async () => {
+      resolveGetUserMedia(fakeStream);
+      await Promise.resolve();
+    });
+
+    expect(fakeTrack.stop).toHaveBeenCalled();
+    expect(result.current.state).toBe('idle');
   });
 });
