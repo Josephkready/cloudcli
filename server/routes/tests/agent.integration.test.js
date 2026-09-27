@@ -177,6 +177,66 @@ test('POST /api/agent rejects the mock provider when AGENT_MOCK_PROVIDER is off'
   });
 });
 
+test('POST /api/agent surfaces a github-error frame (stream) when a GitHub token is required but missing', async () => {
+  await withAgentServer(async ({ baseUrl, projectPath }) => {
+    const response = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectPath,
+        message: 'do the thing',
+        provider: 'mock',
+        stream: true,
+        createBranch: true,
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    const frames = parseSseFrames(await response.text());
+    const errorFrame = frames.find((f) => f.type === 'github-error');
+    assert.ok(errorFrame, 'expected a github-error frame');
+    assert.match(errorFrame.error, /GitHub token required/);
+    assert.deepEqual(frames.at(-1), { type: 'done' });
+  });
+});
+
+test('POST /api/agent surfaces a branch/pullRequest error object (non-streaming) when a GitHub token is missing', async () => {
+  await withAgentServer(async ({ baseUrl, projectPath }) => {
+    const response = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectPath,
+        message: 'do the thing',
+        provider: 'mock',
+        stream: false,
+        createBranch: true,
+        createPR: true,
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.success, true);
+    assert.match(body.branch.error, /GitHub token required/);
+    assert.match(body.pullRequest.error, /GitHub token required/);
+  });
+});
+
+test('POST /api/agent rejects createBranch/createPR without a target', async () => {
+  await withAgentServer(async ({ baseUrl }) => {
+    const response = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'hi', provider: 'mock', stream: false, createBranch: true }),
+    });
+    // No githubUrl and no projectPath -- the generic "either is required" 400 fires first.
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.match(body.error, /githubUrl or projectPath/);
+  });
+});
+
 test('POST /api/agent validates required inputs', async () => {
   await withAgentServer(async ({ baseUrl, projectPath }) => {
     // Missing message.
