@@ -74,14 +74,6 @@ test('project file routes stay mounted at their historical paths behind auth', a
     const saved = await request('PUT', '/api/projects/:id/file', { filePath: 'README.md', content: '# changed\n' });
     assert.equal(saved.status, 200);
     assert.equal(await readFile(path.join(projectRoot, 'README.md'), 'utf8'), '# changed\n');
-
-    const createdFile = await request('POST', '/api/projects/:id/files/create', { path: 'src', type: 'file', name: 'new.ts' });
-    assert.equal(createdFile.status, 200);
-    assert.equal(await readFile(path.join(projectRoot, 'src', 'new.ts'), 'utf8'), '');
-
-    const renamed = await request('PUT', '/api/projects/:id/files/rename', { oldPath: 'src/new.ts', newName: 'renamed.ts' });
-    assert.equal(renamed.status, 200);
-    assert.equal(await readFile(path.join(projectRoot, 'src', 'renamed.ts'), 'utf8'), '');
   });
 });
 
@@ -89,9 +81,6 @@ test('project file routes reject traversal outside the project and unknown proje
   await withProjectFilesServer(async ({ request }) => {
     const escape = await request('GET', '/api/projects/:id/file?filePath=../../../etc/passwd');
     assert.equal(escape.status, 403);
-
-    const badName = await request('PUT', '/api/projects/:id/files/rename', { oldPath: 'README.md', newName: '../x' });
-    assert.equal(badName.status, 400);
 
     const unknown = await request('GET', '/api/projects/does-not-exist/files');
     assert.equal(unknown.status, 404);

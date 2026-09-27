@@ -29,7 +29,6 @@ const DEMAND_LOADED_PACKAGES = [
   { prefix: '@codemirror/', reason: 'the editor (~690 KB) belongs to the code editor' },
   { prefix: '@uiw/react-codemirror', reason: 'the editor (~690 KB) belongs to the code editor' },
   { prefix: '@replit/codemirror-minimap', reason: 'the editor minimap belongs to the code editor' },
-  { prefix: 'jszip', reason: 'zip export belongs to the files tab' },
   { prefix: 'dompurify', reason: 'SVG sanitising belongs to the plugin icon fetch path' },
   // #287. Both were reachable from the chat composer, so they loaded on boot
   // for every session — including ones with no code block and no attachment.
@@ -90,7 +89,6 @@ describe('entry chunk static import graph (#267)', () => {
       'src/components/code-editor/view/EditorSidebar.tsx',
       'src/components/git-panel/view/GitPanel.tsx',
       'src/components/settings/view/Settings.tsx',
-      'src/components/file-tree/view/FileTree.tsx',
       'src/components/command-palette/CommandPalette.tsx',
       'src/components/project-creation-wizard/ProjectCreationWizard.tsx',
       'src/components/onboarding/view/Onboarding.tsx',

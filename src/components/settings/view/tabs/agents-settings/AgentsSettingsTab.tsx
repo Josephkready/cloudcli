@@ -20,8 +20,8 @@ export default function AgentsSettingsTab({
   const [selectedCategory, setSelectedCategory] = useState<AgentCategory>('account');
   const visibleCategories = useMemo<AgentCategory[]>(() => (
     selectedAgent === 'antigravity'
-      ? ['account', 'mcp', 'skills']
-      : ['account', 'permissions', 'mcp', 'skills']
+      ? ['account', 'mcp']
+      : ['account', 'permissions', 'mcp']
   ), [selectedAgent]);
 
   const visibleAgents = useMemo<AgentProvider[]>(() => {

@@ -2,7 +2,7 @@
  * Filesystem-tree helpers shared by the folder-picker (`/api/browse-filesystem`)
  * and the project file-explorer (`/api/projects/:projectId/files`) endpoints.
  *
- * Extracted from server/index.js so the pure pieces (permToRwx, validateFilename,
+ * Extracted from server/index.js so the pure pieces (permToRwx,
  * expandWorkspacePath) are independently unit-testable, and the recursive
  * getFileTree walk — including its bounded fs-concurrency limiter — has a
  * single home instead of living inline in the entry point.
@@ -36,28 +36,6 @@ export function permToRwx(perm: number): string {
   const w = perm & 2 ? 'w' : '-';
   const x = perm & 1 ? 'x' : '-';
   return r + w + x;
-}
-
-/** Validates a candidate file/directory name for the file-explorer's create/rename endpoints. */
-export function validateFilename(name: string | undefined | null): { valid: boolean; error?: string } {
-  if (!name || !name.trim()) {
-    return { valid: false, error: 'Filename cannot be empty' };
-  }
-  // Check for invalid characters (Windows + Unix)
-  const invalidChars = /[<>:"/\\|?*\x00-\x1f]/;
-  if (invalidChars.test(name)) {
-    return { valid: false, error: 'Filename contains invalid characters' };
-  }
-  // Check for reserved names (Windows)
-  const reserved = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
-  if (reserved.test(name)) {
-    return { valid: false, error: 'Filename is a reserved name' };
-  }
-  // Check for dots only
-  if (/^\.+$/.test(name)) {
-    return { valid: false, error: 'Filename cannot be only dots' };
-  }
-  return { valid: true };
 }
 
 /** Expands a leading `~` in a browse/create-folder input path to the given workspace root. */
