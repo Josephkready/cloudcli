@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ChangeEvent,
-  ClipboardEvent,
   Dispatch,
   FormEvent,
   KeyboardEvent,
@@ -14,19 +13,9 @@ import { authenticatedFetch } from '../../../utils/api';
 import { recordFeatureUse } from '../../../utils/featureUsage';
 import { SHARED_TEXT_KEY } from '../../../pwa/launchParams';
 import type { MarkSessionProcessing } from '../../../hooks/useSessionProtection';
-import { grantClaudeToolPermission } from '../utils/chatPermissions';
-import {
-  queuedMessageKey,
-  readQueuedMessages,
-  safeLocalStorage,
-  writeQueuedMessages,
-  type QueuedSendOptions,
-  type StoredQueuedMessage,
-} from '../utils/chatStorage';
+import { safeLocalStorage, type QueuedSendOptions } from '../utils/chatStorage';
 import { appendPendingSend, makePendingSendId, markPendingSendDispatched } from '../utils/pendingSends';
-import { decideQueueFlush } from '../utils/queueFlush';
 import { resolveEnterKeyAction } from '../utils/enterKeyAction';
-import { MAX_IMAGE_ATTACHMENT_COUNT, partitionImageFiles } from '../utils/imageAttachments';
 import { getNotificationSessionSummary } from '../utils/sessionSummary';
 import type {
   ChatMessage,
@@ -34,12 +23,26 @@ import type {
   PermissionMode,
   SessionEstablishedContext,
 } from '../types/types';
-import type { Project, ProjectSession, LLMProvider, ProviderModelsCacheInfo } from '../../../types/app';
-import { escapeRegExp } from '../utils/chatFormatting';
+import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 
 import { useFileMentions } from './useFileMentions';
-import { useImageDropzone } from './useImageDropzone';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
+import { useComposerCommands } from './useComposerCommands';
+import { useComposerImageAttachments } from './useComposerImageAttachments';
+import { useComposerTextarea } from './useComposerTextarea';
+import { useComposerPermissions } from './useComposerPermissions';
+import { useQueuedDrafts } from './useQueuedDrafts';
+
+export type {
+  ModelCommandData,
+  CostCommandData,
+  StatusCommandData,
+  HelpCommandData,
+  CommandModalKind,
+  CommandModalPayload,
+} from './useComposerCommands';
+export type { QueuedDraft } from './useQueuedDrafts';
+export { reconcileQueuedDraftsFromStorage } from '../utils/queuedDrafts';
 
 interface UseChatComposerStateArgs {
   selectedProject: Project | null;
@@ -86,172 +89,8 @@ interface MentionableFile {
   path: string;
 }
 
-interface CommandExecutionResult {
-  type: 'builtin' | 'custom';
-  action?: string;
-  data?: any;
-  content?: string;
-  hasBashCommands?: boolean;
-  hasFileIncludes?: boolean;
-}
-
-export type ModelCommandData = {
-  current?: {
-    provider?: string;
-    providerLabel?: string;
-    model?: string;
-  };
-  available?: Partial<Record<LLMProvider, string[]>>;
-  availableModels?: string[];
-  availableOptions?: Array<{
-    value: string;
-    label?: string;
-    description?: string;
-  }>;
-  defaultModel?: string;
-  cache?: ProviderModelsCacheInfo;
-};
-
-export type CostCommandData = {
-  tokenUsage?: {
-    used?: number;
-    total?: number;
-  };
-  tokenBreakdown?: {
-    input?: number;
-    output?: number;
-  };
-  provider?: string;
-  model?: string;
-};
-
-export type StatusCommandData = {
-  version?: string;
-  packageName?: string;
-  uptime?: string;
-  model?: string;
-  provider?: string;
-  nodeVersion?: string;
-  platform?: string;
-  pid?: number;
-  memoryUsage?: {
-    rssMb?: number;
-    heapUsedMb?: number;
-    heapTotalMb?: number;
-  };
-};
-
-export type HelpCommandData = {
-  content?: string;
-  format?: string;
-  commands?: Array<{
-    name: string;
-    description?: string;
-    namespace?: string;
-  }>;
-};
-
-export type CommandModalKind = 'help' | 'models' | 'cost' | 'status';
-
-export type CommandModalPayload = {
-  kind: CommandModalKind;
-  data: HelpCommandData | ModelCommandData | CostCommandData | StatusCommandData;
-};
-
 const createFakeSubmitEvent = () => {
   return { preventDefault: () => undefined } as unknown as FormEvent<HTMLFormElement>;
-};
-
-// In-memory-only id, used solely as a stable React key for queued cards. Not
-// persisted (restored drafts get fresh ids); a monotonic counter is enough.
-let queuedDraftSeq = 0;
-const makeQueuedDraftId = () => `qd_${queuedDraftSeq++}`;
-
-// A queued slash command that resolves to a *custom* (project-defined) command
-// dispatches its real send asynchronously (after a `/api/commands/execute`
-// round trip), so "no run started synchronously" isn't conclusive for
-// command-like input. Hold this long before re-driving the drain, giving a
-// started run time to flip `isLoading` so its completion edge takes over
-// instead of the next item overtaking it. Built-ins (which start no run) just
-// drain after the hold. A custom command slower than this could still race.
-const COMMAND_REDRAIN_HOLD_MS = 1200;
-
-export type QueuedDraft = {
-  // Stable key for rendering the queue; never persisted.
-  id: string;
-  content: string;
-  images: File[];
-  /**
-   * Send options snapshotted at queue time. Persisted with the draft so the
-   * app-level auto-send can dispatch the message with the right model and
-   * permission settings while another session is being viewed.
-   */
-  options?: QueuedSendOptions;
-};
-
-const restoreQueuedDrafts = (sessionKey: string): QueuedDraft[] =>
-  // Image attachments can't survive a reload; only text and options persist.
-  readQueuedMessages(sessionKey).map((saved) => ({
-    id: makeQueuedDraftId(),
-    content: saved.content,
-    images: [],
-    options: saved.options,
-  }));
-
-/**
- * Reconciles the in-memory queued drafts to what another tab wrote to storage
- * for the same session (#459). Two tabs on one session share the single
- * `queued_message_<id>` key, and the persistence effect below writes this tab's
- * in-memory copy over it — so without adopting the other tab's writes, a stale
- * tab would clobber a message the other tab queued (loss) or resurrect one it
- * drained. Returns the new draft list, or `null` when the two already hold the
- * same messages in the same order, so the caller can skip the state update —
- * which is also what stops a cross-tab write from ping-ponging between two
- * already-synced tabs.
- *
- * Drafts are matched to stored messages by content, in order, so a surviving
- * message keeps its stable React id and any in-memory image attachments (which
- * never persist); a genuinely new message from the other tab gets a fresh id
- * and no images.
- */
-export const reconcileQueuedDraftsFromStorage = (
-  current: QueuedDraft[],
-  stored: StoredQueuedMessage[],
-  makeId: () => string,
-): QueuedDraft[] | null => {
-  const unchanged =
-    current.length === stored.length
-    && current.every((draft, index) => draft.content === stored[index]?.content);
-  if (unchanged) {
-    return null;
-  }
-
-  const reusableByContent = new Map<string, QueuedDraft[]>();
-  for (const draft of current) {
-    const bucket = reusableByContent.get(draft.content);
-    if (bucket) {
-      bucket.push(draft);
-    } else {
-      reusableByContent.set(draft.content, [draft]);
-    }
-  }
-  // Storage carries no per-item id, so when another tab removes one of several
-  // identical-content drafts we cannot tell WHICH survived. Reuse image-bearing
-  // drafts first, so a surviving duplicate keeps its (non-persisted) attachment
-  // rather than silently dropping it. Ids are ephemeral React keys, so which id
-  // the survivor inherits does not matter.
-  for (const bucket of reusableByContent.values()) {
-    if (bucket.length > 1) {
-      bucket.sort((a, b) => (b.images.length > 0 ? 1 : 0) - (a.images.length > 0 ? 1 : 0));
-    }
-  }
-
-  return stored.map((message) => {
-    const reused = reusableByContent.get(message.content)?.shift();
-    return reused
-      ? { ...reused, options: message.options }
-      : { id: makeId(), content: message.content, images: [], options: message.options };
-  });
 };
 
 export function useChatComposerState({
@@ -290,16 +129,8 @@ export function useChatComposerState({
     }
     return '';
   });
-  const [attachedImages, setAttachedImages] = useState<File[]>([]);
-  const [uploadingImages, setUploadingImages] = useState<Map<string, number>>(new Map());
-  const [imageErrors, setImageErrors] = useState<Map<string, string>>(new Map());
-  const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
-  const [commandModalPayload, setCommandModalPayload] = useState<CommandModalPayload | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const inputHighlightRef = useRef<HTMLDivElement>(null);
-  const textareaLineHeightRef = useRef<number | null>(null);
-  const lastAutosizedInputRef = useRef<string | null>(null);
   const handleSubmitRef = useRef<
     // Resolves to `true` when a run was actually started (a chat.send was
     // dispatched), `false` otherwise (queued, intercepted as a command, or an
@@ -315,230 +146,46 @@ export function useChatComposerState({
   // handed back to the parent's `selectedSession` prop yet.
   const sessionKey = selectedSession?.id || currentSessionId || null;
 
-  const [queuedDrafts, setQueuedDrafts] = useState<QueuedDraft[]>(() => {
-    if (typeof window === 'undefined' || !sessionKey) {
-      return [];
-    }
-    return restoreQueuedDrafts(sessionKey);
+  const {
+    attachedImages,
+    setAttachedImages,
+    uploadingImages,
+    imageErrors,
+    handlePaste,
+    getRootProps,
+    getInputProps,
+    isDragActive,
+    openImagePicker,
+    resetImages,
+  } = useComposerImageAttachments();
+
+  const { queuedDrafts, enqueueDraft, editQueuedDraft, deleteQueuedDraft } = useQueuedDrafts({
+    sessionKey,
+    isLoading,
+    setInput,
+    inputValueRef,
+    setAttachedImages,
+    addMessage,
+    handleSubmitRef,
+    textareaRef,
   });
-  // Latest queuedDrafts, for the cross-tab storage listener to read without
-  // re-registering on every queue change (and so its reconcile runs outside the
-  // setState updater, keeping that updater side-effect free).
-  const queuedDraftsRef = useRef(queuedDrafts);
-  queuedDraftsRef.current = queuedDrafts;
-  // Which session the in-memory `queuedDrafts` belong to. On a session switch
-  // there is one commit where `sessionKey` already points at the new session
-  // while `queuedDrafts` still holds the old session's queue; the persistence
-  // effect must not write across that gap.
-  const queuedDraftSessionRef = useRef<string | null>(sessionKey);
-  // Held in a ref so the queue-persistence effect can report a refused write
-  // without depending on `addMessage` — an unmemoized caller would otherwise
-  // make that effect re-run, and rewrite the queue, on every render.
-  const addMessageRef = useRef(addMessage);
-  useEffect(() => {
-    addMessageRef.current = addMessage;
-  }, [addMessage]);
-  // Whether the persisted queue is a trustworthy mirror of `queuedDrafts`.
-  // Goes false when storage refuses the write (#330), which is what tells the
-  // drain below that an empty key means "never written" rather than "already
-  // claimed by the other flusher".
-  const queuePersistedRef = useRef(true);
 
-  const handleBuiltInCommand = useCallback(
-    (result: CommandExecutionResult) => {
-      const { action, data } = result;
-      switch (action) {
-        case 'help':
-          setCommandModalPayload({
-            kind: 'help',
-            data: (data || {}) as HelpCommandData,
-          });
-          break;
-
-        case 'models':
-          setCommandModalPayload({
-            kind: 'models',
-            data: (data || {}) as ModelCommandData,
-          });
-          break;
-
-        case 'cost': {
-          setCommandModalPayload({
-            kind: 'cost',
-            data: (data || {}) as CostCommandData,
-          });
-          break;
-        }
-
-        case 'status': {
-          setCommandModalPayload({
-            kind: 'status',
-            data: (data || {}) as StatusCommandData,
-          });
-          break;
-        }
-
-        case 'memory':
-          if (data.error) {
-            addMessage({
-              type: 'assistant',
-              content: `Warning: ${data.message}`,
-              timestamp: Date.now(),
-            });
-          } else {
-            addMessage({
-              type: 'assistant',
-              content: `${data.message}\n\nPath: \`${data.path}\``,
-              timestamp: Date.now(),
-            });
-            if (data.exists && onFileOpen) {
-              onFileOpen(data.path);
-            }
-          }
-          break;
-
-        case 'config':
-          onShowSettings?.();
-          break;
-
-        default:
-          console.warn('Unknown built-in command action:', action);
-      }
-    },
-    [onFileOpen, onShowSettings, addMessage],
-  );
-
-  const closeCommandModal = useCallback(() => {
-    setCommandModalPayload(null);
-  }, []);
-
-  const handleCustomCommand = useCallback(async (result: CommandExecutionResult) => {
-    const { content, hasBashCommands } = result;
-
-    if (hasBashCommands) {
-      const confirmed = window.confirm(
-        'This command contains bash commands that will be executed. Do you want to proceed?',
-      );
-      if (!confirmed) {
-        addMessage({
-          type: 'assistant',
-          content: 'Command execution cancelled',
-          timestamp: Date.now(),
-        });
-        return;
-      }
-    }
-
-    const commandContent = content || '';
-    setInput(commandContent);
-    inputValueRef.current = commandContent;
-
-    // Defer submit to next tick so the command text is reflected in UI before dispatching.
-    setTimeout(() => {
-      if (handleSubmitRef.current) {
-        handleSubmitRef.current(createFakeSubmitEvent());
-      }
-    }, 0);
-  }, [addMessage]);
-
-  const executeCommand = useCallback(
-    async (command: SlashCommand, rawInput?: string, options?: { preserveInput?: boolean }) => {
-      if (!command || !selectedProject) {
-        return;
-      }
-
-      try {
-        const effectiveInput = rawInput ?? input;
-        const commandMatch = effectiveInput.match(new RegExp(`${escapeRegExp(command.name)}\\s*(.*)`));
-        const args =
-          commandMatch && commandMatch[1] ? commandMatch[1].trim().split(/\s+/) : [];
-
-        // The `/api/commands/execute` context sends `projectId` now instead of
-        // a folder-derived project name; the path is still included verbatim.
-        const context = {
-          projectPath: selectedProject.fullPath || selectedProject.path,
-          projectId: selectedProject.projectId,
-          sessionId: currentSessionId,
-          provider,
-          model: provider === 'codex'
-            ? codexModel
-            : provider === 'antigravity'
-              ? antigravityModel
-              : claudeModel,
-          tokenUsage: tokenBudget,
-        };
-
-        const response = await authenticatedFetch('/api/commands/execute', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            commandName: command.name,
-            commandPath: command.path,
-            args,
-            context,
-          }),
-        });
-
-        if (!response.ok) {
-          let errorMessage = `Failed to execute command (${response.status})`;
-          try {
-            const errorData = await response.json();
-            errorMessage = errorData?.message || errorData?.error || errorMessage;
-          } catch {
-            // Ignore JSON parse failures and use fallback message.
-          }
-          throw new Error(errorMessage);
-        }
-
-        const result = (await response.json()) as CommandExecutionResult;
-        if (result.type === 'builtin') {
-          handleBuiltInCommand(result);
-          if (!options?.preserveInput) {
-            setInput('');
-            inputValueRef.current = '';
-          }
-        } else if (result.type === 'custom') {
-          await handleCustomCommand(result);
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        console.error('Error executing command:', error);
-        addMessage({
-          type: 'assistant',
-          content: `Error executing command: ${message}`,
-          timestamp: Date.now(),
-        });
-      }
-    },
-    [
-      antigravityModel,
-      claudeModel,
-      codexModel,
-      currentSessionId,
-      handleBuiltInCommand,
-      handleCustomCommand,
-      input,
-      provider,
-      selectedProject,
-      addMessage,
-      tokenBudget,
-    ],
-  );
-
-  const showCostModal = useCallback(() => {
-    executeCommand(
-      {
-        name: '/cost',
-        description: 'Display token usage information',
-        namespace: 'builtin',
-        metadata: { type: 'builtin' },
-      } as SlashCommand,
-      '/cost',
-      { preserveInput: true },
-    );
-  }, [executeCommand]);
+  const { executeCommand, commandModalPayload, closeCommandModal, showCostModal } = useComposerCommands({
+    selectedProject,
+    currentSessionId,
+    provider,
+    claudeModel,
+    codexModel,
+    antigravityModel,
+    tokenBudget,
+    input,
+    setInput,
+    inputValueRef,
+    handleSubmitRef,
+    addMessage,
+    onFileOpen,
+    onShowSettings,
+  });
 
   const {
     slashCommands,
@@ -576,79 +223,21 @@ export function useChatComposerState({
     textareaRef,
   });
 
-  const syncInputOverlayScroll = useCallback((target: HTMLTextAreaElement) => {
-    if (!inputHighlightRef.current || !target) {
-      return;
-    }
-    inputHighlightRef.current.scrollTop = target.scrollTop;
-    inputHighlightRef.current.scrollLeft = target.scrollLeft;
-  }, []);
-
-  const resizeTextarea = useCallback((target: HTMLTextAreaElement) => {
-    target.style.height = 'auto';
-    const nextHeight = Math.max(22, target.scrollHeight);
-    target.style.height = `${nextHeight}px`;
-
-    let lineHeight = textareaLineHeightRef.current;
-    if (!lineHeight) {
-      lineHeight = parseInt(window.getComputedStyle(target).lineHeight);
-      textareaLineHeightRef.current = Number.isFinite(lineHeight) ? lineHeight : 24;
-    }
-
-    const expanded = nextHeight > (textareaLineHeightRef.current || 24) * 2;
-    setIsTextareaExpanded((previous) => previous === expanded ? previous : expanded);
-    lastAutosizedInputRef.current = target.value;
-  }, []);
-
-  const handleImageFiles = useCallback((files: File[]) => {
-    const { validFiles, errors } = partitionImageFiles(files);
-
-    if (errors.length > 0) {
-      setImageErrors((previous) => {
-        const next = new Map(previous);
-        for (const { fileName, message } of errors) {
-          next.set(fileName, message);
-        }
-        return next;
-      });
-    }
-
-    if (validFiles.length > 0) {
-      recordFeatureUse('chat.image_attach');
-      setAttachedImages((previous) => [...previous, ...validFiles].slice(0, MAX_IMAGE_ATTACHMENT_COUNT));
-    }
-  }, []);
-
-  const handlePaste = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
-      const items = Array.from(event.clipboardData.items);
-
-      items.forEach((item) => {
-        if (!item.type.startsWith('image/')) {
-          return;
-        }
-        const file = item.getAsFile();
-        if (file) {
-          handleImageFiles([file]);
-        }
-      });
-
-      if (items.length === 0 && event.clipboardData.files.length > 0) {
-        const files = Array.from(event.clipboardData.files);
-        const imageFiles = files.filter((file) => file.type.startsWith('image/'));
-        if (imageFiles.length > 0) {
-          handleImageFiles(imageFiles);
-        }
-      }
-    },
-    [handleImageFiles],
-  );
-
-  // Native drag/drop + file picker. `accept`, `maxSize` and `maxFiles` used to
-  // be configured on react-dropzone, but `handleImageFiles` already enforces the
-  // image type and the 5 MB ceiling, and the attachment list is capped at 5 — so
-  // removing the library removed duplication, not validation (#287).
-  const { getRootProps, getInputProps, isDragActive, open } = useImageDropzone(handleImageFiles);
+  const {
+    inputHighlightRef,
+    isTextareaExpanded,
+    syncInputOverlayScroll,
+    handleTextareaClick,
+    handleTextareaInput,
+    handleClearInput,
+  } = useComposerTextarea({
+    input,
+    setInput,
+    inputValueRef,
+    resetCommandMenuState,
+    setCursorPosition,
+    textareaRef,
+  });
 
   // Snapshot of everything `chat.send` needs beyond the text itself. Built at
   // send time for immediate sends and at queue time for queued ones, so a
@@ -725,24 +314,11 @@ export function useChatComposerState({
       // turn ends — still going through slash-command interception, image
       // upload, etc.
       if (isLoading) {
-        recordFeatureUse('chat.queue_message');
-        queuedDraftSessionRef.current = sessionKey;
-        setQueuedDrafts((prev) => [
-          ...prev,
-          {
-            id: makeQueuedDraftId(),
-            content: currentInput,
-            images: attachedImages,
-            options: buildSendOptions(currentInput),
-          },
-        ]);
+        enqueueDraft(currentInput, attachedImages, buildSendOptions(currentInput));
         setInput('');
         inputValueRef.current = '';
-        setAttachedImages([]);
-        setUploadingImages(new Map());
-        setImageErrors(new Map());
+        resetImages();
         resetCommandMenuState();
-        setIsTextareaExpanded(false);
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto';
         }
@@ -775,11 +351,8 @@ export function useChatComposerState({
           executeCommand(matchedCommand, isHelpAlias ? '/help' : commandInput);
           setInput('');
           inputValueRef.current = '';
-          setAttachedImages([]);
-          setUploadingImages(new Map());
-          setImageErrors(new Map());
+          resetImages();
           resetCommandMenuState();
-          setIsTextareaExpanded(false);
           if (textareaRef.current) {
             textareaRef.current.style.height = 'auto';
           }
@@ -930,10 +503,7 @@ export function useChatComposerState({
         setInput('');
         inputValueRef.current = '';
         resetCommandMenuState();
-        setAttachedImages([]);
-        setUploadingImages(new Map());
-        setImageErrors(new Map());
-        setIsTextareaExpanded(false);
+        resetImages();
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto';
         }
@@ -988,10 +558,7 @@ export function useChatComposerState({
         setInput('');
         inputValueRef.current = '';
         resetCommandMenuState();
-        setAttachedImages([]);
-        setUploadingImages(new Map());
-        setImageErrors(new Map());
-        setIsTextareaExpanded(false);
+        resetImages();
 
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto';
@@ -1019,133 +586,18 @@ export function useChatComposerState({
       scrollToBottom,
       selectedProject,
       sendMessage,
-      sessionKey,
       addMessage,
       setIsUserScrolledUp,
       slashCommands,
+      enqueueDraft,
+      resetImages,
+      textareaRef,
     ],
   );
 
   useEffect(() => {
     handleSubmitRef.current = handleSubmit;
   }, [handleSubmit]);
-
-  // Once the in-flight turn ends, replay the head of the queue through the
-  // normal submit path (slash commands, image upload, etc. all still apply).
-  const wasLoadingRef = useRef(isLoading);
-  const flushSessionKeyRef = useRef(sessionKey);
-  // True while a queued item's replay is in flight, so we never dispatch a
-  // second queued message into the same window — the serialization guard that
-  // also covers slow image uploads (which keep `isLoading` false for a while).
-  const flushingRef = useRef(false);
-  // Bumped to re-run the drain when a flushed item started no run (a built-in
-  // command or a failed send), which produces no completion edge of its own.
-  const [drainTick, setDrainTick] = useState(0);
-  useEffect(() => {
-    const wasLoading = wasLoadingRef.current;
-    wasLoadingRef.current = isLoading;
-
-    // A session switch changes which session `isLoading` describes; the swap
-    // effect below replaces `queuedDrafts` with the new session's saved queue
-    // right after this. Track it so we never flush across the gap.
-    const sessionChanged = flushSessionKeyRef.current !== sessionKey;
-    if (sessionChanged) {
-      flushSessionKeyRef.current = sessionKey;
-    }
-
-    const { flush, delayMs } = decideQueueFlush({
-      sessionChanged,
-      isLoading,
-      isFlushing: flushingRef.current,
-      queueLength: queuedDrafts.length,
-      wasLoading,
-    });
-    if (!flush) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      // The persisted queue is the claim ticket shared with the app-level
-      // auto-send (which handles sessions that finish while not viewed). Re-read
-      // it; if it's been drained elsewhere, just resync the in-memory queue.
-      //
-      // The exception is a queue storage refused to hold (#330): the key is
-      // then empty because the write never landed, not because anyone claimed
-      // it, and resyncing to it would silently drop the message the user was
-      // just told would still be sent. Nothing else can have claimed it either
-      // — the other flusher reads the same absent key — so replaying from the
-      // in-memory copy cannot double-send.
-      const persisted = sessionKey ? readQueuedMessages(sessionKey) : [];
-      if (persisted.length === 0 && queuePersistedRef.current) {
-        setQueuedDrafts([]);
-        return;
-      }
-      const head = queuedDrafts[0];
-      if (!head) {
-        return;
-      }
-      // Claim the head by removing it from storage BEFORE replaying the send, so
-      // a racing flusher can't also dispatch it; the tail stays queued.
-      if (sessionKey) {
-        writeQueuedMessages(sessionKey, persisted.slice(1));
-      }
-      // Latched before the state updates so any re-render this triggers sees the
-      // flush as in progress and holds the next item.
-      flushingRef.current = true;
-      setQueuedDrafts((prev) => prev.slice(1));
-      setInput(head.content);
-      inputValueRef.current = head.content;
-      setAttachedImages(head.images);
-      // Defer a macrotask so the state above commits (and handleSubmit's closure
-      // refreshes with the restored images) before we replay it.
-      setTimeout(() => {
-        void (async () => {
-          let startedRun = false;
-          try {
-            startedRun = (await handleSubmitRef.current?.(createFakeSubmitEvent())) ?? false;
-          } finally {
-            flushingRef.current = false;
-            // A real send starts a run whose completion edge drains the next
-            // item. An item that starts no run (a built-in command, or a failed
-            // send — including one that threw) produces no such edge, so nudge
-            // the drain to keep going. Command-like input is held longer: a
-            // custom command's real send is async, and the re-drive becomes a
-            // no-op once that run flips isLoading (decideQueueFlush defers to the
-            // completion edge). In `finally` so it still fires if the send threw.
-            if (!startedRun) {
-              const trimmed = head.content.trim();
-              const wasCommandLike = trimmed.startsWith('/') || trimmed.toLowerCase() === 'help';
-              const holdMs = wasCommandLike ? COMMAND_REDRAIN_HOLD_MS : 0;
-              setTimeout(() => setDrainTick((tick) => tick + 1), holdMs);
-            }
-          }
-        })();
-      }, 0);
-    }, delayMs);
-    return () => clearTimeout(timer);
-  }, [isLoading, queuedDrafts, sessionKey, setInput, drainTick]);
-
-  // Addressed by the draft's stable id (not array index) so an edit/delete can't
-  // hit the wrong item if the queue shifts under it (e.g. the head drains).
-  const editQueuedDraft = useCallback(
-    (id: string) => {
-      const target = queuedDrafts.find((draft) => draft.id === id);
-      if (!target) {
-        return;
-      }
-      // Pull the item out of the queue and back into the composer to edit.
-      setQueuedDrafts((prev) => prev.filter((draft) => draft.id !== id));
-      setInput(target.content);
-      inputValueRef.current = target.content;
-      setAttachedImages(target.images);
-      textareaRef.current?.focus();
-    },
-    [queuedDrafts],
-  );
-
-  const deleteQueuedDraft = useCallback((id: string) => {
-    setQueuedDrafts((prev) => prev.filter((draft) => draft.id !== id));
-  }, []);
 
   // A voice transcript either fills the input (to edit before sending) or, when the
   // user tapped "stop and send", is submitted straight away. Mirror the value into
@@ -1198,103 +650,6 @@ export function useChatComposerState({
     }
   }, [input, selectedProjectId]);
 
-  // Persist the queued messages under the session's key. Must be defined BEFORE
-  // the swap effect below: on a session switch there is one commit where
-  // `sessionKey` already points at the new session while `queuedDrafts` (and
-  // the owner ref) still describe the old one — the ref mismatch makes this
-  // effect skip that commit instead of writing/clearing across sessions.
-  useEffect(() => {
-    if (!sessionKey || queuedDraftSessionRef.current !== sessionKey) {
-      return;
-    }
-    // writeQueuedMessages removes the key when the list is empty.
-    const persisted = writeQueuedMessages(
-      sessionKey,
-      queuedDrafts.map((draft) => ({ content: draft.content, options: draft.options })),
-    );
-    queuePersistedRef.current = persisted;
-    if (!persisted) {
-      // Storage refused the queue, and quota recovery no longer buys room by
-      // deleting it (#330), so this text now exists only in memory. Say so:
-      // the whole point of the queue is that it survives a reload, and a user
-      // who is told can copy the message out before losing it.
-      addMessageRef.current({
-        type: 'error',
-        content:
-          "This browser's storage is full, so your queued messages could not be saved. "
-          + "They'll still be sent when the current response finishes, but they will be "
-          + 'lost if you reload before then.',
-        timestamp: new Date(),
-      });
-    }
-  }, [queuedDrafts, sessionKey]);
-
-  // Keep the viewed session's queue in sync with other tabs (#459). The queue
-  // lives under one shared `queued_message_<id>` key, so a second tab on the same
-  // session would otherwise blindly overwrite this tab's copy on its next persist
-  // — losing a message queued here, or resurrecting one drained here. Adopting
-  // the other tab's write means this tab's next persist reflects the shared state
-  // instead of clobbering it. `storage` events fire only in OTHER documents, so
-  // this never sees its own writes, and reconcile returns null (no state update)
-  // when already in sync, which stops two synced tabs from ping-ponging.
-  useEffect(() => {
-    if (!sessionKey || typeof window === 'undefined') {
-      return undefined;
-    }
-    const key = queuedMessageKey(sessionKey);
-    const handleStorage = (event: StorageEvent) => {
-      if (event.storageArea && event.storageArea !== window.localStorage) {
-        return;
-      }
-      // Only our session's queue key. A drain-to-empty in the other tab arrives
-      // as this key with a null value (removeItem), which is handled. We
-      // deliberately ignore a null key (another tab's storage.clear()): syncing
-      // to empty on any unrelated clear would discard a message still being
-      // composed here, and the in-memory queue self-heals on the next persist.
-      if (event.key !== key) {
-        return;
-      }
-      const stored = readQueuedMessages(sessionKey);
-      const reconciled = reconcileQueuedDraftsFromStorage(queuedDraftsRef.current, stored, makeQueuedDraftId);
-      if (reconciled) {
-        setQueuedDrafts(reconciled);
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, [sessionKey]);
-
-  // Switching sessions swaps in that session's queued messages (image
-  // attachments can't survive a reload, so only text and options restore).
-  useEffect(() => {
-    queuedDraftSessionRef.current = sessionKey;
-    if (!sessionKey) {
-      setQueuedDrafts([]);
-      return;
-    }
-    setQueuedDrafts(restoreQueuedDrafts(sessionKey));
-  }, [sessionKey]);
-
-  useEffect(() => {
-    if (!textareaRef.current) {
-      return;
-    }
-    if (lastAutosizedInputRef.current === input) {
-      return;
-    }
-    // Re-run for restored drafts and programmatic input changes. User typing is
-    // already resized in onInput, so this avoids doing the same forced layout twice.
-    resizeTextarea(textareaRef.current);
-  }, [input, resizeTextarea]);
-
-  useEffect(() => {
-    if (!textareaRef.current || input.trim()) {
-      return;
-    }
-    textareaRef.current.style.height = 'auto';
-    setIsTextareaExpanded(false);
-  }, [input]);
-
   const handleInputChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
       const newValue = event.target.value;
@@ -1306,7 +661,6 @@ export function useChatComposerState({
 
       if (!newValue.trim()) {
         event.target.style.height = 'auto';
-        setIsTextareaExpanded(false);
         resetCommandMenuState();
         return;
       }
@@ -1361,34 +715,6 @@ export function useChatComposerState({
     ],
   );
 
-  const handleTextareaClick = useCallback(
-    (event: MouseEvent<HTMLTextAreaElement>) => {
-      setCursorPosition(event.currentTarget.selectionStart);
-    },
-    [setCursorPosition],
-  );
-
-  const handleTextareaInput = useCallback(
-    (event: FormEvent<HTMLTextAreaElement>) => {
-      const target = event.currentTarget;
-      resizeTextarea(target);
-      setCursorPosition(target.selectionStart);
-      syncInputOverlayScroll(target);
-    },
-    [resizeTextarea, setCursorPosition, syncInputOverlayScroll],
-  );
-
-  const handleClearInput = useCallback(() => {
-    setInput('');
-    inputValueRef.current = '';
-    resetCommandMenuState();
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.focus();
-    }
-    setIsTextareaExpanded(false);
-  }, [resetCommandMenuState]);
-
   const handleAbortSession = useCallback(() => {
     if (!canAbortSession) {
       return;
@@ -1409,44 +735,11 @@ export function useChatComposerState({
     });
   }, [canAbortSession, currentSessionId, selectedSession?.id, sendMessage]);
 
-  const handleGrantToolPermission = useCallback(
-    (suggestion: { entry: string; toolName: string }) => {
-      if (!suggestion || provider !== 'claude') {
-        return { success: false };
-      }
-      return grantClaudeToolPermission(suggestion.entry);
-    },
-    [provider],
-  );
-
-  const handlePermissionDecision = useCallback(
-    (
-      requestIds: string | string[],
-      decision: { allow?: boolean; message?: string; rememberEntry?: string | null; updatedInput?: unknown },
-    ) => {
-      const ids = Array.isArray(requestIds) ? requestIds : [requestIds];
-      const validIds = ids.filter(Boolean);
-      if (validIds.length === 0) {
-        return;
-      }
-
-      validIds.forEach((requestId) => {
-        sendMessage({
-          type: 'chat.permission-response',
-          requestId,
-          allow: Boolean(decision?.allow),
-          updatedInput: decision?.updatedInput,
-          message: decision?.message,
-          rememberEntry: decision?.rememberEntry,
-        });
-      });
-
-      setPendingPermissionRequests((previous) =>
-        previous.filter((request) => !validIds.includes(request.requestId)),
-      );
-    },
-    [sendMessage, setPendingPermissionRequests],
-  );
+  const { handleGrantToolPermission, handlePermissionDecision } = useComposerPermissions({
+    provider,
+    sendMessage,
+    setPendingPermissionRequests,
+  });
 
   const [isInputFocused, setIsInputFocused] = useState(false);
 
@@ -1484,7 +777,7 @@ export function useChatComposerState({
     getRootProps,
     getInputProps,
     isDragActive,
-    openImagePicker: open,
+    openImagePicker,
     handleSubmit,
     queuedDrafts,
     editQueuedDraft,
