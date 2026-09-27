@@ -60,14 +60,14 @@ test('recordFeatureUse buffers keys and flushes them as one batch', () => {
     () => {
       recordFeatureUse('chat.send');
       recordFeatureUse('chat.send');
-      recordFeatureUse('git.commit');
+      recordFeatureUse('chat.model_change');
 
       // Nothing goes out until the flush; the batch is what limits a chatty
       // surface to one request instead of one per click.
       assert.deepEqual([...__pendingFeatureUsesForTests()], [
         'chat.send',
         'chat.send',
-        'git.commit',
+        'chat.model_change',
       ]);
 
       __flushFeatureUsageForTests();
@@ -76,7 +76,7 @@ test('recordFeatureUse buffers keys and flushes them as one batch', () => {
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.url, '/api/usage');
-  assert.deepEqual(calls[0]?.keys, ['chat.send', 'chat.send', 'git.commit']);
+  assert.deepEqual(calls[0]?.keys, ['chat.send', 'chat.send', 'chat.model_change']);
   assert.equal(calls[0]?.keepalive, false);
 });
 
@@ -112,7 +112,7 @@ test('a rejecting fetch never produces an unhandled rejection', async () => {
     () => Promise.reject(new Error('offline')),
     () => {
       assert.doesNotThrow(() => {
-        recordFeatureUse('git.commit');
+        recordFeatureUse('chat.model_change');
         __flushFeatureUsageForTests();
       });
     },

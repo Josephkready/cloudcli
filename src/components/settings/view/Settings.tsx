@@ -11,7 +11,6 @@ import AgentsSettingsTab from '../view/tabs/agents-settings/AgentsSettingsTab';
 import AppearanceSettingsTab from '../view/tabs/AppearanceSettingsTab';
 import CredentialsSettingsTab from '../view/tabs/api-settings/CredentialsSettingsTab';
 import VoiceSettingsTab from '../view/tabs/VoiceSettingsTab';
-import GitSettingsTab from '../view/tabs/git-settings/GitSettingsTab';
 import NotificationsSettingsTab from '../view/tabs/NotificationsSettingsTab';
 import DataSettingsTab from '../view/tabs/DataSettingsTab';
 import AboutTab from '../view/tabs/AboutTab';
@@ -152,7 +151,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
                 />
               )}
 
-              {activeTab === 'git' && <GitSettingsTab />}
 
               {activeTab === 'agents' && (
                 <AgentsSettingsTab

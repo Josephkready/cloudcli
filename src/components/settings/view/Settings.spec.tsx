@@ -69,7 +69,6 @@ vi.mock('./tabs/agents-settings/AgentsSettingsTab', () => ({
 vi.mock('./tabs/AppearanceSettingsTab', () => ({ default: () => null }));
 vi.mock('./tabs/api-settings/CredentialsSettingsTab', () => ({ default: () => null }));
 vi.mock('./tabs/VoiceSettingsTab', () => ({ default: () => null }));
-vi.mock('./tabs/git-settings/GitSettingsTab', () => ({ default: () => null }));
 vi.mock('./tabs/NotificationsSettingsTab', () => ({ default: () => null }));
 vi.mock('./tabs/DataSettingsTab', () => ({ default: () => null }));
 vi.mock('./tabs/AboutTab', () => ({ default: () => null }));

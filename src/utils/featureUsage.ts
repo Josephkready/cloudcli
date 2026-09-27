@@ -4,7 +4,7 @@
  * One line per instrumented entry point:
  *
  * ```ts
- * recordFeatureUse('git.commit');
+ * recordFeatureUse('chat.send');
  * ```
  *
  * The keys are the closed union in `shared/featureKeys.ts`, imported here as a

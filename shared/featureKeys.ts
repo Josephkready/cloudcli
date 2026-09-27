@@ -26,7 +26,6 @@ export const FEATURE_KEYS = [
   'tab.chat',
   'tab.shell',
   'tab.files',
-  'tab.git',
   // Aggregate across every drop-installed plugin tab (docs/plugins.md). There is
   // no per-plugin key on purpose: the question this answers is "is the plugin
   // subsystem worth keeping at all", not "which plugin is popular".
@@ -51,19 +50,7 @@ export const FEATURE_KEYS = [
   'files.context_menu',
   'files.search',
 
-  // --- Git ------------------------------------------------------------------
-  'git.commit',
-  'git.stage',
-  'git.discard',
-  'git.branch_create',
-  'git.branch_switch',
-  'git.history_view',
-  'git.revert',
-  'git.ai_commit_message',
-
   // --- Navigation -----------------------------------------------------------
-  'palette.open',
-  'palette.action',
   'sidebar.search',
   'sidebar.archived_view',
   'session.archive',
@@ -77,7 +64,6 @@ export const FEATURE_KEYS = [
   // (the tab ids come from SettingsSidebar's NAV_ITEMS).
   'settings.tab.agents',
   'settings.tab.appearance',
-  'settings.tab.git',
   'settings.tab.api',
   'settings.tab.voice',
   'settings.tab.notifications',

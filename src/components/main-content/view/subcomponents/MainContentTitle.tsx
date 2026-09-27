@@ -25,10 +25,6 @@ function getTabTitle(activeTab: AppTab, t: (key: string) => string, pluginDispla
     return t('mainContent.projectFiles');
   }
 
-  if (activeTab === 'git') {
-    return t('tabs.git');
-  }
-
   return 'Project';
 }
 

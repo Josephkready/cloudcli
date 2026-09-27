@@ -105,7 +105,6 @@
     "label": "Settings",
     "agents": "Agents",
     "appearance": "Appearance",
-    "git": "Git",
     "apiTokens": "API & Tokens",
     "voice": "Voice",
     "notifications": "Notifications",
@@ -246,25 +245,6 @@
   "footerActions": {
     "save": "Save Settings",
     "cancel": "Cancel"
-  },
-  "git": {
-    "title": "Git Configuration",
-    "description": "Configure your git identity for commits. These settings will be applied globally via git config --global",
-    "name": {
-      "label": "Git Name",
-      "help": "Your name for git commits"
-    },
-    "email": {
-      "label": "Git Email",
-      "help": "Your email for git commits"
-    },
-    "actions": {
-      "save": "Save Configuration",
-      "saving": "Saving..."
-    },
-    "status": {
-      "success": "Saved successfully"
-    }
   },
   "apiKeys": {
     "title": "API Keys",

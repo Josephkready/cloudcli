@@ -9,9 +9,6 @@ import { cn } from '../../../../lib/utils';
 import { recordFeatureUse } from '../../../../utils/featureUsage';
 import type { SidebarOverlay } from '../../types/types';
 
-const MOD_KEY =
-  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
-
 type SidebarHeaderProps = {
   isPWA: boolean;
   isMobile: boolean;
@@ -219,16 +216,7 @@ export default function SidebarHeader({
                 >
                   <X className="h-3 w-3 text-muted-foreground" />
                 </button>
-              ) : (
-                <kbd
-                  aria-hidden
-                  title={t('tooltips.openCommandPalette')}
-                  className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground md:inline-flex"
-                >
-                  {MOD_KEY}
-                  <span>K</span>
-                </kbd>
-              )}
+              ) : null}
             </div>
             {/* Overlay toggles: full-text conversation search + archived browsing.
                 The two-section body (Spaces + Conversations) shows when neither is on. */}

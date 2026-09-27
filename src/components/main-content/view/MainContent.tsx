@@ -21,7 +21,6 @@ import ErrorBoundary from './ErrorBoundary';
 // chat was the single largest main-thread task on a cold mobile load.
 const FileTree = lazySurface(() => import('../../file-tree/view/FileTree'));
 const StandaloneShell = lazySurface(loadStandaloneShell);
-const GitPanel = lazySurface(() => import('../../git-panel/view/GitPanel'));
 const PluginTabContent = lazySurface(() => import('../../plugins/view/PluginTabContent'));
 const EditorSidebar = lazySurface(loadEditorSidebar);
 
@@ -178,14 +177,6 @@ function MainContent({
                   isActive={isShellTab}
                   autoConnect={isShellTab}
                 />
-              </LazySurface>
-            </div>
-          )}
-
-          {activeTab === 'git' && (
-            <div className="h-full overflow-hidden">
-              <LazySurface>
-                <GitPanel selectedProject={selectedProject} isMobile={isMobile} onFileOpen={handleFileOpen} />
               </LazySurface>
             </div>
           )}

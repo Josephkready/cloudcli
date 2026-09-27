@@ -44,10 +44,6 @@ vi.mock('../../file-tree/view/FileTree', () => ({
   default: () => <div data-testid="file-tree" />,
 }));
 
-vi.mock('../../git-panel/view/GitPanel', () => ({
-  default: () => <div data-testid="git-panel" />,
-}));
-
 vi.mock('../../plugins/view/PluginTabContent', () => ({
   default: () => <div data-testid="plugin-tab" />,
 }));
@@ -179,13 +175,13 @@ describe('MainContent — shell surface lifetime (#295)', () => {
 });
 
 describe('MainContent — the other tabs stay cheap', () => {
-  it('unmounts the files and git surfaces on tab-away, unlike the shell', async () => {
+  it('unmounts the files surface on tab-away, unlike the shell', async () => {
     const { rerender } = render(<MainContent {...baseProps({ activeTab: 'files' })} />);
     await screen.findByTestId('file-tree');
 
-    rerender(<MainContent {...baseProps({ activeTab: 'git' })} />);
+    rerender(<MainContent {...baseProps({ activeTab: 'plugin:example' })} />);
 
-    await screen.findByTestId('git-panel');
+    await screen.findByTestId('plugin-tab');
     expect(screen.queryByTestId('file-tree')).toBeNull();
   });
 

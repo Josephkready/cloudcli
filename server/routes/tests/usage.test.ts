@@ -63,13 +63,13 @@ const countFor = (key: string) =>
 
 test('POST /api/usage records a batch and reports recording as enabled', async () => {
   await withUsageServer(async (post) => {
-    const result = await post({ keys: ['chat.send', 'chat.send', 'git.commit'] });
+    const result = await post({ keys: ['chat.send', 'chat.send', 'chat.model_change'] });
 
     assert.equal(result.status, 200);
     assert.equal(result.body.enabled, true);
     assert.equal(result.body.recorded, 3);
     assert.equal(countFor('chat.send'), 2);
-    assert.equal(countFor('git.commit'), 1);
+    assert.equal(countFor('chat.model_change'), 1);
   });
 });
 
