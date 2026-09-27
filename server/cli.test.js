@@ -341,3 +341,109 @@ test('showUsage --clear removes stored counters and reports how many', async (t)
     assert.ok(afterClear.every((e) => e.useCount === 0));
   });
 });
+
+// ---------------------------------------------------------------------------
+// start command — real process boundary regression test
+// ---------------------------------------------------------------------------
+//
+// Everything above exercises cli.js's internals directly (parseArgs,
+// showStatus, main() dispatch, etc.) by importing the module, which is fast
+// but cannot catch a bug that only exists at a real process boundary: index.js
+// only auto-starts the server when *it* is the process entry point
+// (isMainModule(), comparing realpath(process.argv[1]) to its own
+// import.meta.url). cli.js's `start` command used to do a bare
+// `await import('./index.js')`, relying on that auto-start side effect —
+// which is a no-op once argv[1] is cli.js, so `node server/cli.js` /
+// `node dist-server/server/cli.js [start]` silently never started the
+// server. Only a real spawn of cli.js reproduces that.
+
+async function findFreePort() {
+  const { createServer } = await import('node:net');
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.unref();
+    probe.on('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      if (address === null || typeof address === 'string') {
+        probe.close(() => reject(new Error('cli.test: could not determine a free port')));
+        return;
+      }
+      const { port } = address;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+async function waitForHealth(baseURL, { timeoutMs = 20_000, intervalMs = 200 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      return await fetch(`${baseURL}/health`);
+    } catch (err) {
+      lastError = err;
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+  throw new Error(`cli.test: server never answered /health: ${lastError?.message || lastError}`);
+}
+
+test('cli.js `start` boots the server and answers /health (regression)', async () => {
+  const { spawn } = await import('node:child_process');
+  const cliPath = fileURLToPath(new URL('./cli.js', import.meta.url));
+  const repoRoot = fileURLToPath(new URL('..', import.meta.url));
+  const tsxBin = path.join(repoRoot, 'node_modules', '.bin', 'tsx');
+  const tsconfigPath = path.join(repoRoot, 'server', 'tsconfig.json');
+
+  const home = await mkdtemp(path.join(tmpdir(), 'cloudcli-cli-test-'));
+  const dbPath = path.join(home, 'auth.db');
+  const port = await findFreePort();
+  const baseURL = `http://127.0.0.1:${port}`;
+
+  // Spawned through `tsx` against the real cli.js, the same way
+  // `server:dev`/`npm run usage` do, and the way a packaged install runs the
+  // compiled dist-server/server/cli.js — not by calling cli.js's exported
+  // main()/startServer() in-process, since the whole point is to catch a
+  // launch-path regression that only shows up on a real process boundary.
+  const child = spawn(
+    tsxBin,
+    ['--tsconfig', tsconfigPath, cliPath, 'start', '--port', String(port), '--database-path', dbPath],
+    {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        HOME: home,
+        HOST: '127.0.0.1',
+        VITE_AUTH_DISABLED: 'true',
+        AGENT_MOCK_PROVIDER: 'true',
+        JWT_SECRET: 'cli-test-secret',
+      },
+    },
+  );
+
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+
+  const exitPromise = new Promise((resolve) => {
+    child.on('exit', (code, signal) => resolve({ code, signal }));
+  });
+
+  try {
+    const res = await waitForHealth(baseURL);
+    assert.equal(res.status, 200, `expected /health to return 200, got ${res.status}\nstdout:\n${stdout}\nstderr:\n${stderr}`);
+  } finally {
+    child.kill('SIGTERM');
+    const result = await Promise.race([
+      exitPromise,
+      new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
+    ]);
+    if (!result) {
+      child.kill('SIGKILL');
+    }
+    await rm(home, { recursive: true, force: true });
+  }
+});

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Load environment variables before other imports execute
 import './load-env.js';
-import fs, { promises as fsPromises } from 'fs';
+import fs, { promises as fsPromises, realpathSync } from 'fs';
 import path from 'path';
 import os from 'os';
 import http from 'http';
+import { pathToFileURL } from 'url';
 
 import express from 'express';
 import cors from 'cors';
@@ -657,4 +658,27 @@ async function startServer() {
     }
 }
 
-startServer();
+// Only auto-start the HTTP server (and its DB init / timers / listeners) when
+// this file is run directly (`node server/index.js`, `tsx server/index.js`, the
+// packaged `cloudcli` bin, etc.). Importing it — e.g. from a test that wants
+// `app`/`server`/`wss` without a live port or a real database — must be a pure
+// module load. Compares REALPATHS so a symlinked entry point (npm global
+// installs, `tsx` shims) still matches; falls back to "not main" on any
+// resolution error rather than accidentally auto-starting.
+function isMainModule() {
+    try {
+        const invokedPath = process.argv[1];
+        if (!invokedPath) {
+            return false;
+        }
+        return pathToFileURL(realpathSync(invokedPath)).href === import.meta.url;
+    } catch {
+        return false;
+    }
+}
+
+if (isMainModule()) {
+    startServer();
+}
+
+export { app, server, wss, startServer };

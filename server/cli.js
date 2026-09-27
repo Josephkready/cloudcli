@@ -276,8 +276,15 @@ function showVersion() {
 
 // Start the server
 async function startServer() {
-    // Import and run the server
-    await import('./index.js');
+    // index.js only auto-starts when it detects it was launched directly
+    // (`node server/index.js`), which is false here since argv[1] is this
+    // file. Import it for its exported `startServer` and call that
+    // explicitly instead of relying on the import's side effect. Env vars
+    // (SERVER_PORT, DATABASE_PATH) are already set on process.env by
+    // main() before this runs, and index.js reads them at module load
+    // time, so the import must stay after that assignment.
+    const { startServer: startAppServer } = await import('./index.js');
+    await startAppServer();
 }
 
 // Parse CLI arguments
