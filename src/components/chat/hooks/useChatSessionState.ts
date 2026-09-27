@@ -16,6 +16,7 @@ import { resolveRestoreScrollTop, type ScrollRestoreState } from '../utils/scrol
 import {
   isGestureActive,
   isNearBottom as metricsAreNearBottom,
+  isReaderScroll,
   shouldFollowNewMessages,
   shouldResumeAutoFollow,
   shouldSuspendAutoFollow,
@@ -25,6 +26,9 @@ import {
 import { normalizedToChatMessages } from './useChatMessages';
 
 const MESSAGES_PER_PAGE = 20;
+
+/** Keys that scroll the focused pane — reader input for auto-follow (#540). */
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 const INITIAL_VISIBLE_MESSAGES = 100;
 
 interface UseChatSessionStateArgs {
@@ -153,6 +157,9 @@ export function useChatSessionState({
   const isUserScrolledUpRef = useRef(false);
   const pointerDownRef = useRef(false);
   const pointerDownAtRef = useRef(0);
+  // When the reader last touched, wheeled, clicked or keyed the pane (#540). A
+  // scroll event with none of that behind it is the app moving itself.
+  const lastReaderInputAtRef = useRef(0);
   const autoFollowSuspendedRef = useRef(false);
   const autoFollowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastScrollTopRef = useRef(0);
@@ -443,6 +450,20 @@ export function useChatSessionState({
     setIsUserScrolledUp(!nearBottom);
     isUserScrolledUpRef.current = !nearBottom;
 
+    const now = Date.now();
+    const readerInput = isReaderScroll({
+      pointerDown: pointerIsActive(),
+      lastInputAt: lastReaderInputAtRef.current,
+      now,
+    });
+    // Momentum carries a flick on long after the finger lifts, so an upward
+    // scroll inside the window renews it. Only upward: the app's own follow
+    // writes all move down, and renewing on those would keep the window open
+    // for a whole run after a single touch.
+    if (readerInput && metrics.scrollTop < lastScrollTopRef.current) {
+      lastReaderInputAtRef.current = now;
+    }
+
     // Auto-follow suspension is tracked separately from `isUserScrolledUp`
     // because the two answer different questions. `isUserScrolledUp` drives the
     // scroll-to-bottom button and wants a generous 50px band; following wants
@@ -450,6 +471,7 @@ export function useChatSessionState({
     if (shouldSuspendAutoFollow({
       previousScrollTop: lastScrollTopRef.current,
       metrics,
+      readerInput,
     })) {
       autoFollowSuspendedRef.current = true;
     } else if (shouldResumeAutoFollow(metrics)) {
@@ -468,7 +490,7 @@ export function useChatSessionState({
       const didLoad = await loadOlderMessages(container);
       if (didLoad) topLoadLockRef.current = true;
     }
-  }, [loadOlderMessages, readScrollMetrics]);
+  }, [loadOlderMessages, pointerIsActive, readScrollMetrics]);
 
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) return;
@@ -816,6 +838,11 @@ export function useChatSessionState({
         }
 
         if (targetElement) {
+          // The reader asked to read this message, so stop following before
+          // moving them to it. A programmatic scroll never suspends following
+          // on its own (#540), and without this the next streamed chunk would
+          // drag them straight back down to the bottom.
+          autoFollowSuspendedRef.current = true;
           targetElement.scrollIntoView({ block: 'center', behavior: 'smooth' });
           targetElement.classList.add('search-highlight-flash');
           setTimeout(() => targetElement?.classList.remove('search-highlight-flash'), 4000);
@@ -873,11 +900,13 @@ export function useChatSessionState({
     if (isLoadingMoreRef.current || isLoadingMoreMessages || pendingScrollRestoreRef.current) return undefined;
     if (searchScrollActiveRef.current) return undefined;
 
-    if (isUserScrolledUp) {
+    if (autoFollowSuspendedRef.current) {
       // Nothing to do. New messages are appended *below* the viewport, so a
       // reader who has scrolled away keeps their position for free — and the
       // one case that does move content above them, a load-more prepend, is
-      // handled by `pendingScrollRestoreRef` and bailed on above.
+      // handled by `pendingScrollRestoreRef` and bailed on above. Keyed on the
+      // reader having moved away, not on the distance from the bottom, which
+      // the app changes by itself (#540).
       return undefined;
     }
 
@@ -893,7 +922,6 @@ export function useChatSessionState({
       if (!shouldFollowNewMessages({
         pointerDown: pointerIsActive(),
         autoFollowSuspended: autoFollowSuspendedRef.current,
-        userScrolledUp: isUserScrolledUpRef.current,
       })) return;
       container.scrollTop = container.scrollHeight;
       lastScrollTopRef.current = container.scrollTop;
@@ -937,14 +965,25 @@ export function useChatSessionState({
       if (!shouldFollowNewMessages({
         pointerDown: pointerIsActive(),
         autoFollowSuspended: autoFollowSuspendedRef.current,
-        userScrolledUp: isUserScrolledUpRef.current,
-      })) return;
+      })) {
+        // Not following, so the bottom is moving away from a reader who is
+        // holding still — and a still pane fires no `scroll` event, the only
+        // other place the button's state is computed. Without this a reader
+        // who stopped inside the 50px band never got the button, however far
+        // the run grew below them (#540).
+        const scrolledUp = !metricsAreNearBottom(readScrollMetrics(container));
+        if (scrolledUp !== isUserScrolledUpRef.current) {
+          isUserScrolledUpRef.current = scrolledUp;
+          setIsUserScrolledUp(scrolledUp);
+        }
+        return;
+      }
       container.scrollTop = container.scrollHeight;
       lastScrollTopRef.current = container.scrollTop;
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, [currentSessionId]);
+  }, [currentSessionId, pointerIsActive, readScrollMetrics]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -965,15 +1004,47 @@ export function useChatSessionState({
       pointerDownRef.current = false;
     };
 
+    /*
+     * Reader input, as distinct from scrolling (#540). Only a scroll with one
+     * of these behind it may suspend auto-follow: the virtualizer also writes
+     * `scrollTop` when it re-measures a row, and that must not read as the
+     * reader scrolling up. Touch, wheel, a press or drag on the scrollbar, and
+     * the keyboard's scroll keys are every way a reader moves this pane.
+     */
+    const markReaderInput = () => {
+      lastReaderInputAtRef.current = Date.now();
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.buttons !== 0) markReaderInput();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!SCROLL_KEYS.has(event.key)) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      markReaderInput();
+    };
+
     container.addEventListener('scroll', handleScroll);
     container.addEventListener('touchstart', onPointerDown, { passive: true });
     container.addEventListener('touchend', onPointerUp, { passive: true });
     container.addEventListener('touchcancel', onPointerUp, { passive: true });
+    container.addEventListener('touchstart', markReaderInput, { passive: true });
+    container.addEventListener('touchmove', markReaderInput, { passive: true });
+    container.addEventListener('wheel', markReaderInput, { passive: true });
+    container.addEventListener('pointerdown', markReaderInput, { passive: true });
+    container.addEventListener('pointermove', onPointerMove, { passive: true });
+    document.addEventListener('keydown', onKeyDown);
     return () => {
       container.removeEventListener('scroll', handleScroll);
       container.removeEventListener('touchstart', onPointerDown);
       container.removeEventListener('touchend', onPointerUp);
       container.removeEventListener('touchcancel', onPointerUp);
+      container.removeEventListener('touchstart', markReaderInput);
+      container.removeEventListener('touchmove', markReaderInput);
+      container.removeEventListener('wheel', markReaderInput);
+      container.removeEventListener('pointerdown', markReaderInput);
+      container.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('keydown', onKeyDown);
     };
   }, [handleScroll]);
 

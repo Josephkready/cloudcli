@@ -121,6 +121,38 @@ export const MOCK_STREAM_PREFIX = 'stream:';
 export const MOCK_STREAM_CHUNKS = ['one ', 'two ', 'three ', 'four ', 'five ', 'six '];
 export const MOCK_STREAM_CHUNK_DELAY_MS = 200;
 
+/**
+ * Prompt prefix that holds the reply back: `hold:<ms>:<rest>` waits `<ms>` after
+ * the `thinking` frame, then answers `<rest>` exactly as if it had been sent
+ * alone (so it composes with `echo:`).
+ *
+ * The fixed reply lands within a few milliseconds of the send, which leaves a
+ * browser test no window in which the run is live but its reply has not arrived.
+ * Auto-follow bugs live in that window (cloudcli#540: the pane is nudged while a
+ * run streams, and the reply that lands afterwards must still be followed), so a
+ * spec needs a way to open it. Capped so a typo cannot wedge a worker's run.
+ *
+ * The parametric sibling of `MOCK_HOLD_RUN_SENTINEL`, whose fixed 15s hold is
+ * sized for inspecting the running-turn UI, not for a spec that only needs the
+ * reply to land a couple of seconds late.
+ */
+export const MOCK_HOLD_PREFIX = 'hold:';
+const MOCK_HOLD_MAX_MS = 10_000;
+
+/**
+ * Splits a `hold:<ms>:<rest>` prompt into its delay and the prompt to answer.
+ * Anything that does not match the shape exactly is answered as-is, undelayed.
+ */
+export function parseMockHold(message) {
+  const text = typeof message === 'string' ? message : '';
+  const match = /^hold:(\d+):/.exec(text);
+  if (!match) return { delayMs: 0, message };
+  return {
+    delayMs: Math.min(Number(match[1]), MOCK_HOLD_MAX_MS),
+    message: text.slice(match[0].length),
+  };
+}
+
 /** Cumulative token snapshot the run reports via a `token_budget` status frame. */
 export const MOCK_TOKEN_BUDGET = {
   inputTokens: 100,
@@ -176,6 +208,12 @@ export async function runMockAgentProvider(message, options = {}, writer) {
   if (String(message || '').includes(MOCK_HOLD_RUN_SENTINEL)) {
     await new Promise((resolve) => setTimeout(resolve, MOCK_HOLD_RUN_MS));
   }
+
+  const hold = parseMockHold(message);
+  if (hold.delayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, hold.delayMs));
+  }
+  message = hold.message;
 
   // Three independent hooks, checked in precedence order. The sentinel swaps in the
   // code-surface fixture; `echo:` replies with the rest of the prompt as ONE frame,
