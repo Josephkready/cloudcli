@@ -6,9 +6,24 @@ import { describe, expect, it, vi } from 'vitest';
 import { useFocusTrap } from '../../../shared/view/ui/useFocusTrap';
 import { useOverlayDismiss } from '../../../shared/view/ui/useOverlayDismiss';
 
+const config = vi.hoisted(() => ({
+  IS_PLATFORM: false,
+  DEFAULT_PROJECT_FOR_EMPTY_SHELL: { id: 'empty', name: '', fullPath: '', path: '' },
+}));
+vi.mock('../../../constants/config', () => config);
+
+const capturedShellProps = vi.hoisted(() => ({ current: null as null | { command?: string; onComplete?: (code: number) => void } }));
+
 vi.mock('../../lazy/LazySurface', () => ({
   default: ({ children }: { children: React.ReactNode }) => children,
-  lazySurface: () => () => <button type="button">Terminal control</button>,
+  lazySurface: () => (props: { command?: string; onComplete?: (code: number) => void }) => {
+    capturedShellProps.current = props;
+    return (
+      <button type="button" onClick={() => props.onComplete?.(0)}>
+        Terminal control
+      </button>
+    );
+  },
 }));
 
 vi.mock('../../lazy/surfaceLoaders', () => ({
@@ -79,5 +94,67 @@ describe('ProviderLoginModal stacked over Settings (#279)', () => {
 
     expect(screen.queryByRole('dialog', { name: 'Claude CLI Login' })).not.toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+  });
+});
+
+describe('ProviderLoginModal command and title resolution', () => {
+  it('renders nothing when isOpen is false', () => {
+    const { container } = render(
+      <ProviderLoginModal isOpen={false} onClose={vi.fn()} provider="claude" />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('uses the codex login command and title when not running as the platform', () => {
+    config.IS_PLATFORM = false;
+    render(<ProviderLoginModal isOpen onClose={vi.fn()} provider="codex" />);
+    expect(screen.getByRole('dialog', { name: 'Codex CLI Login' })).toBeInTheDocument();
+    expect(capturedShellProps.current?.command).toBe('codex login');
+  });
+
+  it('uses the codex device-auth command when running as the platform', () => {
+    config.IS_PLATFORM = true;
+    render(<ProviderLoginModal isOpen onClose={vi.fn()} provider="codex" />);
+    expect(capturedShellProps.current?.command).toBe('codex login --device-auth');
+    config.IS_PLATFORM = false;
+  });
+
+  it('uses the antigravity command and title', () => {
+    render(<ProviderLoginModal isOpen onClose={vi.fn()} provider="antigravity" />);
+    expect(screen.getByRole('dialog', { name: 'Antigravity CLI Login' })).toBeInTheDocument();
+    expect(capturedShellProps.current?.command).toBe('agy');
+  });
+
+  it('uses a custom command when provided, overriding the provider default', () => {
+    render(
+      <ProviderLoginModal isOpen onClose={vi.fn()} provider="claude" customCommand="claude login --custom" />,
+    );
+    expect(capturedShellProps.current?.command).toBe('claude login --custom');
+  });
+
+  it('calls onComplete with the exit code but keeps the modal open', async () => {
+    const user = userEvent.setup();
+    const onComplete = vi.fn();
+    render(<ProviderLoginModal isOpen onClose={vi.fn()} provider="claude" onComplete={onComplete} />);
+
+    await user.click(screen.getByRole('button', { name: 'Terminal control' }));
+
+    expect(onComplete).toHaveBeenCalledWith(0);
+    expect(screen.getByRole('dialog', { name: 'Claude CLI Login' })).toBeInTheDocument();
+  });
+
+  it('does not throw when the terminal completes without an onComplete handler', async () => {
+    const user = userEvent.setup();
+    render(<ProviderLoginModal isOpen onClose={vi.fn()} provider="claude" />);
+    await user.click(screen.getByRole('button', { name: 'Terminal control' }));
+    expect(screen.getByRole('dialog', { name: 'Claude CLI Login' })).toBeInTheDocument();
+  });
+
+  it('closes the modal when the close button is clicked', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<ProviderLoginModal isOpen onClose={onClose} provider="claude" />);
+    await user.click(screen.getByRole('button', { name: 'Close login modal' }));
+    expect(onClose).toHaveBeenCalled();
   });
 });

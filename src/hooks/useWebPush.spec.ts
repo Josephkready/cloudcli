@@ -320,11 +320,37 @@ describe('useWebPush', () => {
     expect(result.current.isSubscribed).toBe(true);
   });
 
+  it('does not produce an unhandled rejection when the mount effect\'s getSubscription() rejects', async () => {
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => unhandledRejections.push(reason);
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    try {
+      installSupportedBrowser({ permission: 'granted' });
+      getSubscription.mockRejectedValue(new Error('boom'));
+
+      const { result } = renderHook(() => useWebPush());
+      await act(async () => {
+        await swReady;
+        // Flush the microtask queue so the inner getSubscription() rejection
+        // has a chance to surface (and, on the old code, escape unhandled).
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(result.current.isSubscribed).toBe(false);
+      expect(result.current.error).toBeNull();
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
+
+    expect(unhandledRejections).toEqual([]);
+  });
+
   it('unsubscribe() surfaces a generic failure message for non-Error rejections', async () => {
     installSupportedBrowser({ permission: 'granted' });
-    // Let the mount effect's own getSubscription() call resolve cleanly (its
-    // rejection path is unhandled in the source — see bug note in the report)
-    // and only reject on the later call made from unsubscribe().
+    // Let the mount effect's own getSubscription() call resolve cleanly and
+    // only reject on the later call made from unsubscribe().
     getSubscription.mockResolvedValueOnce(null).mockRejectedValue('boom');
 
     const { result } = renderHook(() => useWebPush());

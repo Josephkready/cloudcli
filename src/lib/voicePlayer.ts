@@ -67,17 +67,36 @@ class VoicePlayer {
   }
 
   // Call synchronously from the click handler so iOS grants the (reused) element playback.
+  // Only mark ourselves unlocked once play() has actually succeeded - a synchronous
+  // throw or a rejected play() promise means priming failed and should be retried
+  // on a later user gesture rather than being silently treated as unlocked.
   unlock() {
     if (this.unlocked) return;
     const audio = this.ensureAudio();
+    let playResult: Promise<void> | undefined;
     try {
-      const p = audio.play();
-      if (p && typeof p.catch === 'function') p.catch(() => {});
-      audio.pause();
-    } catch {
-      /* priming attempt; ignore */
+      playResult = audio.play();
+    } catch (err) {
+      // Synchronous priming failure (e.g. blocked autoplay); leave unlocked
+      // as-is so we retry on the next user gesture. Expected on some
+      // browsers, but worth a trace for debugging a stuck "locked" state.
+      console.warn('Voice unlock priming failed synchronously:', err);
+      return;
     }
-    this.unlocked = true;
+    if (playResult && typeof playResult.then === 'function') {
+      playResult.then(() => {
+        audio.pause();
+        this.unlocked = true;
+      }).catch((err) => {
+        // Priming attempt rejected; leave unlocked as-is so we retry later.
+        console.warn('Voice unlock priming was rejected:', err);
+      });
+    } else {
+      // Some environments' play() doesn't return a promise; treat a non-throwing
+      // synchronous call as success.
+      audio.pause();
+      this.unlocked = true;
+    }
   }
 
   toggle(content: string) {

@@ -6,7 +6,7 @@ import spawn from 'cross-spawn';
 
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
-import { readObjectRecord, readOptionalString } from '@/shared/utils.js';
+import { readObjectRecord, readOptionalString, resolveProviderCliExecutable } from '@/shared/utils.js';
 
 type CodexCredentialsStatus = {
   authenticated: boolean;
@@ -20,9 +20,14 @@ export class CodexProviderAuth implements IProviderAuth {
    * Checks whether Codex is available to the server runtime.
    */
   private checkInstalled(): boolean {
+    const executable = resolveProviderCliExecutable('CODEX_CLI_PATH', 'codex');
     try {
-      spawn.sync('codex', ['--version'], { stdio: 'ignore', timeout: 5000 });
-      return true;
+      // spawnSync (which cross-spawn's `.sync` wraps) does NOT throw for a
+      // missing executable -- it resolves normally with `result.error` set to
+      // the ENOENT error. Checking only for a thrown exception here always
+      // reported "installed" even when the CLI binary does not exist.
+      const result = spawn.sync(executable, ['--version'], { stdio: 'ignore', timeout: 5000 });
+      return !result.error;
     } catch {
       return false;
     }

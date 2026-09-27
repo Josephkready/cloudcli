@@ -109,8 +109,14 @@ export default function EditorSidebar({
         </div>
       )}
 
+      {/*
+        Tailwind's JIT scanner only picks up class names it can see verbatim in source, so a
+        dynamically-built arbitrary value like `min-w-[${MIN_EDITOR_WIDTH}px]` would never be
+        generated. The min-width (and width) for the non-expanded case are therefore set via
+        the inline `style` below instead; only the static `flex-shrink-0` class is needed here.
+      */}
       <div
-        className={`h-full overflow-hidden border-l border-gray-200 dark:border-gray-700 ${useFlexLayout ? 'min-w-0 flex-1' : `min-w-[ flex-shrink-0${MIN_EDITOR_WIDTH}px]`}`}
+        className={`h-full overflow-hidden border-l border-gray-200 dark:border-gray-700 ${useFlexLayout ? 'min-w-0 flex-1' : 'flex-shrink-0'}`}
         style={useFlexLayout ? undefined : { width: `${effectiveWidth}px`, minWidth: `${MIN_EDITOR_WIDTH}px` }}
       >
         <CodeEditor

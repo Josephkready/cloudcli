@@ -67,13 +67,23 @@ export function useWebPush(): WebPushState {
   useEffect(() => {
     if (permission === 'unsupported') return;
 
-    navigator.serviceWorker.ready.then((registration) => {
+    let cancelled = false;
+
+    navigator.serviceWorker.ready.then((registration) => (
       registration.pushManager.getSubscription().then((sub) => {
-        setIsSubscribed(sub !== null);
-      });
-    }).catch(() => {
-      // SW not ready yet
+        if (!cancelled) {
+          setIsSubscribed(sub !== null);
+        }
+      })
+    )).catch((err) => {
+      // SW not ready yet, or getSubscription() rejected - not fatal, the UI
+      // just falls back to showing "not subscribed" until the user retries.
+      console.warn('Could not check existing push subscription:', err);
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [permission]);
 
   const subscribe = useCallback(async () => {

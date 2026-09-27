@@ -48,7 +48,9 @@ describe('MessageCopyControl interactions', () => {
     render(<MessageCopyControl content="   " messageType="user" />);
     fireEvent.click(screen.getByRole('button', { name: /copy/i }));
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Give the async handleCopyClick a turn to run without a real timer wait.
+    await Promise.resolve();
+    await Promise.resolve();
     expect(writeText).not.toHaveBeenCalled();
   });
 
@@ -98,12 +100,16 @@ describe('MessageCopyControl interactions', () => {
   });
 
   it('resets to the default format when messageType changes', () => {
+    // Assistant messages default to 'markdown' (tag "MD"); non-assistant
+    // messages default to 'text' (tag "TXT"). Without the reset-on-
+    // messageType-change effect, changing messageType would leave the format
+    // state at its previous value ("MD") instead of flipping to the new
+    // type's default ("TXT").
     const { rerender } = render(<MessageCopyControl content="x" messageType="assistant" />);
-    fireEvent.click(screen.getByRole('button', { name: /select copy format/i }));
-    fireEvent.click(screen.getByText('Copy as text'));
-    expect(screen.getByText('TXT')).toBeTruthy();
+    expect(screen.getByText('MD')).toBeTruthy();
 
     rerender(<MessageCopyControl content="x" messageType="error" />);
     expect(screen.getByText('TXT')).toBeTruthy();
+    expect(screen.queryByText('MD')).toBeNull();
   });
 });

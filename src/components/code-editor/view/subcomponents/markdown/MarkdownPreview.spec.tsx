@@ -83,6 +83,19 @@ describe('MarkdownPreview', () => {
     expect(container.querySelector('annotation')?.textContent).toBe('a^2 + b^2 = c^2');
   }, 30_000);
 
+  it('renders a blockquote with its styled wrapper', () => {
+    const { container } = renderPreview('> a wise quote');
+    expect(container.querySelector('blockquote')?.textContent?.trim()).toBe('a wise quote');
+  });
+
+  it('renders links as safe, new-tab anchors', () => {
+    const { container } = renderPreview('[docs](https://example.com/docs)');
+    const anchor = container.querySelector('a');
+    expect(anchor?.getAttribute('href')).toBe('https://example.com/docs');
+    expect(anchor?.getAttribute('target')).toBe('_blank');
+    expect(anchor?.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
   it('copies a code block to the clipboard', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeText);
