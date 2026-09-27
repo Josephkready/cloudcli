@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { projectsDb } from '../modules/database/index.js';
-import { queryClaudeSDK } from '../claude-sdk.js';
+import { queryClaudeSDK } from '../modules/providers/list/claude/claude-sdk-runner.js';
 import { spawnAsync } from '../utils/spawnAsync.js';
 import { ResponseCollector } from './response-collector.js';
 

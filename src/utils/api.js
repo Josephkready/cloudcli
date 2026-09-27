@@ -178,8 +178,6 @@ export const api = {
     }),
   readFile: (projectId, filePath) =>
     authenticatedFetch(`/api/projects/${projectId}/file?filePath=${encodeURIComponent(filePath)}`),
-  readFileBlob: (projectId, filePath) =>
-    authenticatedFetch(`/api/projects/${projectId}/files/content?path=${encodeURIComponent(filePath)}`),
   saveFile: (projectId, filePath, content) =>
     authenticatedFetch(`/api/projects/${projectId}/file`, {
       method: 'PUT',
@@ -187,32 +185,6 @@ export const api = {
     }),
   getFiles: (projectId, options = {}) =>
     authenticatedFetch(`/api/projects/${projectId}/files`, options),
-
-  // File operations
-  createFile: (projectId, { path, type, name }) =>
-    authenticatedFetch(`/api/projects/${projectId}/files/create`, {
-      method: 'POST',
-      body: JSON.stringify({ path, type, name }),
-    }),
-
-  renameFile: (projectId, { oldPath, newName }) =>
-    authenticatedFetch(`/api/projects/${projectId}/files/rename`, {
-      method: 'PUT',
-      body: JSON.stringify({ oldPath, newName }),
-    }),
-
-  deleteFile: (projectId, { path, type }) =>
-    authenticatedFetch(`/api/projects/${projectId}/files`, {
-      method: 'DELETE',
-      body: JSON.stringify({ path, type }),
-    }),
-
-  uploadFiles: (projectId, formData) =>
-    authenticatedFetch(`/api/projects/${projectId}/files/upload`, {
-      method: 'POST',
-      body: formData,
-      headers: {}, // Let browser set Content-Type for FormData
-    }),
 
   // Browse filesystem for project suggestions
   browseFilesystem: (dirPath = null) => {

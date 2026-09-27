@@ -54,13 +54,13 @@ test('buildBugReportMetadata omits absent fields instead of emitting undefined',
   const metadata = buildBugReportMetadata({
     appVersion: '1.36.3',
     serverVersion: null,
-    activeTab: 'files',
+    activeTab: 'git',
     project: null,
     session: null,
     environment: {},
   });
 
-  assert.deepEqual(metadata, { appVersion: '1.36.3', activeTab: 'files' });
+  assert.deepEqual(metadata, { appVersion: '1.36.3', activeTab: 'git' });
   assert.ok(!('sessionId' in metadata));
   assert.ok(!('serverVersion' in metadata));
 });

@@ -7,6 +7,7 @@ import test from 'node:test';
 import TOML from '@iarna/toml';
 
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
+import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { AppError } from '@/shared/utils.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
@@ -23,8 +24,11 @@ const readJson = async (filePath: string): Promise<Record<string, unknown>> => {
 };
 
 /**
- * This test covers Claude MCP support for all scopes (user/local/project) and all transports (stdio/http/sse),
- * including add, update/list, and remove operations.
+ * This test covers Claude MCP support for all scopes (user/local/project) and all transports
+ * (stdio/http/sse), including list and remove — the routes still exposed by the API. Servers
+ * are seeded directly through the provider's `mcp.upsertServer` (there is no longer an add/update
+ * route or service method; the write path only remains as plumbing for `removeServer`'s own
+ * read-modify-write cycle and is exercised here to set up fixtures).
  */
 test('providerMcpService handles claude MCP scopes/transports with file-backed persistence', { concurrency: false }, async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-mcp-claude-'));
@@ -33,7 +37,9 @@ test('providerMcpService handles claude MCP scopes/transports with file-backed p
 
   const restoreHomeDir = patchHomeDir(tempRoot);
   try {
-    await providerMcpService.upsertProviderMcpServer('claude', {
+    const claude = providerRegistry.resolveProvider('claude');
+
+    await claude.mcp.upsertServer({
       name: 'claude-user-stdio',
       scope: 'user',
       transport: 'stdio',
@@ -42,7 +48,7 @@ test('providerMcpService handles claude MCP scopes/transports with file-backed p
       env: { API_KEY: 'secret' },
     });
 
-    await providerMcpService.upsertProviderMcpServer('claude', {
+    await claude.mcp.upsertServer({
       name: 'claude-local-http',
       scope: 'local',
       transport: 'http',
@@ -51,7 +57,7 @@ test('providerMcpService handles claude MCP scopes/transports with file-backed p
       workspacePath,
     });
 
-    await providerMcpService.upsertProviderMcpServer('claude', {
+    await claude.mcp.upsertServer({
       name: 'claude-project-sse',
       scope: 'project',
       transport: 'sse',
@@ -66,7 +72,7 @@ test('providerMcpService handles claude MCP scopes/transports with file-backed p
     assert.ok(grouped.project.some((server) => server.name === 'claude-project-sse' && server.transport === 'sse'));
 
     // update behavior is the same upsert route with same name
-    await providerMcpService.upsertProviderMcpServer('claude', {
+    await claude.mcp.upsertServer({
       name: 'claude-project-sse',
       scope: 'project',
       transport: 'sse',
@@ -93,17 +99,20 @@ test('providerMcpService handles claude MCP scopes/transports with file-backed p
 });
 
 /**
- * This test covers Codex MCP support for user/project scopes, stdio/http formats,
- * and validation for unsupported scope/transport combinations.
+ * This test covers Codex MCP capability validation (unsupported scope/transport combinations),
+ * which still lives on the provider's `mcp.upsertServer` even though the write route/service
+ * wrapper around it was removed along with the MCP add form.
  */
-test('providerMcpService handles codex MCP TOML config and capability validation', { concurrency: false }, async () => {
+test('providerMcpService codex provider rejects unsupported scope/transport combinations', { concurrency: false }, async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-mcp-codex-'));
   const workspacePath = path.join(tempRoot, 'workspace');
   await fs.mkdir(workspacePath, { recursive: true });
 
   const restoreHomeDir = patchHomeDir(tempRoot);
   try {
-    await providerMcpService.upsertProviderMcpServer('codex', {
+    const codex = providerRegistry.resolveProvider('codex');
+
+    await codex.mcp.upsertServer({
       name: 'codex-user-stdio',
       scope: 'user',
       transport: 'stdio',
@@ -114,31 +123,14 @@ test('providerMcpService handles codex MCP TOML config and capability validation
       cwd: '/tmp',
     });
 
-    await providerMcpService.upsertProviderMcpServer('codex', {
-      name: 'codex-project-http',
-      scope: 'project',
-      transport: 'http',
-      url: 'https://codex.example.com/mcp',
-      headers: { 'X-Custom-Header': 'value' },
-      envHttpHeaders: { 'X-API-Key': 'MY_API_KEY_ENV' },
-      bearerTokenEnvVar: 'MY_API_TOKEN',
-      workspacePath,
-    });
-
     const userTomlPath = path.join(tempRoot, '.codex', 'config.toml');
     const userConfig = TOML.parse(await fs.readFile(userTomlPath, 'utf8')) as Record<string, unknown>;
     const userServers = userConfig.mcp_servers as Record<string, unknown>;
     const userStdio = userServers['codex-user-stdio'] as Record<string, unknown>;
     assert.equal(userStdio.command, 'python');
 
-    const projectTomlPath = path.join(workspacePath, '.codex', 'config.toml');
-    const projectConfig = TOML.parse(await fs.readFile(projectTomlPath, 'utf8')) as Record<string, unknown>;
-    const projectServers = projectConfig.mcp_servers as Record<string, unknown>;
-    const projectHttp = projectServers['codex-project-http'] as Record<string, unknown>;
-    assert.equal(projectHttp.url, 'https://codex.example.com/mcp');
-
     await assert.rejects(
-      providerMcpService.upsertProviderMcpServer('codex', {
+      codex.mcp.upsertServer({
         name: 'codex-local',
         scope: 'local',
         transport: 'stdio',
@@ -151,7 +143,7 @@ test('providerMcpService handles codex MCP TOML config and capability validation
     );
 
     await assert.rejects(
-      providerMcpService.upsertProviderMcpServer('codex', {
+      codex.mcp.upsertServer({
         name: 'codex-sse',
         scope: 'project',
         transport: 'sse',
@@ -161,57 +153,6 @@ test('providerMcpService handles codex MCP TOML config and capability validation
       (error: unknown) =>
         error instanceof AppError &&
         error.code === 'MCP_TRANSPORT_NOT_SUPPORTED' &&
-        error.statusCode === 400,
-    );
-  } finally {
-    restoreHomeDir();
-    await fs.rm(tempRoot, { recursive: true, force: true });
-  }
-});
-
-/**
- * This test covers the global MCP adder requirement: only http/stdio are allowed and
- * one payload is written to all providers.
- */
-test('providerMcpService global adder writes to all providers and rejects unsupported transports', { concurrency: false }, async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-mcp-global-'));
-  const workspacePath = path.join(tempRoot, 'workspace');
-  await fs.mkdir(workspacePath, { recursive: true });
-
-  const restoreHomeDir = patchHomeDir(tempRoot);
-  try {
-    const globalResult = await providerMcpService.addMcpServerToAllProviders({
-      name: 'global-http',
-      scope: 'project',
-      transport: 'http',
-      url: 'https://global.example.com/mcp',
-      workspacePath,
-    });
-
-    assert.equal(globalResult.length, 3);
-    assert.ok(globalResult.every((entry) => entry.created === true));
-
-    const claudeProject = await readJson(path.join(workspacePath, '.mcp.json'));
-    assert.ok((claudeProject.mcpServers as Record<string, unknown>)['global-http']);
-
-    const codexProject = TOML.parse(await fs.readFile(path.join(workspacePath, '.codex', 'config.toml'), 'utf8')) as Record<string, unknown>;
-    assert.ok((codexProject.mcp_servers as Record<string, unknown>)['global-http']);
-
-    const antigravityProject = await readJson(path.join(workspacePath, '.agents', 'mcp_config.json'));
-    const antigravityServer = (antigravityProject.mcpServers as Record<string, Record<string, unknown>>)['global-http'];
-    assert.equal(antigravityServer.serverUrl, 'https://global.example.com/mcp');
-
-    await assert.rejects(
-      providerMcpService.addMcpServerToAllProviders({
-        name: 'global-sse',
-        scope: 'project',
-        transport: 'sse',
-        url: 'https://example.com/sse',
-        workspacePath,
-      }),
-      (error: unknown) =>
-        error instanceof AppError &&
-        error.code === 'INVALID_GLOBAL_MCP_TRANSPORT' &&
         error.statusCode === 400,
     );
   } finally {

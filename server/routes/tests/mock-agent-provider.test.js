@@ -5,8 +5,10 @@ import {
   MOCK_ASSISTANT_FRAME_COUNT,
   MOCK_ASSISTANT_TEXT,
   MOCK_ECHO_PREFIX,
+  MOCK_HOLD_PREFIX,
   MOCK_STREAM_CHUNKS,
   MOCK_STREAM_PREFIX,
+  parseMockHold,
   runMockAgentProvider,
 } from '../mock-agent-provider.js';
 
@@ -104,5 +106,40 @@ describe('runMockAgentProvider', () => {
     assert.deepEqual(writer.text(), [MOCK_STREAM_CHUNKS.join('')]);
     assert.ok(kinds.indexOf('text') > kinds.indexOf('stream_end'));
     assert.equal(writer.frames.at(-1).kind, 'complete');
+  });
+});
+
+/*
+ * The `hold:<ms>:` seam (cloudcli#540). It opens a window in which a run is live
+ * but its reply has not landed, which is where the auto-follow bugs live. The
+ * prefix must delay the reply and then vanish, leaving the rest of the prompt
+ * to be answered exactly as if it had been sent alone.
+ */
+describe('parseMockHold', () => {
+  it('splits a hold prompt into its delay and the remaining prompt', () => {
+    assert.deepEqual(parseMockHold(`${MOCK_HOLD_PREFIX}250:echo:hi`), { delayMs: 250, message: 'echo:hi' });
+  });
+
+  it('caps the delay so a typo cannot wedge a run', () => {
+    assert.equal(parseMockHold(`${MOCK_HOLD_PREFIX}999999:x`).delayMs, 10_000);
+  });
+
+  it('answers anything not shaped exactly like a hold prompt as-is', () => {
+    for (const message of ['hold:abc:x', 'hold:12', 'say hold:12:x', 'plain']) {
+      assert.deepEqual(parseMockHold(message), { delayMs: 0, message });
+    }
+    assert.deepEqual(parseMockHold(undefined), { delayMs: 0, message: undefined });
+  });
+});
+
+describe('runMockAgentProvider with a hold prefix', () => {
+  it('delays the reply, then answers the rest of the prompt', async () => {
+    const writer = collectingWriter();
+    const started = Date.now();
+
+    await runMockAgentProvider(`${MOCK_HOLD_PREFIX}120:${MOCK_ECHO_PREFIX}held reply`, {}, writer);
+
+    assert.ok(Date.now() - started >= 100, 'the reply should have been held back');
+    assert.deepEqual(writer.text(), ['held reply']);
   });
 });

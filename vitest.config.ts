@@ -16,6 +16,15 @@ import viteConfig from './vite.config.js';
  * `react-syntax-highlighter/dist/esm/styles/prism` (the Markdown chain) can be
  * tested here but crash the raw Node ESM loader used by `tsx --test`.
  */
+/**
+ * `COVERAGE_WHOLE_APP=1` swaps the coverage scope for scripts/coverage-all.mjs:
+ * every app file in src/, server/ and shared/ gets an executable-line count
+ * (vitest instruments files it never executes), written to its own directory
+ * so the component floor gate's `coverage/component` report keeps measuring
+ * the vitest suite alone.
+ */
+const wholeApp = process.env.COVERAGE_WHOLE_APP === '1';
+
 export default defineConfig((configEnv) =>
   mergeConfig(viteConfig(configEnv), {
     test: {
@@ -27,15 +36,22 @@ export default defineConfig((configEnv) =>
       css: false,
       coverage: {
         provider: 'v8',
-        include: ['src/**/*.{ts,tsx}'],
-        exclude: ['src/**/*.spec.{ts,tsx}', 'src/**/*.test.{ts,tsx}', 'src/test/**'],
+        include: wholeApp
+          ? ['src/**/*.{ts,tsx,js,jsx}', 'server/**/*.{ts,js}', 'shared/**/*.{ts,js}']
+          : ['src/**/*.{ts,tsx}'],
+        exclude: [
+          '**/*.spec.{ts,tsx,js,jsx}',
+          '**/*.test.{ts,tsx,js,jsx}',
+          '**/*.d.ts',
+          'src/test/**',
+        ],
         // `text-summary` keeps CI logs readable while the suite is young (a
         // per-file `text` table would be ~370 rows of 0%); the HTML report is
         // there for local drill-down; `lcov` writes `coverage/component/lcov.info`,
         // the machine-readable report the coverage floor gate parses (see
         // scripts/check-coverage-floor.mjs).
         reporter: ['text-summary', 'html', 'lcov'],
-        reportsDirectory: 'coverage/component',
+        reportsDirectory: wholeApp ? 'coverage/whole-app' : 'coverage/component',
       },
     },
   }),

@@ -6,10 +6,9 @@ import { usePaletteOpsRegister } from '../../../contexts/PaletteOpsContext';
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { useFileOpenResolver } from '../../../hooks/useFileOpenResolver';
 import { useEditorSidebar } from '../../code-editor/hooks/useEditorSidebar';
-import { useStickyMount } from '../hooks/useStickyMount';
 import LazySurface, { lazySurface } from '../../lazy/LazySurface';
 import SurfaceSkeleton from '../../lazy/SurfaceSkeleton';
-import { loadEditorSidebar, loadStandaloneShell } from '../../lazy/surfaceLoaders';
+import { loadEditorSidebar } from '../../lazy/surfaceLoaders';
 
 import MainContentHeader from './subcomponents/MainContentHeader';
 import MainContentStateView from './subcomponents/MainContentStateView';
@@ -17,12 +16,9 @@ import ErrorBoundary from './ErrorBoundary';
 
 // Chat is the tab the app opens on, so it stays in the entry chunk. Every other
 // tab — and the editor side panel — is demand-loaded (issue #267): shipping
-// xterm (~390 KB) and CodeMirror (~660 KB) to a session that only ever reads
-// chat was the single largest main-thread task on a cold mobile load.
-const FileTree = lazySurface(() => import('../../file-tree/view/FileTree'));
-const StandaloneShell = lazySurface(loadStandaloneShell);
+// CodeMirror (~660 KB) to a session that only ever reads chat was the single
+// largest main-thread task on a cold mobile load.
 const GitPanel = lazySurface(() => import('../../git-panel/view/GitPanel'));
-const PluginTabContent = lazySurface(() => import('../../plugins/view/PluginTabContent'));
 const EditorSidebar = lazySurface(loadEditorSidebar);
 
 function MainContent({
@@ -58,7 +54,6 @@ function MainContent({
     editingFile,
     editorWidth,
     editorExpanded,
-    hasManualWidth,
     resizeHandleRef,
     handleFileOpen,
     handleCloseEditor,
@@ -73,17 +68,7 @@ function MainContent({
   // real project files before opening them in the in-app editor.
   const resolvedFileOpen = useFileOpenResolver(selectedProject, handleFileOpen);
 
-  const isShellTab = activeTab === 'shell';
-  const isShellMounted = useStickyMount(
-    isShellTab,
-    selectedProject?.fullPath || selectedProject?.path || null,
-  );
-
   usePaletteOpsRegister({
-    openFile: (filePath: string) => {
-      setActiveTab('files');
-      handleFileOpen(filePath);
-    },
     // Opens the editor side panel in place, keeping the current tab (e.g. chat).
     openFileInEditor: (filePath: string) => {
       resolvedFileOpen(filePath);
@@ -152,52 +137,10 @@ function MainContent({
             </ErrorBoundary>
           </div>
 
-          {activeTab === 'files' && (
-            <div className="h-full overflow-hidden">
-              <LazySurface>
-                <FileTree selectedProject={selectedProject} onFileOpen={handleFileOpen} />
-              </LazySurface>
-            </div>
-          )}
-
-          {/*
-            Hidden rather than unmounted once opened (issue #272): rebuilding
-            xterm, its addons, a WebGL context and the pty websocket on every
-            return made repeat opens as expensive as the first. The mount is
-            scoped to the selected project, so at most one terminal is ever
-            alive and it never outlives the project it belongs to. `autoConnect`
-            follows the tab so a hidden shell never spawns a pty on its own.
-          */}
-          {isShellMounted && (
-            <div className={`h-full w-full overflow-hidden ${isShellTab ? 'block' : 'hidden'}`}>
-              <LazySurface>
-                <StandaloneShell
-                  project={selectedProject}
-                  session={selectedSession}
-                  showHeader={false}
-                  isActive={isShellTab}
-                  autoConnect={isShellTab}
-                />
-              </LazySurface>
-            </div>
-          )}
-
           {activeTab === 'git' && (
             <div className="h-full overflow-hidden">
               <LazySurface>
                 <GitPanel selectedProject={selectedProject} isMobile={isMobile} onFileOpen={handleFileOpen} />
-              </LazySurface>
-            </div>
-          )}
-
-          {activeTab.startsWith('plugin:') && (
-            <div className="h-full overflow-hidden">
-              <LazySurface>
-                <PluginTabContent
-                  pluginName={activeTab.replace('plugin:', '')}
-                  selectedProject={selectedProject}
-                  selectedSession={selectedSession}
-                />
               </LazySurface>
             </div>
           )}
@@ -229,13 +172,11 @@ function MainContent({
               isMobile={isMobile}
               editorExpanded={editorExpanded}
               editorWidth={editorWidth}
-              hasManualWidth={hasManualWidth}
               resizeHandleRef={resizeHandleRef}
               onResizeStart={handleResizeStart}
               onCloseEditor={handleCloseEditor}
               onToggleEditorExpand={handleToggleEditorExpand}
               projectPath={selectedProject.path}
-              fillSpace={activeTab === 'files'}
             />
           </LazySurface>
         )}

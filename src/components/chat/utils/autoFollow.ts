@@ -47,6 +47,29 @@ export const UPWARD_INTENT_PX = 2;
  */
 export const MAX_GESTURE_MS = 10_000;
 
+/**
+ * How long after the reader's last scroll input (touch, wheel, pointer, scroll
+ * key) a small upward move is still credited to them.
+ *
+ * The app moves `scrollTop` on its own too: the virtualizer corrects the offset
+ * whenever a re-measured row differs from its estimate, and that write fires a
+ * `scroll` event indistinguishable from a reader's (cloudcli#540). Only a move
+ * with the reader's input behind it may suspend following. Every scroll event
+ * that arrives inside the window renews it, so a flick's momentum — which keeps
+ * scrolling long after the finger lifts — stays credited for as long as it runs.
+ */
+export const READER_INPUT_WINDOW_MS = 300;
+
+/** Is this scroll event plausibly the reader's doing? */
+export function isReaderScroll(input: {
+  pointerDown: boolean;
+  lastInputAt: number;
+  now: number;
+}): boolean {
+  if (input.pointerDown) return true;
+  return input.now - input.lastInputAt <= READER_INPUT_WINDOW_MS;
+}
+
 export interface ScrollMetrics {
   scrollTop: number;
   scrollHeight: number;
@@ -82,10 +105,12 @@ export function isNearBottom(
  * scroll up — 20px, well inside the 50px band — left auto-follow armed, so the
  * next chunk of a streaming run snapped the reader back to the bottom, and the
  * one after that, for as long as the run lasted (#508). Any upward movement
- * past the jitter floor is the reader taking control, so it suspends following
- * regardless of whether a finger is currently on the glass — this is what
- * catches a mouse wheel-up (no pointer) and a flick-and-lift where the finger
- * is already off the glass by the time the next chunk arrives.
+ * past the jitter floor with the reader's input behind it is the reader taking
+ * control, so it suspends following regardless of whether a finger is
+ * currently on the glass — this is what catches a mouse wheel-up (no pointer)
+ * and a flick-and-lift where the finger is already off the glass by the time
+ * the next chunk arrives. "Input behind it" (`readerInput`) is what keeps the
+ * app's own `scrollTop` corrections out (#540).
  *
  * The one non-intent source of an upward movement is a rubber-band / overscroll
  * *settle*: pushing past the bottom and releasing snaps `scrollTop` back UP to
@@ -100,7 +125,17 @@ export function isNearBottom(
 export function shouldSuspendAutoFollow(input: {
   previousScrollTop: number;
   metrics: ScrollMetrics;
+  /** From {@link isReaderScroll}: was there reader input behind this event? */
+  readerInput: boolean;
 }): boolean {
+  // A move nobody asked for is the app moving itself — the virtualizer
+  // correcting `scrollTop` as it re-measures rows, or a reply landing as one
+  // tall message before the follow catches up (#540). Suspending on it stranded
+  // the reader: a few pixels off the bottom it was too far to re-arm and too
+  // close for the scroll-to-bottom button, so the rest of the run slid out of
+  // view unseen. The one programmatic move that must suspend — a search jump —
+  // does so explicitly where it scrolls.
+  if (!input.readerInput) return false;
   if (!isNearBottom(input.metrics)) return true;
   const movedUp = input.metrics.scrollTop < input.previousScrollTop - UPWARD_INTENT_PX;
   if (!movedUp) return false;
@@ -122,16 +157,20 @@ export function shouldResumeAutoFollow(metrics: ScrollMetrics): boolean {
 /**
  * The fire-time check for a scheduled follow. Every input is read fresh from a
  * ref at the moment the timer runs, never captured when it was scheduled.
+ *
+ * Deliberately blind to how far the pane is from the bottom. That distance is
+ * what the scroll-to-bottom button shows, but the app changes it by itself — a
+ * reply landing as one tall message, the virtualizer correcting `scrollTop` —
+ * and gating on it let any such moment stop the follow for good (#540). Whether
+ * the reader moved away is `autoFollowSuspended`, which only their input sets.
  */
 export function shouldFollowNewMessages(state: {
   pointerDown: boolean;
   autoFollowSuspended: boolean;
-  userScrolledUp: boolean;
 }): boolean {
   // A finger on the glass outranks everything: moving the pane mid-gesture is
   // the jump the reader feels, and iOS keeps its own momentum running through
   // a programmatic `scrollTop` write.
   if (state.pointerDown) return false;
-  if (state.autoFollowSuspended) return false;
-  return !state.userScrolledUp;
+  return !state.autoFollowSuspended;
 }

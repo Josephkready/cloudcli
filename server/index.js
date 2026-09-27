@@ -37,15 +37,15 @@ import {
     getPendingApprovalsForSession,
     startStaleToolApprovalReaper,
     stopStaleToolApprovalReaper,
-} from './claude-sdk.js';
+} from './modules/providers/list/claude/claude-sdk-runner.js';
 import {
     queryCodex,
     abortCodexSession,
-} from './openai-codex.js';
+} from './modules/providers/list/codex/codex-runner.js';
 import {
     spawnAntigravity,
     abortAntigravitySession,
-} from './antigravity-cli.js';
+} from './modules/providers/list/antigravity/antigravity-runner.js';
 import {
     stripAnsiSequences,
     normalizeDetectedUrl,
@@ -61,14 +61,12 @@ import agentRoutes from './routes/agent.js';
 import projectModuleRoutes from './modules/projects/projects.routes.js';
 import projectFilesRoutes from './routes/project-files.js';
 import userRoutes from './routes/user.js';
-import pluginsRoutes from './routes/plugins.js';
 import usageRoutes from './routes/usage.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import { pruneOrphanedBrowserMcp } from './modules/providers/services/orphaned-mcp-cleanup.service.js';
 import voiceRoutes from './voice-proxy.js';
 import bugReportRoutes from './routes/bug-report.js';
 import { assetsRoutes } from './modules/assets/index.js';
-import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
 import { initializeDatabase, sessionsDb } from './modules/database/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import {
@@ -150,7 +148,7 @@ const chatAbortFns = {
 // The activation warning is emitted in the "Ready" banner below (next to the
 // AUTH_DISABLED warning), where an operator scanning startup output will see it.
 
-// Single WebSocket server that handles chat, shell, and plugin proxy paths.
+// Single WebSocket server that handles chat and shell paths.
 const wss = createWebSocketServer(server, {
     verifyClient: {
         isPlatform: IS_PLATFORM,
@@ -176,7 +174,6 @@ const wss = createWebSocketServer(server, {
         extractUrlsFromText,
         shouldAutoOpenUrlFromOutput,
     },
-    getPluginPort,
 });
 
 // Make WebSocket server available to routes
@@ -232,9 +229,6 @@ app.use('/api/settings', authenticateToken, settingsRoutes);
 
 // User API Routes (protected)
 app.use('/api/user', authenticateToken, userRoutes);
-
-// Plugins API Routes (protected)
-app.use('/api/plugins', authenticateToken, pluginsRoutes);
 
 // Local feature-usage counters (protected, issue #248)
 app.use('/api/usage', authenticateToken, usageRoutes);
@@ -563,11 +557,6 @@ async function startServer() {
             // Start the AI session-title worker (opt-in; no-op unless enabled)
             startAiSessionTitler();
 
-            // Start server-side plugin processes for enabled plugins
-            startEnabledPluginServers().catch(err => {
-                console.error('[Plugins] Error during startup:', err.message);
-            });
-
             // One-time cleanup of the orphaned 'cloudcli-browser' MCP registration
             // left in provider configs by the removed browser-use feature (#95).
             pruneOrphanedBrowserMcp().catch(err => {
@@ -606,7 +595,6 @@ async function startServer() {
         // shutdown sequence while the drain is still in progress.
         let shuttingDown = false;
 
-        // Clean up plugin processes on shutdown
         const shutdownRuntimeServices = async () => {
             if (shuttingDown) {
                 return;
@@ -657,11 +645,6 @@ async function startServer() {
                 await closeSessionsWatcher();
             } catch (err) {
                 console.error('[Sessions watcher] Error stopping watcher during shutdown:', err?.message || err);
-            }
-            try {
-                await stopAllPlugins();
-            } catch (err) {
-                console.error('[Plugins] Error stopping plugins during shutdown:', err?.message || err);
             }
             try {
                 await removeLocalServerMarker(LOCAL_SERVER_MARKER_PATH, process.pid);
