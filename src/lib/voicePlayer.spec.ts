@@ -73,10 +73,14 @@ describe('voicePlayer', () => {
   });
 
   describe('unlock', () => {
-    it('primes the audio element by playing then immediately pausing it, only once', async () => {
+    it('primes the audio element by playing then pausing it once play() resolves, only once', async () => {
       const { voicePlayer } = await freshModules();
       voicePlayer.unlock();
       expect(currentAudio.play).toHaveBeenCalledTimes(1);
+
+      // pause() only happens once the play() promise resolves.
+      await Promise.resolve();
+      await Promise.resolve();
       expect(currentAudio.pause).toHaveBeenCalledTimes(1);
 
       voicePlayer.unlock();
@@ -84,7 +88,7 @@ describe('voicePlayer', () => {
       expect(currentAudio.play).toHaveBeenCalledTimes(1);
     });
 
-    it('swallows a synchronous throw from audio.play() during priming', async () => {
+    it('swallows a synchronous throw from audio.play() during priming and stays locked', async () => {
       const { voicePlayer } = await freshModules();
       currentAudio.play = vi.fn(() => {
         throw new Error('NotAllowedError');
@@ -92,6 +96,34 @@ describe('voicePlayer', () => {
 
       expect(() => voicePlayer.unlock()).not.toThrow();
       expect(currentAudio.pause).not.toHaveBeenCalled();
+
+      // Since priming failed, a later unlock() call should retry rather than
+      // treat us as already unlocked.
+      currentAudio.play = vi.fn(() => {
+        currentAudio.paused = false;
+        return Promise.resolve();
+      });
+      voicePlayer.unlock();
+      expect(currentAudio.play).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not mark itself unlocked when audio.play() returns a rejected promise', async () => {
+      const { voicePlayer } = await freshModules();
+      currentAudio.play = vi.fn(() => Promise.reject(new Error('NotAllowedError')));
+
+      voicePlayer.unlock();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(currentAudio.pause).not.toHaveBeenCalled();
+
+      // Still locked, so a later unlock() call retries instead of being a no-op.
+      currentAudio.play = vi.fn(() => {
+        currentAudio.paused = false;
+        return Promise.resolve();
+      });
+      voicePlayer.unlock();
+      expect(currentAudio.play).toHaveBeenCalledTimes(1);
     });
   });
 
