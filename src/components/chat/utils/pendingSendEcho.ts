@@ -20,7 +20,7 @@ import { partitionPendingSends, type PendingSend } from './pendingSends';
  * it, and threading a value only to satisfy the type would mean inventing one
  * at every call site.
  */
-export function pendingSendAsMessage(entry: PendingSend, sessionId: string): NormalizedMessage {
+function pendingSendAsMessage(entry: PendingSend, sessionId: string): NormalizedMessage {
   return {
     id: entry.id,
     sessionId,

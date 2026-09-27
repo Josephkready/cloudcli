@@ -50,7 +50,7 @@ export const DEFAULTS: UiPreferences = {
   voiceEnabled: false,
 };
 
-export const PREFERENCE_KEYS = Object.keys(DEFAULTS) as UiPreferenceKey[];
+const PREFERENCE_KEYS = Object.keys(DEFAULTS) as UiPreferenceKey[];
 const VALID_KEYS = new Set<UiPreferenceKey>(PREFERENCE_KEYS); // prevents unknown keys from being written
 
 export const SYNC_EVENT = 'ui-preferences:sync';

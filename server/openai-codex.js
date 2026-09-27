@@ -9,8 +9,6 @@
  *
  * - queryCodex(command, options, ws) - Execute a prompt with streaming via WebSocket
  * - abortCodexSession(sessionId) - Cancel an active session
- * - isCodexSessionActive(sessionId) - Check if a session is running
- * - getActiveCodexSessions() - List all active sessions
  */
 
 import { Codex } from '@openai/codex-sdk';
@@ -463,36 +461,6 @@ export function abortCodexSession(sessionId) {
   }
 
   return true;
-}
-
-/**
- * Check if a session is active
- * @param {string} sessionId - Session ID to check
- * @returns {boolean} - Whether session is active
- */
-export function isCodexSessionActive(sessionId) {
-  const session = activeCodexSessions.get(sessionId);
-  return session?.status === 'running';
-}
-
-/**
- * Get all active sessions
- * @returns {Array} - Array of active session info
- */
-export function getActiveCodexSessions() {
-  const sessions = [];
-
-  for (const [id, session] of activeCodexSessions.entries()) {
-    if (session.status === 'running') {
-      sessions.push({
-        id,
-        status: session.status,
-        startedAt: session.startedAt
-      });
-    }
-  }
-
-  return sessions;
 }
 
 // Clean up old completed sessions periodically.

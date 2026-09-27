@@ -172,7 +172,7 @@ export async function shrinkVisualViewport(page: Page, keyboardHeight: number): 
  * would. Paired with {@link shrinkVisualViewport} so a test can assert the
  * retraction as well as the extension.
  */
-export async function restoreVisualViewport(page: Page): Promise<void> {
+async function restoreVisualViewport(page: Page): Promise<void> {
   await page.evaluate(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;

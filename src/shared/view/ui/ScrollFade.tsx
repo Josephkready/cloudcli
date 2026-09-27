@@ -18,7 +18,7 @@ import { computeScrollFade, type ScrollFadeState } from './scrollFadeState';
  * overflows on mount paints with its edge fade already present — matching the
  * pre-extraction behaviour — rather than fading it in one frame late.
  */
-export function useScrollFade<T extends HTMLElement>(resetKey?: unknown) {
+function useScrollFade<T extends HTMLElement>(resetKey?: unknown) {
   const scrollRef = useRef<T>(null);
   const [state, setState] = useState<ScrollFadeState>({
     canScrollLeft: false,

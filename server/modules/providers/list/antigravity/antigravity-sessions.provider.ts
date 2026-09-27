@@ -24,7 +24,7 @@ function parseTimestamp(value: unknown): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
-export function normalizeAntigravityHistoryStep(
+function normalizeAntigravityHistoryStep(
   rawStep: unknown,
   sessionId: string | null,
 ): NormalizedMessage[] {

@@ -18,7 +18,7 @@ interface ReasoningContextValue {
 
 const ReasoningContext = React.createContext<ReasoningContextValue | null>(null);
 
-export const useReasoning = () => {
+const useReasoning = () => {
   const context = React.useContext(ReasoningContext);
   if (!context) {
     throw new Error('Reasoning components must be used within Reasoning');

@@ -22,7 +22,7 @@ type WebSocketServerDependencies = {
  * silently torn down even when the UI is active, causing repeated reconnect
  * cycles. ws library heartbeat is opt-in.
  */
-export const HEARTBEAT_INTERVAL_MS = 30_000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
 /** The subset of a `ws` socket the heartbeat drives. */
 type HeartbeatSocket = {

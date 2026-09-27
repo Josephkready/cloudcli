@@ -23,7 +23,7 @@ const TITLE_PREFIX = 'Bug: ';
  * This is an allowlist rather than a passthrough: the payload is client-supplied,
  * so unknown keys are dropped instead of being echoed into a public issue.
  */
-export const METADATA_FIELDS = [
+const METADATA_FIELDS = [
   ['appVersion', 'App version'],
   ['serverVersion', 'Server version'],
   ['provider', 'Provider'],

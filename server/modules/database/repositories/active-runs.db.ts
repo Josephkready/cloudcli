@@ -9,9 +9,9 @@ import type { AnyRecord } from '@/shared/types.js';
  * - `interrupted` — a `running`/`queued` row left behind by a previous process,
  *   flagged by the startup reconcile so the user can resume it (issue #70).
  */
-export type ActiveRunStatus = 'running' | 'queued' | 'interrupted';
+type ActiveRunStatus = 'running' | 'queued' | 'interrupted';
 
-export type ActiveRunRow = {
+type ActiveRunRow = {
   id: number;
   session_id: string;
   provider: string;

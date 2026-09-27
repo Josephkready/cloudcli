@@ -490,5 +490,3 @@ export const WebSocketProvider = ({ children }: { children: React.ReactNode }) =
     </WebSocketContext.Provider>
   );
 };
-
-export default WebSocketContext;

@@ -59,7 +59,7 @@ export function terminateAntigravityChild(child, graceMs = ANTIGRAVITY_ABORT_GRA
 }
 const MAX_PROVIDER_ERROR_LENGTH = 2_000;
 
-export function sanitizeAntigravityError(value) {
+function sanitizeAntigravityError(value) {
   const message = readString(value) || 'Antigravity CLI failed';
   return message
     .replace(/(authorization\s*:\s*bearer\s+)\S+/gi, '$1[REDACTED]')
@@ -438,12 +438,4 @@ export function abortAntigravitySession(sessionId) {
     return false;
   }
   return terminateAntigravityChild(child);
-}
-
-export function isAntigravitySessionActive(sessionId) {
-  return activeAntigravityProcesses.has(sessionId);
-}
-
-export function getActiveAntigravitySessions() {
-  return [...activeAntigravityProcesses.keys()];
 }

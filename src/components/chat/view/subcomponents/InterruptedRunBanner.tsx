@@ -44,5 +44,3 @@ export function InterruptedRunBanner({
     </div>
   );
 }
-
-export default InterruptedRunBanner;

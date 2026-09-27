@@ -137,7 +137,6 @@ export function useChatSessionState({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [searchTarget, setSearchTarget] = useState<{ timestamp?: string; uuid?: string; snippet?: string } | null>(null);
   const searchScrollActiveRef = useRef(false);
-  const isLoadingSessionRef = useRef(false);
   const isLoadingMoreRef = useRef(false);
   const allMessagesLoadedRef = useRef(false);
   const topLoadLockRef = useRef(false);

@@ -14,7 +14,7 @@ import type { LLMProvider } from '@/shared/types.js';
  * subset of fields. Providers that don't surface usage data return
  * `unsupported: true` so the frontend can render an empty/disabled state.
  */
-export type SessionTokenUsageResponse = {
+type SessionTokenUsageResponse = {
   used: number;
   total: number;
   breakdown?: {

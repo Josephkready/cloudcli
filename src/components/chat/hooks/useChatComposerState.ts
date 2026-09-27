@@ -26,6 +26,8 @@ import {
 import { appendPendingSend, makePendingSendId, markPendingSendDispatched } from '../utils/pendingSends';
 import { decideQueueFlush } from '../utils/queueFlush';
 import { resolveEnterKeyAction } from '../utils/enterKeyAction';
+import { MAX_IMAGE_ATTACHMENT_COUNT, partitionImageFiles } from '../utils/imageAttachments';
+import { getNotificationSessionSummary } from '../utils/sessionSummary';
 import type {
   ChatMessage,
   PendingPermissionRequest,
@@ -250,24 +252,6 @@ export const reconcileQueuedDraftsFromStorage = (
       ? { ...reused, options: message.options }
       : { id: makeId(), content: message.content, images: [], options: message.options };
   });
-};
-
-const getNotificationSessionSummary = (
-  selectedSession: ProjectSession | null,
-  fallbackInput: string,
-): string | null => {
-  const sessionSummary = selectedSession?.summary || selectedSession?.name || selectedSession?.title;
-  if (typeof sessionSummary === 'string' && sessionSummary.trim()) {
-    const normalized = sessionSummary.replace(/\s+/g, ' ').trim();
-    return normalized.length > 80 ? `${normalized.slice(0, 77)}...` : normalized;
-  }
-
-  const normalizedFallback = fallbackInput.replace(/\s+/g, ' ').trim();
-  if (!normalizedFallback) {
-    return null;
-  }
-
-  return normalizedFallback.length > 80 ? `${normalizedFallback.slice(0, 77)}...` : normalizedFallback;
 };
 
 export function useChatComposerState({
@@ -617,37 +601,21 @@ export function useChatComposerState({
   }, []);
 
   const handleImageFiles = useCallback((files: File[]) => {
-    const validFiles = files.filter((file) => {
-      try {
-        if (!file || typeof file !== 'object') {
-          console.warn('Invalid file object:', file);
-          return false;
-        }
+    const { validFiles, errors } = partitionImageFiles(files);
 
-        if (!file.type || !file.type.startsWith('image/')) {
-          return false;
+    if (errors.length > 0) {
+      setImageErrors((previous) => {
+        const next = new Map(previous);
+        for (const { fileName, message } of errors) {
+          next.set(fileName, message);
         }
-
-        if (!file.size || file.size > 5 * 1024 * 1024) {
-          const fileName = file.name || 'Unknown file';
-          setImageErrors((previous) => {
-            const next = new Map(previous);
-            next.set(fileName, 'File too large (max 5MB)');
-            return next;
-          });
-          return false;
-        }
-
-        return true;
-      } catch (error) {
-        console.error('Error validating file:', error, file);
-        return false;
-      }
-    });
+        return next;
+      });
+    }
 
     if (validFiles.length > 0) {
       recordFeatureUse('chat.image_attach');
-      setAttachedImages((previous) => [...previous, ...validFiles].slice(0, 5));
+      setAttachedImages((previous) => [...previous, ...validFiles].slice(0, MAX_IMAGE_ATTACHMENT_COUNT));
     }
   }, []);
 

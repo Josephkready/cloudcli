@@ -61,7 +61,7 @@ export const shouldAutoReload = (input: {
 }): boolean => input.newBuildAvailable && input.isIdle && input.becameVisibleAfterHidden;
 
 /** localStorage prefix the chat composer persists its draft under (`useChatComposerState`). */
-export const DRAFT_INPUT_PREFIX = 'draft_input_';
+const DRAFT_INPUT_PREFIX = 'draft_input_';
 
 /**
  * Whether any project has unsent composer text, by scanning localStorage for the

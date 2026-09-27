@@ -69,13 +69,3 @@ export const CONFIRMATION_ICON_CONTAINER_CLASSES: Record<ConfirmActionType, stri
   deleteBranch: 'bg-red-100 dark:bg-red-900/30',
 };
 
-export const CONFIRMATION_ICON_CLASSES: Record<ConfirmActionType, string> = {
-  discard: 'text-red-600 dark:text-red-400',
-  delete: 'text-red-600 dark:text-red-400',
-  commit: 'text-yellow-600 dark:text-yellow-400',
-  pull: 'text-yellow-600 dark:text-yellow-400',
-  push: 'text-yellow-600 dark:text-yellow-400',
-  publish: 'text-yellow-600 dark:text-yellow-400',
-  revertLocalCommit: 'text-yellow-600 dark:text-yellow-400',
-  deleteBranch: 'text-red-600 dark:text-red-400',
-};

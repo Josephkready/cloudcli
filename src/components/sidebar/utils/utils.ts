@@ -7,7 +7,7 @@ import type { ProjectSortOrder, SettingsProject, SessionViewModel, SessionWithPr
 
 // Session count is the default: the projects with the most sessions are the
 // ones actually worked in, so they lead the list unless the user picked a mode.
-export const DEFAULT_PROJECT_SORT_ORDER: ProjectSortOrder = 'count';
+const DEFAULT_PROJECT_SORT_ORDER: ProjectSortOrder = 'count';
 
 const normalizeProjectSortOrder = (value: unknown): ProjectSortOrder => {
   return value === 'name' || value === 'date' || value === 'count'

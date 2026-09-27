@@ -6,7 +6,7 @@ const AudioContextConstructor =
 
 let audioContext: AudioContext | null = null;
 
-export const isNotificationSoundEnabled = (): boolean => {
+const isNotificationSoundEnabled = (): boolean => {
   if (typeof localStorage === 'undefined') {
     return true;
   }
