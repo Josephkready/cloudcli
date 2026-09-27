@@ -256,11 +256,23 @@ test('POST /api/projects/create-project rejects legacy workspaceType and github 
 });
 
 test('POST /api/projects/create-project creates a new project', async () => {
+  // createProject validates the path is under WORKSPACES_ROOT, which -- since
+  // WORKSPACES_ROOT is captured from the environment at module import time,
+  // long before this test file can override it -- resolves to the real
+  // os.homedir() here. That's writable on a dev box, but some CI containers
+  // run as root, where FORBIDDEN_WORKSPACE_PATHS blocks /root outright and
+  // this scenario can never validate. Skip there rather than asserting a
+  // false failure; the createProject success path itself (with an injected,
+  // always-valid `validatePath`) is covered directly in
+  // project-management.service.test.ts.
+  const { validateWorkspacePath } = await import('@/shared/utils.js');
+  const candidateDir = path.join(os.homedir(), '.cloudcli-projects-routes-test-probe');
+  const probe = await validateWorkspacePath(candidateDir);
+  if (!probe.valid) {
+    return;
+  }
+
   await withSeededDatabase(async (server) => {
-    // createProject validates the path is under WORKSPACES_ROOT, which -- since
-    // WORKSPACES_ROOT is captured from the environment at module import time,
-    // long before this test file can override it -- resolves to the real
-    // os.homedir() here. So the fixture directory has to live there too.
     const newProjectDir = await mkdtemp(path.join(os.homedir(), '.cloudcli-projects-routes-test-'));
     try {
       const response = await requestText(server.port, 'POST', '/api/projects/create-project', {

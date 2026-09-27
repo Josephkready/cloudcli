@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import {
@@ -21,6 +21,15 @@ import {
 } from '../agent.js';
 
 const execFileAsync = promisify(execFile);
+
+// A handful of these tests shell out to a real `git` binary to exercise
+// getGitRemoteUrl/getCommitMessages/cloneGitHubRepo end to end. Some CI
+// containers (e.g. slim Node images) don't ship `git`, so probe for it once
+// and skip those specific tests there rather than failing the gate on an
+// environment gap -- the "git missing entirely" error path is still covered
+// separately (see the "not a valid git repository" test below, which doesn't
+// require git to be present).
+const gitAvailable = spawnSync('git', ['--version'], { stdio: 'ignore' }).error === undefined;
 
 // ---------------------------------------------------------------------------
 // Pure functions
@@ -164,40 +173,40 @@ async function makeTempGitRepo(remoteUrl) {
   return dir;
 }
 
-test('getGitRemoteUrl resolves the origin remote of a real repo', async (t) => {
+test('getGitRemoteUrl resolves the origin remote of a real repo', { skip: !gitAvailable }, async (t) => {
   const dir = await makeTempGitRepo('https://github.com/foo/bar.git');
   t.after(() => rm(dir, { recursive: true, force: true }));
   const url = await getGitRemoteUrl(dir);
   assert.equal(url, 'https://github.com/foo/bar.git');
 });
 
-test('getGitRemoteUrl rejects when there is no such remote', async (t) => {
+test('getGitRemoteUrl rejects when there is no such remote', { skip: !gitAvailable }, async (t) => {
   const dir = await makeTempGitRepo(null);
   t.after(() => rm(dir, { recursive: true, force: true }));
   await assert.rejects(getGitRemoteUrl(dir), /Failed to get git remote/);
 });
 
-test('getCommitMessages returns recent commit subjects newest first', async (t) => {
+test('getCommitMessages returns recent commit subjects newest first', { skip: !gitAvailable }, async (t) => {
   const dir = await makeTempGitRepo(null);
   t.after(() => rm(dir, { recursive: true, force: true }));
   const messages = await getCommitMessages(dir, 5);
   assert.deepEqual(messages, ['second commit', 'first commit']);
 });
 
-test('getCommitMessages rejects for a non-git directory', async (t) => {
+test('getCommitMessages rejects for a non-git directory', { skip: !gitAvailable }, async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), 'agent-nogit-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   await assert.rejects(getCommitMessages(dir, 5), /Failed to get commit messages/);
 });
 
-test('cloneGitHubRepo reuses an existing repo when the remote URL already matches', async (t) => {
+test('cloneGitHubRepo reuses an existing repo when the remote URL already matches', { skip: !gitAvailable }, async (t) => {
   const dir = await makeTempGitRepo('https://github.com/foo/bar.git');
   t.after(() => rm(dir, { recursive: true, force: true }));
   const result = await cloneGitHubRepo('https://github.com/foo/bar.git', null, dir);
   assert.equal(result, path.resolve(dir));
 });
 
-test('cloneGitHubRepo rejects when the directory already exists with a different repo', async (t) => {
+test('cloneGitHubRepo rejects when the directory already exists with a different repo', { skip: !gitAvailable }, async (t) => {
   const dir = await makeTempGitRepo('https://github.com/foo/bar.git');
   t.after(() => rm(dir, { recursive: true, force: true }));
   await assert.rejects(
