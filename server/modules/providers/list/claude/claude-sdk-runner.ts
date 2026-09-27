@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { Query } from '@anthropic-ai/claude-agent-sdk';
+import type { Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
 import { buildClaudeUserContent, normalizeImageDescriptors } from '@/shared/image-attachments.js';
 import { CLAUDE_FALLBACK_MODELS } from '@/modules/providers/list/claude/claude-models.provider.js';
@@ -675,7 +675,7 @@ export function extractTokenBudget(sdkMessage: unknown): TokenBudget | null {
  * whose content carries the prompt text plus one base64 `image` block per
  * attachment (read from the global `~/.cloudcli/assets` folder).
  */
-async function buildPromptPayload(command: string, images: unknown, cwd: string | undefined): Promise<string | AsyncIterable<AnyRecord>> {
+async function buildPromptPayload(command: string, images: unknown, cwd: string | undefined): Promise<string | AsyncIterable<SDKUserMessage>> {
   if (normalizeImageDescriptors(images).length === 0) {
     return command;
   }
@@ -686,7 +686,8 @@ async function buildPromptPayload(command: string, images: unknown, cwd: string 
       type: 'user',
       message: {
         role: 'user',
-        content
+        // Our image blocks type media_type as string; the SDK wants its image MIME union.
+        content: content as SDKUserMessage['message']['content']
       },
       parent_tool_use_id: null,
       timestamp: new Date().toISOString()
@@ -786,9 +787,8 @@ export async function queryClaudeSDK(command: string, options: ClaudeCliOptions 
   const emitNotification = (event: AnyRecord) => {
     notifyUserIfEnabled({
       userId: ws?.userId || null,
-      writer: ws,
       event
-    } as any);
+    });
   };
 
   try {
@@ -834,7 +834,7 @@ export async function queryClaudeSDK(command: string, options: ClaudeCliOptions 
             severity: 'warning',
             requiresUserAction: true,
             dedupeKey: `claude:hook:notification:${capturedSessionId || sessionId || 'none'}:${message}`
-          } as any));
+          }));
           return {};
         }]
       }]
@@ -880,7 +880,7 @@ export async function queryClaudeSDK(command: string, options: ClaudeCliOptions 
         severity: 'warning',
         requiresUserAction: true,
         dedupeKey: `claude:permission:${capturedSessionId || sessionId || 'none'}:${requestId}`
-      } as any));
+      }));
 
       // Mark the run blocked so the sidebar ranks it "needs attention" while it
       // waits on the user. By default the wait is indefinite (terminal parity,
@@ -945,7 +945,7 @@ export async function queryClaudeSDK(command: string, options: ClaudeCliOptions 
       let queryInstance: Query;
       try {
         queryInstance = query({
-          prompt: (await createPrompt()) as any,
+          prompt: await createPrompt(),
           options: sdkOptions
         });
       } catch (hookError) {
@@ -954,7 +954,7 @@ export async function queryClaudeSDK(command: string, options: ClaudeCliOptions 
         console.warn('Failed to initialize Claude query with hooks, retrying without hooks:', (hookError as AnyRecord)?.message || hookError);
         delete sdkOptions.hooks;
         queryInstance = query({
-          prompt: (await createPrompt()) as any,
+          prompt: await createPrompt(),
           options: sdkOptions
         });
       }

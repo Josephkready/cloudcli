@@ -44,6 +44,18 @@ function isDuplicate(event) {
   return false;
 }
 
+/**
+ * @param {{
+ *   provider: string,
+ *   sessionId?: string | null,
+ *   kind?: string,
+ *   code?: string,
+ *   meta?: Record<string, unknown>,
+ *   severity?: string,
+ *   dedupeKey?: string | null,
+ *   requiresUserAction?: boolean,
+ * }} params
+ */
 function createNotificationEvent({
   provider,
   sessionId = null,
@@ -213,6 +225,9 @@ const notificationChannels = [
   }
 ];
 
+/**
+ * @param {{ userId: number | string | null | undefined, event: object | null | undefined }} params
+ */
 function notifyUserIfEnabled({ userId, event }) {
   if (!userId || !event) {
     return;
