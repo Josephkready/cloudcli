@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
   ChangeEvent,
   Dispatch,
@@ -595,7 +595,9 @@ export function useChatComposerState({
     ],
   );
 
-  useEffect(() => {
+  // Layout effects run before every passive effect, so sub-hooks called earlier
+  // (useQueuedDrafts' auto-drain) always see the current handleSubmit.
+  useLayoutEffect(() => {
     handleSubmitRef.current = handleSubmit;
   }, [handleSubmit]);
 
