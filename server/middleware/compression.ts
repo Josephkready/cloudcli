@@ -18,7 +18,7 @@
 // not mounted by hand: `mountStaticAssets()` at the bottom of this file owns the
 // order of every static handler, and both server/index.js and the tests use it.
 
-import fs from 'node:fs';
+import { promises as fsPromises } from 'node:fs';
 import path from 'node:path';
 
 import compression from 'compression';
@@ -150,6 +150,23 @@ export function createPrecompressedAssets({ root }: { root: string }): RequestHa
     const resolvedRoot = path.resolve(root);
 
     return function precompressedAssets(req: Request, res: Response, next: NextFunction): void {
+        void handlePrecompressedAssets(req, res, next, resolvedRoot);
+    };
+}
+
+/**
+ * Async body of `createPrecompressedAssets`'s middleware. Split out so the
+ * outer function keeps its synchronous `RequestHandler` signature (Express
+ * doesn't await handlers) while the actual sibling-file check — previously a
+ * blocking `fs.statSync` on every precompressible-extension request — runs
+ * off the main thread via `fs.promises.stat`.
+ */
+async function handlePrecompressedAssets(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+    resolvedRoot: string,
+): Promise<void> {
         if (req.method !== 'GET' && req.method !== 'HEAD') {
             next();
             return;
@@ -188,7 +205,7 @@ export function createPrecompressedAssets({ root }: { root: string }): RequestHa
 
         const suffix = ENCODING_FILE_SUFFIXES[encoding];
         try {
-            if (!fs.statSync(`${assetPath}${suffix}`).isFile()) {
+            if (!(await fsPromises.stat(`${assetPath}${suffix}`)).isFile()) {
                 next();
                 return;
             }
@@ -199,7 +216,6 @@ export function createPrecompressedAssets({ root }: { root: string }): RequestHa
 
         req.url = `${pathname}${suffix}${suffixedQuery}`;
         next();
-    };
 }
 
 /**
