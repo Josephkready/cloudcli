@@ -30,6 +30,13 @@
 //   5. Positive controls, so the gate cannot pass vacuously if the marker
 //      format or the file layout changes: a registered grammar IS present in
 //      the entry chunk, and KaTeX and mermaid ARE still shipped on demand.
+//   6. (perf-audit WP7) No react-markdown/remark-gfm/micromark/mdast/unified
+//      code — the ~450 KB markdown-rendering stack — appears in the entry JS
+//      chunk, with a positive control that it still ships on demand.
+//   7. (perf-audit WP7) BugReportDialog, CommandResultModal and
+//      AskUserQuestionPanel — surfaces reachable far less often than chat
+//      itself — do not appear in the entry JS chunk, each with a positive
+//      control that it still ships on demand.
 //
 // USAGE
 //   npm run build:client && npm run check:bundle
@@ -83,6 +90,43 @@ export function containsGrammar(source, name) {
  * appear nowhere in application code.
  */
 const MERMAID_MARKERS = ['stateDiagram-v2', 'flowchart-v2', 'erDiagram', 'quadrantChart', 'sequenceDiagram'];
+
+/**
+ * micromark's own internal construct names (perf-audit package WP7).
+ *
+ * `name:"codeFenced"` etc. are the literal `name` property micromark's
+ * tokenizer constructs register themselves under — stable across the
+ * micromark/mdast/unified/react-markdown stack's minified output because
+ * they are read back by string, not just assigned, so the minifier cannot
+ * rename them away. This is the single biggest chunk in the whole app
+ * (~450 KB pre-minify: react-markdown + remark-gfm + micromark + mdast +
+ * unified), so a static import putting it back in the entry chunk would be
+ * the single worst regression this gate can catch.
+ */
+const MARKDOWN_ENGINE_MARKERS = ['name:"codeFenced"', 'name:"htmlFlow"', 'name:"labelEnd"', 'name:"thematicBreak"'];
+
+/**
+ * Rarely-used surfaces that should be demand-loaded, not statically reachable
+ * from the entry (perf-audit package WP7 — issue-268/269/287's pattern
+ * applied to bug-report, the command-result modal, and the ask-user-question
+ * permission panel). Each marker is a literal string specific to that
+ * component's own source — an i18n key, or English copy nothing else in the
+ * app would plausibly contain — so it cannot pass vacuously against an
+ * unrelated string that merely shares a word.
+ */
+const RARE_SURFACE_MARKERS = [
+  ['BugReportDialog (bug reporting)', 'bugReport.title', 'src/components/bug-report/BugReportDialog.tsx'],
+  [
+    'CommandResultModal (/model, /cost, /status, /help)',
+    'Command center',
+    'src/components/chat/view/subcomponents/CommandResultModal.tsx',
+  ],
+  [
+    'AskUserQuestionPanel (AskUserQuestion permission panel)',
+    'Select all that apply',
+    'src/components/chat/tools/components/InteractiveRenderers/AskUserQuestionPanel.tsx',
+  ],
+];
 
 /**
  * Blank out emitted asset filenames before searching a chunk for library code.
@@ -310,6 +354,65 @@ function checkBundle(distDir) {
     notes.push(`on-demand mermaid chunk present: ${mermaidRuntimeChunk[0]}`);
   }
 
+  // 7. The markdown rendering stack (react-markdown/remark-gfm/micromark/mdast/
+  //    unified) must not be on the boot path — it is now the single biggest
+  //    contributor to the entry chunk if it leaks back in (perf-audit WP7).
+  //    Only src/components/chat/view/subcomponents/MarkdownRenderer.tsx may
+  //    import it, reachable solely through the `React.lazy` in Markdown.tsx.
+  const eagerMarkdownEngine = findMarkers(entryJs, MARKDOWN_ENGINE_MARKERS);
+  if (eagerMarkdownEngine.length > 0) {
+    failures.push(
+      `${entryJsName} contains the markdown engine (${eagerMarkdownEngine.join(', ')}). Only ` +
+        'MarkdownRenderer.tsx may import react-markdown/remark-gfm, and only Markdown.tsx may reach it, ' +
+        'through `React.lazy`. A static import from anything the entry touches puts the ~450 KB ' +
+        'react-markdown/micromark/mdast/unified stack back on every cold load (issue: perf-audit WP7).',
+    );
+  } else {
+    notes.push(`no markdown-engine code in ${entryJsName}`);
+  }
+
+  // 7b. Positive control, mirroring the mermaid pair: the engine must still
+  //     ship SOMEWHERE, or check 7 is passing because markdown rendering was
+  //     removed rather than deferred.
+  const markdownEngineChunks = chunks.filter((chunk) => findMarkers(chunk.source, MARKDOWN_ENGINE_MARKERS).length > 0);
+  if (markdownEngineChunks.length === 0) {
+    failures.push(
+      `no chunk contains any markdown-engine marker (${MARKDOWN_ENGINE_MARKERS.join(', ')}). Either markdown ` +
+        'rendering was removed — update this gate too — or micromark renamed its construct names and the ' +
+        'markers need refreshing. Do not assume the bundle is clean.',
+    );
+  } else {
+    notes.push(`markdown engine still shipped on demand in ${markdownEngineChunks.length} chunk(s)`);
+  }
+
+  // 8. The rarely-used surfaces demand-loaded in perf-audit package WP7
+  //    (bug-report, the command-result modal, the ask-user-question panel)
+  //    must not be statically reachable from the entry.
+  const eagerRareSurfaces = RARE_SURFACE_MARKERS.filter(([, marker]) => stripAssetFilenames(entryJs).includes(marker));
+  if (eagerRareSurfaces.length > 0) {
+    failures.push(
+      `${entryJsName} contains ${eagerRareSurfaces.map(([label]) => label).join(', ')}. Each of these is ` +
+        'reachable far less often than chat itself and must stay behind a `lazySurface`/`React.lazy` boundary ' +
+        '(issue: perf-audit WP7) — check for a static import that bypassed it.',
+    );
+  } else {
+    notes.push(`no rare-surface code (${RARE_SURFACE_MARKERS.length} checked) in ${entryJsName}`);
+  }
+
+  // 8b. Positive controls: each rare surface must still ship somewhere, or the
+  //     corresponding check above is passing because the feature was deleted.
+  const missingRareSurfaces = RARE_SURFACE_MARKERS.filter(
+    ([, marker]) => !chunks.some((chunk) => chunk.source.includes(marker)),
+  );
+  if (missingRareSurfaces.length > 0) {
+    failures.push(
+      `no chunk contains ${missingRareSurfaces.map(([label]) => label).join(', ')}. Either the feature was ` +
+        'removed — update this gate too — or its marker string changed. Do not assume the bundle is clean.',
+    );
+  } else {
+    notes.push(`all ${RARE_SURFACE_MARKERS.length} rare surfaces still shipped on demand`);
+  }
+
   return { failures, notes, entryJsName, entryCssName, entryJsBytes: entryJs.length, entryCssBytes: entryCss.length };
 }
 
@@ -406,11 +509,44 @@ function selfTest() {
     ['findMarkers reports a real mermaid marker', 'x="erDiagram"', ['erDiagram', 'flowchart-v2'], ['erDiagram']],
     ['findMarkers ignores chunk filenames', '"assets/erDiagram-ABC123.js"', ['erDiagram'], []],
     ['findMarkers returns nothing for unrelated code', 'const a=1', ['erDiagram'], []],
+    // WP7: same function, the markdown-engine marker set.
+    [
+      'findMarkers reports a real micromark construct marker',
+      'const to={concrete:!0,name:"htmlFlow",resolveTo:lo}',
+      MARKDOWN_ENGINE_MARKERS,
+      ['name:"htmlFlow"'],
+    ],
+    [
+      'findMarkers ignores app code that merely mentions a similar word',
+      'const codeFencedLanguage = detectLanguage(raw)',
+      MARKDOWN_ENGINE_MARKERS,
+      [],
+    ],
   ];
   for (const [label, source, markers, expected] of markerCases) {
     const actual = findMarkers(source, markers);
     if (actual.join(',') !== expected.join(',')) {
       console.error(`✗ ${label}: expected [${expected}], got [${actual}]`);
+      failed += 1;
+    } else {
+      console.log(`✓ ${label}`);
+    }
+  }
+
+  // WP7: the rare-surface markers are plain `.includes()` checks (not run
+  // through `findMarkers`/asset-filename stripping, since none of these three
+  // components' markers could plausibly collide with an emitted chunk
+  // filename) — pin the marker strings themselves stay distinctive.
+  const rareSurfaceCases = [
+    ['BugReportDialog marker matches its own i18n key', 't("bugReport.title")', 'bugReport.title', true],
+    ['BugReportDialog marker ignores an unrelated i18n key', 't("mainContent.reportBug")', 'bugReport.title', false],
+    ['CommandResultModal marker matches its eyebrow copy', 'eyebrow:"Command center"', 'Command center', true],
+    ['AskUserQuestionPanel marker matches its helper copy', '"Select all that apply"', 'Select all that apply', true],
+  ];
+  for (const [label, source, marker, expected] of rareSurfaceCases) {
+    const actual = source.includes(marker);
+    if (actual !== expected) {
+      console.error(`✗ ${label}: expected ${expected}, got ${actual}`);
       failed += 1;
     } else {
       console.log(`✓ ${label}`);

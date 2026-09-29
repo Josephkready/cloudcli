@@ -142,3 +142,37 @@ test('GET /images/:filename 404s for a filename that does not exist', async () =
     assert.match((await readJson(res)).error, /Asset not found/);
   });
 });
+
+test('GET /images/:filename sends a long-lived immutable Cache-Control and an ETag', async () => {
+  await withAssetsServer(async (baseUrl) => {
+    const { body } = pngUploadBody('images', 'photo.png');
+    const uploadRes = await fetch(`${baseUrl}/images`, { method: 'POST', body });
+    const uploaded = (await readJson(uploadRes)).images[0];
+    const storedFilename = path.basename(uploaded.path);
+
+    const res = await fetch(`${baseUrl}/images/${storedFilename}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    assert.match(res.headers.get('etag') || '', /^".+"$/);
+  });
+});
+
+test('GET /images/:filename returns 304 when If-None-Match matches the current ETag', async () => {
+  await withAssetsServer(async (baseUrl) => {
+    const { body } = pngUploadBody('images', 'photo.png');
+    const uploadRes = await fetch(`${baseUrl}/images`, { method: 'POST', body });
+    const uploaded = (await readJson(uploadRes)).images[0];
+    const storedFilename = path.basename(uploaded.path);
+
+    const first = await fetch(`${baseUrl}/images/${storedFilename}`);
+    const etag = first.headers.get('etag');
+    assert.ok(etag);
+
+    const second = await fetch(`${baseUrl}/images/${storedFilename}`, {
+      headers: { 'If-None-Match': etag as string },
+    });
+    assert.equal(second.status, 304);
+    const bodyBytes = await second.arrayBuffer();
+    assert.equal(bodyBytes.byteLength, 0);
+  });
+});

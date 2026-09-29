@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 import { ToolRenderer } from './ToolRenderer';
 
@@ -117,7 +117,7 @@ describe('ToolRenderer dispatch', () => {
   });
 
   describe('plan type', () => {
-    it('renders PlanDisplay with a computed title and markdown content for exit_plan_mode', () => {
+    it('renders PlanDisplay with a computed title and markdown content for exit_plan_mode', async () => {
       render(
         <ToolRenderer
           toolName="exit_plan_mode"
@@ -126,7 +126,11 @@ describe('ToolRenderer dispatch', () => {
         />,
       );
       expect(screen.getByText('Implementation plan')).toBeInTheDocument();
-      expect(screen.getByText('Do the thing')).toBeInTheDocument();
+      // `Markdown` is demand-loaded (perf-audit package WP7): a plain-text
+      // fallback shows first, then this once the renderer chunk resolves.
+      await waitFor(() => {
+        expect(screen.getByText('Do the thing')).toBeInTheDocument();
+      });
     });
 
     it('marks a plan as streaming while awaiting a result', () => {
@@ -150,7 +154,7 @@ describe('ToolRenderer dispatch', () => {
   describe('collapsible / diff', () => {
     it('renders a diff viewer for Edit when createDiff is provided, and wires title-click to onFileOpen', () => {
       const onFileOpen = vi.fn();
-      render(
+      const { container } = render(
         <ToolRenderer
           toolName="Edit"
           toolInput={{ file_path: '/src/App.tsx', old_string: 'old', new_string: 'new' }}
@@ -159,10 +163,50 @@ describe('ToolRenderer dispatch', () => {
           onFileOpen={onFileOpen}
         />,
       );
-      expect(identityDiff).toHaveBeenCalledWith('old', 'new');
       // Title is the filename, and clicking it should trigger onFileOpen with the diff strings.
       fireEvent.click(screen.getByText('App.tsx'));
       expect(onFileOpen).toHaveBeenCalledWith('/src/App.tsx', { old_string: 'old', new_string: 'new' });
+
+      // Diffs default collapsed and are lazy-mounted (#WP6), so createDiff has
+      // not run yet — expand via the chevron trigger to mount the diff viewer.
+      expect(identityDiff).not.toHaveBeenCalled();
+      const trigger = container.querySelector('button[aria-expanded="false"]');
+      expect(trigger).not.toBeNull();
+      fireEvent.click(trigger as HTMLButtonElement);
+      expect(identityDiff).toHaveBeenCalledWith('old', 'new');
+    });
+
+    it('does not compute the diff while the Edit accordion stays collapsed', () => {
+      render(
+        <ToolRenderer
+          toolName="Edit"
+          toolInput={{ file_path: '/src/App.tsx', old_string: 'old', new_string: 'new' }}
+          mode="input"
+          createDiff={identityDiff}
+        />,
+      );
+      expect(identityDiff).not.toHaveBeenCalled();
+    });
+
+    it('keeps the diff content mounted (does not recompute) after collapsing again', () => {
+      const { container } = render(
+        <ToolRenderer
+          toolName="Edit"
+          toolInput={{ file_path: '/src/App.tsx', old_string: 'old', new_string: 'new' }}
+          mode="input"
+          createDiff={identityDiff}
+        />,
+      );
+
+      const trigger = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement;
+      fireEvent.click(trigger); // expand — first mount, computes the diff once
+      expect(identityDiff).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(trigger); // collapse again — lazyMount keeps content mounted
+      fireEvent.click(trigger); // re-expand
+      expect(identityDiff).toHaveBeenCalledTimes(1);
+      // The already-rendered diff row is still in the DOM the whole time.
+      expect(screen.getByText('old|new')).toBeInTheDocument();
     });
 
     it('omits the diff viewer entirely when createDiff is not provided', () => {
@@ -195,7 +239,7 @@ describe('ToolRenderer dispatch', () => {
   });
 
   describe('collapsible / markdown (Task tool, transitively renders Markdown.tsx)', () => {
-    it('renders the subagent prompt as markdown content', () => {
+    it('renders the subagent prompt as markdown content', async () => {
       render(
         <ToolRenderer
           toolName="Task"
@@ -204,7 +248,11 @@ describe('ToolRenderer dispatch', () => {
         />,
       );
       expect(screen.getByText(/Subagent \/ general-purpose: do work/)).toBeInTheDocument();
-      expect(screen.getByText('do', { selector: 'strong' })).toBeInTheDocument();
+      // `Markdown` is demand-loaded (perf-audit package WP7): a plain-text
+      // fallback shows first, then this once the renderer chunk resolves.
+      await waitFor(() => {
+        expect(screen.getByText('do', { selector: 'strong' })).toBeInTheDocument();
+      });
     });
 
     it('renders the subagent result content', () => {

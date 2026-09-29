@@ -16,6 +16,8 @@ interface CollapsibleDisplayProps {
   className?: string;
   toolCategory?: string;
   capHeight?: boolean;
+  /** Defer mounting `children` until first expanded — see `CollapsibleSection`. */
+  lazyMount?: boolean;
 }
 
 const borderColorMap: Record<string, string> = {
@@ -43,6 +45,7 @@ export const CollapsibleDisplay: React.FC<CollapsibleDisplayProps> = ({
   className = '',
   toolCategory,
   capHeight = true,
+  lazyMount = false,
 }) => {
   const borderColor = borderColorMap[toolCategory || 'default'] || borderColorMap.default;
 
@@ -56,6 +59,7 @@ export const CollapsibleDisplay: React.FC<CollapsibleDisplayProps> = ({
         badge={badge}
         onTitleClick={onTitleClick}
         capHeight={capHeight}
+        lazyMount={lazyMount}
       >
         {children}
 

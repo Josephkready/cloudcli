@@ -26,6 +26,16 @@ export const DEFAULT_EXCLUDED_PROJECT_PATH_PATTERNS: readonly string[] = Object.
 
 const PATTERN_DELIMITER = ':';
 
+// compileGlobToRegex's output is a pure function of `pattern` — the compiled
+// RegExp for a given pattern string never changes within a process lifetime.
+// The provider session synchronizers call shouldExcludeProjectPath() once per
+// discovered transcript file (thousands during a cold sync of a large
+// session library), each call re-resolving the (small, fixed) pattern list
+// and re-compiling every pattern's regex from scratch. Caching by pattern
+// string avoids that redundant work without changing behavior — a pattern
+// that hasn't been seen before still compiles normally and gets cached.
+const compiledGlobCache = new Map<string, RegExp>();
+
 /**
  * Compile one glob pattern into a `RegExp`. Supported syntax:
  *
@@ -35,8 +45,13 @@ const PATTERN_DELIMITER = ':';
  * - all other characters are matched literally
  *
  * The returned regex is anchored (`^…$`) so partial matches do not fire.
+ * Compiled regexes are memoized by pattern string (see `compiledGlobCache`).
  */
 export function compileGlobToRegex(pattern: string): RegExp {
+  const cached = compiledGlobCache.get(pattern);
+  if (cached) {
+    return cached;
+  }
   let regex = '^';
   let index = 0;
   while (index < pattern.length) {
@@ -60,7 +75,9 @@ export function compileGlobToRegex(pattern: string): RegExp {
     index += 1;
   }
   regex += '$';
-  return new RegExp(regex);
+  const compiled = new RegExp(regex);
+  compiledGlobCache.set(pattern, compiled);
+  return compiled;
 }
 
 /**

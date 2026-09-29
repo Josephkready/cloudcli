@@ -1,11 +1,10 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { ShieldAlertIcon } from 'lucide-react';
 
 import type { PendingPermissionRequest } from '../../types/types';
 import { buildClaudeToolPermissionEntry, formatToolInputForDisplay } from '../../utils/chatPermissions';
 import { getClaudeSettings } from '../../utils/chatStorage';
 import { getPermissionPanel, registerPermissionPanel } from '../../tools/configs/permissionPanelRegistry';
-import { AskUserQuestionPanel } from '../../tools/components/InteractiveRenderers';
 import {
   Confirmation,
   ConfirmationTitle,
@@ -14,6 +13,16 @@ import {
   ConfirmationAction,
 } from '../../../../shared/view/ui';
 
+// Demand-loaded (perf-audit package WP7): `AskUserQuestion` is one tool among
+// many, and only fires when a session actually asks a multi-choice question —
+// rare next to the generic confirmation above, which stays eager. The panel
+// used to be imported (and registered) at module scope, which put it on the
+// boot path for every session whether or not one was ever asked.
+const AskUserQuestionPanel = lazy(() =>
+  import('../../tools/components/InteractiveRenderers/AskUserQuestionPanel').then((m) => ({
+    default: m.AskUserQuestionPanel,
+  })),
+);
 registerPermissionPanel('AskUserQuestion', AskUserQuestionPanel);
 
 interface PermissionRequestsBannerProps {
@@ -45,11 +54,12 @@ export default function PermissionRequestsBanner({
         const CustomPanel = getPermissionPanel(request.toolName);
         if (CustomPanel) {
           return (
-            <CustomPanel
-              key={request.requestId}
-              request={request}
-              onDecision={handlePermissionDecision}
-            />
+            <Suspense key={request.requestId} fallback={null}>
+              <CustomPanel
+                request={request}
+                onDecision={handlePermissionDecision}
+              />
+            </Suspense>
           );
         }
 

@@ -465,6 +465,27 @@ export function pruneRealtimeSupersededByServer(
   });
 }
 
+/**
+ * True when every `extra` row is safe to simply append after `server` without
+ * a full chronological sort — i.e. `server` (already sorted) is entirely no
+ * newer than the oldest `extra` row.
+ *
+ * `Array.prototype.sort` is stable, so `[...server, ...extra].sort(cmp)` puts
+ * a `server` row before an `extra` row with an equal timestamp (their
+ * relative order in the pre-sort array). Appending directly preserves that
+ * same tie-break, which is why this uses `>=` rather than `>`: an `extra` row
+ * exactly as new as the last `server` row still sorts after it either way.
+ */
+function isAppendOnlyMerge(server: NormalizedMessage[], extra: NormalizedMessage[]): boolean {
+  const lastServerTime = readMessageTime(server[server.length - 1]) ?? 0;
+  for (const message of extra) {
+    if ((readMessageTime(message) ?? 0) < lastServerTime) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function computeMerged(server: NormalizedMessage[], realtime: NormalizedMessage[]): NormalizedMessage[] {
   if (realtime.length === 0) {
     return dedupeAdjacentAssistantEchoes(server);
@@ -492,6 +513,21 @@ export function computeMerged(server: NormalizedMessage[], realtime: NormalizedM
 
   if (extra.length === 0) {
     return dedupeAdjacentAssistantEchoes(server);
+  }
+
+  // Fast path: `server` is already chronologically sorted and, during a
+  // streaming tick, `extra` is just the live placeholder row(s) — always
+  // newer than everything already loaded. Skip the O(n log n) sort over the
+  // *whole* transcript (repeated ~every 100ms while a reply streams) and
+  // instead just append, only paying to sort the much smaller `extra` slice
+  // among itself (it is not guaranteed to already be in order). Falls back to
+  // the full sort whenever a realtime row is genuinely out of order (e.g. a
+  // late-arriving row from a background refresh).
+  if (isAppendOnlyMerge(server, extra)) {
+    return dedupeAdjacentAssistantEchoes([
+      ...server,
+      ...(extra.length > 1 ? [...extra].sort(compareMessagesChronologically) : extra),
+    ]);
   }
 
   // Interleave by timestamp so live rows stay with their turn instead of

@@ -2,7 +2,12 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
-import { AppError } from '@/shared/utils.js';
+import { AppError, mapWithConcurrency } from '@/shared/utils.js';
+
+// Bounded so a force-delete of a project with hundreds/thousands of session
+// transcripts overlaps the unlink() calls instead of exhausting file
+// descriptors or thrashing disk with an unbounded Promise.all.
+const UNLINK_CONCURRENCY = 16;
 
 function uniqueJsonlPathsFromSessions(
   sessions: Array<{ jsonl_path: string | null }>,
@@ -45,9 +50,10 @@ async function deleteSessionJsonlFilesForProjectPath(projectPath: string): Promi
   const sessions = sessionsDb.getSessionsByProjectPathIncludingArchived(projectPath);
   const paths = uniqueJsonlPathsFromSessions(sessions);
 
-  for (const filePath of paths) {
-    await unlinkJsonlIfExists(filePath);
-  }
+  // unlinkJsonlIfExists already swallows ENOENT and logs other errors
+  // per-file, so the unlinks are safe to run concurrently — order doesn't
+  // matter and one failure doesn't affect the others.
+  await mapWithConcurrency(paths, UNLINK_CONCURRENCY, unlinkJsonlIfExists);
 }
 
 /**
