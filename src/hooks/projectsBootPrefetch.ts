@@ -27,6 +27,17 @@ export const startProjectsBootPrefetch = (): void => {
     }
     return response.json() as Promise<Project[]>;
   });
+
+  // A discarded-but-still-in-flight prefetch (e.g. auth turns out invalid
+  // right after this started) has no other awaiter once
+  // `discardProjectsBootPrefetch` nulls the module reference below — if it
+  // later rejects (network error, non-2xx status), that would otherwise
+  // surface as an unhandled promise rejection. This second, independent
+  // `.catch` attached to the same promise doesn't affect `consumeProjectsBootPrefetch`'s
+  // caller: a rejected promise notifies every handler attached to it, so
+  // `fetchProjects`'s own `await`/`.catch` on the returned reference still
+  // sees the rejection normally when the prefetch IS consumed.
+  prefetchPromise.catch(() => {});
 };
 
 /**

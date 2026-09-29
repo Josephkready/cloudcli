@@ -13,7 +13,10 @@ const config = vi.hoisted(() => ({ IS_PLATFORM: false, AUTH_DISABLED: false }));
 vi.mock('@/constants/config', () => config);
 vi.mock('../../constants/config', () => config);
 
-const DELAY_MS = 50;
+// Large enough that jsdom/test-scheduler overhead (observed ~70-90ms fixed
+// cost on a loaded box) is a small fraction of the total, so the wall-clock
+// assertion below isn't timing-fragile.
+const DELAY_MS = 100;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function jsonResponse(body: unknown, ok = true) {
@@ -101,11 +104,12 @@ describe('app boot waterfall (WP4 #1)', () => {
     const totalMs = performance.now() - start;
 
     // Old (serial) shape: status -> user -> onboarding -> projects would be
-    // ~4 * DELAY_MS = 200ms end-to-end. New shape collapses that to two
-    // sequential hops (status, then everything else in parallel) -- give
-    // generous headroom above 2 * DELAY_MS for jsdom/test scheduling slop,
-    // but well under the old 4-hop total.
-    expect(totalMs).toBeLessThan(3 * DELAY_MS);
+    // ~4 * DELAY_MS end-to-end. New shape collapses that to two sequential
+    // hops (status, then everything else in parallel) -- ~2 * DELAY_MS ideal.
+    // The per-call timestamp assertions below are the precise proof of
+    // parallelism; this wall-clock check only needs to rule out the old
+    // 4-hop total, with generous headroom for jsdom/test-scheduler overhead.
+    expect(totalMs).toBeLessThan(3.5 * DELAY_MS);
 
     const at = (name: string) => calls.find((call) => call.name === name)?.at;
     const statusAt = at('auth.status');

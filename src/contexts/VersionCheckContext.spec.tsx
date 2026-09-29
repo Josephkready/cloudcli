@@ -1,8 +1,10 @@
+import React from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BUILD_SHA } from '../constants/build';
 import { version as PACKAGE_VERSION } from '../../package.json';
+
 import { useVersionCheck, VersionCheckProvider } from './VersionCheckContext';
 
 /*
@@ -246,5 +248,48 @@ describe('VersionCheckProvider', () => {
       'useVersionCheck must be used within a VersionCheckProvider',
     );
     errorSpy.mockRestore();
+  });
+
+  it('keeps a memoized context value stable across unrelated parent re-renders (WP4 #4)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse({ installMode: 'npm', version: PACKAGE_VERSION }))),
+    );
+
+    let memoRenderCount = 0;
+    let capturedValue: ReturnType<typeof useVersionCheck> | null = null;
+
+    const MemoConsumer = React.memo(function MemoConsumer() {
+      capturedValue = useVersionCheck();
+      memoRenderCount += 1;
+      return null;
+    });
+
+    function Harness({ tick }: { tick: number }) {
+      return (
+        <VersionCheckProvider>
+          <span data-testid="tick">{tick}</span>
+          <MemoConsumer />
+        </VersionCheckProvider>
+      );
+    }
+
+    const { rerender } = render(<Harness tick={0} />);
+    await flush();
+    // The initial mount renders once with default state, then again once the
+    // mount-triggered /health fetch resolves and updates state -- both are
+    // real state changes, not the bug under test.
+    const renderCountAfterMount = memoRenderCount;
+    const firstValue = capturedValue;
+
+    // Re-rendering the provider's parent with unrelated state must not
+    // recreate `value` (and therefore must not re-render a memoized
+    // consumer) when none of the provider's own state has changed.
+    await act(async () => {
+      rerender(<Harness tick={1} />);
+    });
+
+    expect(memoRenderCount).toBe(renderCountAfterMount);
+    expect(capturedValue).toBe(firstValue);
   });
 });
