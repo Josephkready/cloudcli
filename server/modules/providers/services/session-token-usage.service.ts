@@ -129,6 +129,15 @@ async function readCodexTokenUsage(filePath: string): Promise<SessionTokenUsageR
     };
   }
 
+  // `readFileTail` re-stats the file itself, so a transcript that grows past
+  // USAGE_SCAN_TAIL_BYTES between this stat and that read leaves `size` (and
+  // therefore `readWholeFile`) one write stale. That narrow window is the
+  // same one `session-live-status.service.ts`'s tail read accepts already
+  // (stat once for a size/mtime decision, then a separately-stated tail
+  // read): a stale `true` here just skips dropping the leading fragment of a
+  // now-partial tail, which fails `JSON.parse` and is silently skipped like
+  // any other torn line -- not a correctness bug, so it isn't worth a second
+  // stat/refactor to close.
   const readWholeFile = size <= USAGE_SCAN_TAIL_BYTES;
   const tail = await readFileTail(filePath, USAGE_SCAN_TAIL_BYTES);
   const tailLines = tail.split('\n');

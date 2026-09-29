@@ -344,6 +344,14 @@ const readClaudeSessionModelFromJsonl = async (
   // Grow the window if the tail parsed nothing (e.g. it landed entirely
   // inside one oversized tool_use event), bounded by the file size and a
   // hard cap, falling back to a full read only if that cap is reached.
+  //
+  // `size` is a single snapshot, but each `readFileTail` call below re-stats
+  // the file, so a transcript that grows mid-loop can make this bound stale
+  // by one write. `resolveClaudeSessionModelFromTranscript` already tolerates
+  // malformed/partial lines via try/catch, so a stale bound only affects loop
+  // termination timing (one extra or one fewer growth step), never a wrong
+  // parsed result -- the same tradeoff `session-live-status.service.ts`'s
+  // tail read already accepts.
   const { size } = await stat(jsonlPath);
   let windowBytes = ACTIVE_MODEL_TAIL_BYTES;
   let tail = await readFileTail(jsonlPath, windowBytes);
