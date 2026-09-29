@@ -144,6 +144,9 @@ function MainContent({
           CodeMirror off the boot path.
         */}
         {editingFile && (
+          // data-vd-mask: file names/paths are never captured as locator names.
+          // `contents` keeps this wrapper out of the flex layout.
+          <div data-vd-mask="" className="contents">
           <LazySurface
             fallback={
               isMobile ? (
@@ -170,6 +173,7 @@ function MainContent({
               projectPath={selectedProject.path}
             />
           </LazySurface>
+          </div>
         )}
       </div>
     </div>

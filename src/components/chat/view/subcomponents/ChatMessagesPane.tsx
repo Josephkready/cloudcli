@@ -295,7 +295,7 @@ function ChatMessagesPane({
   });
 
   return (
-    <div
+    <div data-vd-mask=""
       ref={scrollContainerRef}
       onWheel={onWheel}
       onTouchMove={onTouchMove}

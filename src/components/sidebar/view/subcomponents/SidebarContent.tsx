@@ -275,7 +275,7 @@ export default function SidebarContent({
               <p className="text-sm text-muted-foreground">{t('search.tryDifferentQuery')}</p>
             </div>
           ) : hasPartialResults ? (
-            <div className="space-y-3 px-2">
+            <div data-vd-mask="" className="space-y-3 px-2">
               <div className="flex items-center justify-between px-1">
                 <p className="text-xs text-muted-foreground">
                   {t('search.matches', { count: conversationResults.totalMatches })}
@@ -381,7 +381,7 @@ export default function SidebarContent({
               </p>
             </div>
           ) : (
-            <div className="space-y-3 px-2">
+            <div data-vd-mask="" className="space-y-3 px-2">
               <div className="flex items-center justify-between px-1">
                 <p className="text-xs text-muted-foreground">
                   {`${archivedSessionsCount} ${t(

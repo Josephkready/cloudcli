@@ -67,6 +67,7 @@ import { pruneOrphanedBrowserMcp } from './modules/providers/services/orphaned-m
 import voiceRoutes from './voice-proxy.js';
 import bugReportRoutes from './routes/bug-report.js';
 import { assetsRoutes } from './modules/assets/index.js';
+import { createVdebugCaptureRouter, resolveVdebugCaptureConfig } from './modules/vdebug-capture/index.js';
 import { initializeDatabase, sessionsDb, closeConnection } from './modules/database/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import {
@@ -185,6 +186,12 @@ app.use(cors({ exposedHeaders: ['X-Refreshed-Token'] }));
 // dist/ are served from build-time .br/.gz siblings instead (see the
 // precompressed-assets handler below), which this middleware leaves alone.
 app.use(createCompressionMiddleware());
+// video-debugger real-user flow capture (Phase 1): the recorder gate + the
+// /api/_vd/events ingest. Mounted before the global 50 MB JSON parser so the
+// endpoint applies its own 256 KB cap, and before validateApiKey because the
+// recorder sends no credentials. Off with VD_CAPTURE_ENABLED=false; never
+// throws into the app. See server/modules/vdebug-capture/.
+app.use(createVdebugCaptureRouter(resolveVdebugCaptureConfig()));
 app.use(express.json({
     limit: '50mb',
     type: (req) => {

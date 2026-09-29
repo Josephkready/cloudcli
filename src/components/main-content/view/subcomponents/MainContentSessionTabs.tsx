@@ -121,7 +121,7 @@ export default function MainContentSessionTabs({
       : t('sessions.openSessions', 'Open sessions');
 
     return (
-      <div className="relative mt-1.5">
+      <div data-vd-mask="" className="relative mt-1.5">
         <div className="flex items-center gap-1">
           <button
             ref={triggerRef}
@@ -232,7 +232,7 @@ export default function MainContentSessionTabs({
   }
 
   return (
-    <div className="mt-1.5 flex items-center gap-1">
+    <div data-vd-mask="" className="mt-1.5 flex items-center gap-1">
       <ScrollFade containerClassName="flex-1 overflow-hidden" resetKey={tabs.length}>
         <PillBar className="w-max">
           {tabs.map(({ id, isActive, status, session }) => {
