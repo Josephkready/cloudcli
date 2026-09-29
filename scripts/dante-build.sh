@@ -49,7 +49,13 @@ fi
 
 # Only STAGE is disposable on every exit path. BACKUP is deliberately NOT removed here:
 # if we die mid-swap it holds the last good build, and swap_in restores from it.
-trap 'rm -rf "$STAGE"' EXIT
+#
+# Also kills the two parallel build subshells (CLIENT_PID/SERVER_PID, set below) if this
+# script is itself signaled (e.g. a systemd timeout) while `wait`ing on them: without this
+# they would keep running as orphans and could go on writing into $STAGE after it is
+# removed. The `${VAR:-}` guard + `2>/dev/null || true` makes this a no-op before the PIDs
+# are assigned and on the normal-success path where both jobs are already dead.
+trap 'kill "${CLIENT_PID:-}" "${SERVER_PID:-}" 2>/dev/null || true; rm -rf "$STAGE"' EXIT
 
 # A non-empty BACKUP means a previous run died mid-swap without completing its rollback
 # (see the CRITICAL path in swap_in) or was hard-killed. Its contents may be the only
@@ -95,35 +101,72 @@ log "installing dependencies (npm ci)"
 # exit code instead of on "git SHA moved" — and is handled in the dante-config change.
 npm ci --no-audit --no-fund
 
-log "building client -> staging (VITE_AUTH_DISABLED=${VITE_AUTH_DISABLED})"
-npx vite build --outDir "$STAGE/dist" --emptyOutDir
+log "building client + server -> staging in parallel (VITE_AUTH_DISABLED=${VITE_AUTH_DISABLED})"
+# The client chain (vite -> build-info -> precompress, all under $STAGE/dist) and the
+# server chain (tsc -> tsc-alias, under $STAGE/dist-server) write to disjoint staging
+# subtrees and neither reads the other's output, so they run as two background jobs
+# instead of four sequential steps. Each chain keeps its own internal ordering (each step
+# depends on the previous one within its chain); only the two chains run concurrently.
+#
+# Both subshells inherit `set -euo pipefail` from the parent, so the first failing
+# command inside either one exits that subshell non-zero — `wait "$pid"` below reports
+# that as its exit status. Output from the two chains interleaves on the console (fine
+# for a build log; each line is still individually well-formed).
 
-log "writing build identity (sha=${VITE_BUILD_SHA}) -> staging"
-# The same SHA the client bundle inlined via Vite `define`. The server reads this at
-# startup and serves it from /health so an already-open tab can detect a new deploy
-# (#458). Written after vite so --emptyOutDir cannot delete it. The values are JSON-encoded
-# by the helper (not interpolated into a heredoc) so a quote/backslash can never produce
-# malformed JSON or inject content into the file the server serves.
-"$ROOT/scripts/write-build-info.sh" "$VITE_BUILD_SHA" "$VITE_BUILT_AT" "$STAGE/dist/build-info.json"
+(
+  # client chain: vite build -> build identity -> precompress, all into $STAGE/dist.
+  # Each step gets its own log() line (prefixed so it's identifiable while interleaved
+  # with the server chain's output) so a failure's preceding log line still identifies
+  # the step, same as the old serial version did.
+  log "client: building -> staging (VITE_AUTH_DISABLED=${VITE_AUTH_DISABLED})"
+  npx vite build --outDir "$STAGE/dist" --emptyOutDir
 
-log "precompressing client assets -> staging"
-# `npm run build:client` chains vite -> build:precompress, but the vite step above is
-# invoked directly (staging, not the live tree) so that chain never runs here. Without
-# this the deploy would ship no .br/.gz siblings and fall back to compressing every
-# bundle on the fly, per request, on a 2-vCPU box — which is the exact cost issue #266
-# removed. Same entry point and arguments as the npm script, except the target is the
-# staged dist rather than the live one; `public` stays repo-relative because that tree is
-# served from the live checkout, not from the build output.
-npx tsx --tsconfig server/tsconfig.json server/shared/precompress-assets.ts "$STAGE/dist" public
+  # The same SHA the client bundle inlined via Vite `define`. The server reads this at
+  # startup and serves it from /health so an already-open tab can detect a new deploy
+  # (#458). Written after vite so --emptyOutDir cannot delete it. The values are JSON-encoded
+  # by the helper (not interpolated into a heredoc) so a quote/backslash can never produce
+  # malformed JSON or inject content into the file the server serves.
+  log "client: writing build identity (sha=${VITE_BUILD_SHA}) -> staging"
+  "$ROOT/scripts/write-build-info.sh" "$VITE_BUILD_SHA" "$VITE_BUILT_AT" "$STAGE/dist/build-info.json"
 
-log "building server -> staging"
-# Invoked directly rather than via `npm run build:server` because that script's
-# `prebuild:server` hook hard-codes rm -rf of the LIVE dist-server/, which is exactly
-# what staging exists to avoid. tsc and tsc-alias both accept an absolute --outDir
-# (tsc-alias documents it as tsconfig-relative, but absolute works and is verified by
-# the alias check below).
-npx tsc -p server/tsconfig.json --outDir "$STAGE/dist-server"
-npx tsc-alias -p server/tsconfig.json --outDir "$STAGE/dist-server"
+  # `npm run build:client` chains vite -> build:precompress, but the vite step above is
+  # invoked directly (staging, not the live tree) so that chain never runs here. Without
+  # this the deploy would ship no .br/.gz siblings and fall back to compressing every
+  # bundle on the fly, per request, on a 2-vCPU box — which is the exact cost issue #266
+  # removed. Same entry point and arguments as the npm script, except the target is the
+  # staged dist rather than the live one; `public` stays repo-relative because that tree is
+  # served from the live checkout, not from the build output.
+  log "client: precompressing assets -> staging"
+  npx tsx --tsconfig server/tsconfig.json server/shared/precompress-assets.ts "$STAGE/dist" public
+) &
+CLIENT_PID=$!
+
+(
+  # server chain: tsc -> tsc-alias, both into $STAGE/dist-server.
+  # Invoked directly rather than via `npm run build:server` because that script's
+  # `prebuild:server` hook hard-codes rm -rf of the LIVE dist-server/, which is exactly
+  # what staging exists to avoid. tsc and tsc-alias both accept an absolute --outDir
+  # (tsc-alias documents it as tsconfig-relative, but absolute works and is verified by
+  # the alias check below).
+  log "server: building -> staging"
+  npx tsc -p server/tsconfig.json --outDir "$STAGE/dist-server"
+  npx tsc-alias -p server/tsconfig.json --outDir "$STAGE/dist-server"
+) &
+SERVER_PID=$!
+
+# Wait on both PIDs unconditionally (a bare `wait` would stop at the first failure and
+# leave the other job's exit status uncollected) so a failure in one chain doesn't hide a
+# failure in the other, and so nothing outlives this script as an orphaned background job.
+CLIENT_STATUS=0
+wait "$CLIENT_PID" || CLIENT_STATUS=$?
+SERVER_STATUS=0
+wait "$SERVER_PID" || SERVER_STATUS=$?
+
+if [ "$CLIENT_STATUS" -ne 0 ] || [ "$SERVER_STATUS" -ne 0 ]; then
+  die "parallel build failed (client exit=${CLIENT_STATUS}, server exit=${SERVER_STATUS})"
+fi
+
+log "client + server builds -> staging complete"
 
 # --- Verification gate -------------------------------------------------------------
 # The steps above duplicate what package.json's build scripts do. If that wiring ever

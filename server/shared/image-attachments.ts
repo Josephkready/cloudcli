@@ -97,16 +97,38 @@ function isPathInsideDirectory(candidate: string, directory: string): boolean {
   return path.resolve(candidate).startsWith(resolvedRoot);
 }
 
+// isAllowedImageSourcePath is called once per image descriptor (up to twice,
+// for the pre- and post-realpath checks), each call resolving the allowed
+// root directories (the global upload store and the run's cwd) fresh. Both
+// roots are static for the lifetime of a chat run — cwd doesn't change
+// mid-run and the global assets dir never changes — so a message with
+// several image attachments was paying several redundant realpathSync calls
+// (blocking the event loop) per root per image. Caching by the literal
+// directory string removes the redundant syscalls; it's the same
+// static-for-process-lifetime tradeoff `project-exclude.ts` already makes
+// for its compiled globs. This is a small correctness/perf tradeoff: if the
+// directory's target changes on disk mid-process (e.g. a symlink is
+// repointed), the cached variants go stale until restart — accepted here
+// because cwd/asset-dir symlink retargeting mid-run is not a supported flow.
+const directoryPathVariantsCache = new Map<string, string[]>();
+
 function getDirectoryPathVariants(directory: string): string[] {
+  const cached = directoryPathVariantsCache.get(directory);
+  if (cached) {
+    return cached;
+  }
   const resolvedDirectory = path.resolve(directory);
+  let variants: string[];
   try {
     const canonicalDirectory = path.resolve(realpathSync(directory));
-    return canonicalDirectory === resolvedDirectory
+    variants = canonicalDirectory === resolvedDirectory
       ? [resolvedDirectory]
       : [resolvedDirectory, canonicalDirectory];
   } catch {
-    return [resolvedDirectory];
+    variants = [resolvedDirectory];
   }
+  directoryPathVariantsCache.set(directory, variants);
+  return variants;
 }
 
 /**

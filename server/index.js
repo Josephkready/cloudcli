@@ -67,7 +67,7 @@ import { pruneOrphanedBrowserMcp } from './modules/providers/services/orphaned-m
 import voiceRoutes from './voice-proxy.js';
 import bugReportRoutes from './routes/bug-report.js';
 import { assetsRoutes } from './modules/assets/index.js';
-import { initializeDatabase, sessionsDb } from './modules/database/index.js';
+import { initializeDatabase, sessionsDb, closeConnection } from './modules/database/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import {
     createCompressionMiddleware,
@@ -257,18 +257,34 @@ app.use(projectFilesRoutes);
 // `npm install -g @cloudcli-ai/cloudcli && cloudcli` flow.
 const DIST_INDEX_PATH = path.join(APP_ROOT, 'dist', 'index.html');
 
-function sendIndexHtmlWithBasename(req, res) {
-    if (!fs.existsSync(DIST_INDEX_PATH)) {
+// In-memory cache of the basename-transformed index.html, keyed by the
+// source file's mtime. dist/index.html is rebuilt only on deploy/restart (or,
+// in dev/test, written once mid-process — see server/index.test.ts), so
+// re-reading and re-transforming it on every request is pure waste: both the
+// existence check and the read were synchronous, blocking the whole event
+// loop (including in-flight websocket chat streams) on every SPA navigation.
+// Caching by mtime (rather than once-at-module-load) keeps this correct when
+// dist/ is written or rebuilt after the module has already loaded.
+let cachedIndexHtml = null; // { mtimeMs: number, transformed: string } | null
+
+async function sendIndexHtmlWithBasename(req, res) {
+    let stat;
+    try {
+        stat = await fsPromises.stat(DIST_INDEX_PATH);
+    } catch {
         return false;
     }
-    const html = fs.readFileSync(DIST_INDEX_PATH, 'utf8');
-    const basename = getRouterBasename(process.env);
-    const transformed = injectRouterBasenameIntoHtml(html, basename);
+    if (!cachedIndexHtml || cachedIndexHtml.mtimeMs !== stat.mtimeMs) {
+        const html = await fsPromises.readFile(DIST_INDEX_PATH, 'utf8');
+        const basename = getRouterBasename(process.env);
+        const transformed = injectRouterBasenameIntoHtml(html, basename);
+        cachedIndexHtml = { mtimeMs: stat.mtimeMs, transformed };
+    }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
-    res.send(transformed);
+    res.send(cachedIndexHtml.transformed);
     return true;
 }
 
@@ -278,8 +294,8 @@ function sendIndexHtmlWithBasename(req, res) {
 // that answers them. Mounted ahead of the static stack for that reason; every
 // other asset flows through express.static below unchanged. Neither static root
 // contains an index.html of its own, so nothing else changes hands here.
-app.get(['/', '/index.html'], (req, res, next) => {
-    if (!sendIndexHtmlWithBasename(req, res)) {
+app.get(['/', '/index.html'], async (req, res, next) => {
+    if (!(await sendIndexHtmlWithBasename(req, res))) {
         return next();
     }
 });
@@ -438,7 +454,7 @@ app.post('/api/create-folder', authenticateToken, async (req, res) => {
 // which stores them in the global ~/.cloudcli/assets folder.
 
 // Serve React app for all other routes (excluding static files)
-app.get('*', (req, res) => {
+app.get('*', async (req, res) => {
     // Skip requests for static assets (files with extensions)
     if (path.extname(req.path)) {
         return res.status(404).send('Not found');
@@ -449,7 +465,7 @@ app.get('*', (req, res) => {
     // We route through sendIndexHtmlWithBasename so the ROUTER_BASENAME injection
     // is applied here too (deep-link refreshes hit this branch, not the `/`
     // handler above).
-    if (sendIndexHtmlWithBasename(req, res)) {
+    if (await sendIndexHtmlWithBasename(req, res)) {
         return;
     }
 
@@ -647,6 +663,15 @@ async function startServer() {
                 await removeLocalServerMarker(LOCAL_SERVER_MARKER_PATH, process.pid);
             } catch (err) {
                 console.error('[Local Server] Error removing server marker during shutdown:', err?.message || err);
+            }
+            try {
+                // WAL-mode commits can sit in the -wal sidecar file until
+                // checkpointed; do it now so a raw file copy of the main db
+                // (e.g. an external system backup) taken shortly after a
+                // graceful restart reflects the latest committed state.
+                closeConnection();
+            } catch (err) {
+                console.error('[Database] Error closing connection during shutdown:', err?.message || err);
             }
             process.exit(0);
         };
