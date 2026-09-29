@@ -210,6 +210,14 @@ export const createSessionViewModel = (
 // Sidebar render (via `SidebarProjectList`), plus again independently for the
 // archived view and `buildConversationList` — without this cache each call
 // re-maps and re-sorts the full session array from scratch.
+//
+// This relies on `project.sessions` (and its elements) being treated as
+// immutable by every producer — `useProjectsState.pure.ts`'s merge/upsert/
+// remove paths all build a *new* array rather than mutating the existing one
+// in place, so a real content change always shows up as a new reference here.
+// An in-place `.push()`/mutation of an existing sessions array (or of a
+// session object already inside it) would silently return stale cached data;
+// don't add one without also busting this cache.
 const allSessionsCache = new WeakMap<ProjectSession[], SessionWithProvider[]>();
 
 export const getAllSessions = (project: Project): SessionWithProvider[] => {

@@ -413,7 +413,7 @@ function SidebarProjectItem({
 }
 
 // Named export of the un-memoized component, purely so a render-count spec
-// (SidebarProjectItem.render-count.spec.tsx) can wrap it in its own
+// (RowMemoization.render-count.spec.tsx) can wrap it in its own
 // instrumented `memo()` and directly count how many times the function body
 // runs — importing the (already memoized) default export can't observe that
 // from outside since React only calls it when memo decides to update.
