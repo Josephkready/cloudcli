@@ -26,18 +26,17 @@ export const loadBugReportDialog = () => import('../bug-report/BugReportDialog')
  * unified stack (~450 KB pre-minify, perf-audit package WP7) — is the single
  * biggest contributor to the entry chunk. `app_boot` (composer + conversation
  * list usable) never renders a message body, but opening any conversation
- * does, so unlike bug-report this one IS worth warming: by the time a user
- * picks a conversation the chunk has usually already loaded in an idle slice,
- * and `Markdown.tsx` shows a plain pre-wrap fallback for the rare cold case.
+ * does. It is not idle-warmed: `Markdown.tsx` starts this import when it is
+ * evaluated (as the entry runs), so it is fetched in parallel with boot rather
+ * than after the load event, and shows a plain pre-wrap fallback until then.
  */
 export const loadMarkdownRenderer = () => import('../chat/view/subcomponents/MarkdownRenderer');
 
 /**
  * Shell (xterm, ~400 KB) and the code editor (CodeMirror, ~690 KB) are the two
- * chunks big enough that fetching them at click time is felt. The markdown
- * renderer joins them here because almost every session opens a conversation
- * within seconds of boot, so warming it is a near-certain win rather than a
- * bet. Everything else that moved out of the entry chunk in issue #267 (and
- * bug-report, WP7) is small/rare enough to load on demand without warming.
+ * chunks big enough that fetching them at click time is felt. Everything else
+ * that moved out of the entry chunk in issue #267 (and bug-report, WP7) is
+ * small/rare enough to load on demand without warming. The markdown renderer
+ * is loaded eagerly by `Markdown.tsx` instead (see `loadMarkdownRenderer`).
  */
-export const WARMABLE_SURFACES: SurfaceLoader[] = [loadStandaloneShell, loadEditorSidebar, loadMarkdownRenderer];
+export const WARMABLE_SURFACES: SurfaceLoader[] = [loadStandaloneShell, loadEditorSidebar];

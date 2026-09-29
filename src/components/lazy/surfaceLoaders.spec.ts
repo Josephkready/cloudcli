@@ -16,8 +16,12 @@ import {
  * component test. This pins the array's contents directly.
  */
 describe('WARMABLE_SURFACES', () => {
-  it('warms exactly the shell, the editor, and the markdown renderer', () => {
-    expect(WARMABLE_SURFACES).toEqual([loadStandaloneShell, loadEditorSidebar, loadMarkdownRenderer]);
+  it('warms exactly the shell and the editor', () => {
+    expect(WARMABLE_SURFACES).toEqual([loadStandaloneShell, loadEditorSidebar]);
+  });
+
+  it('does not idle-warm markdown — Markdown.tsx loads it eagerly at module evaluation', () => {
+    expect(WARMABLE_SURFACES).not.toContain(loadMarkdownRenderer);
   });
 
   it('does not warm bug-report — small/rare enough to load on first click', () => {
