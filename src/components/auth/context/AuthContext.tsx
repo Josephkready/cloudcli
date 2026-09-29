@@ -2,6 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { AUTH_DISABLED, IS_PLATFORM } from '../../../constants/config';
 import { api } from '../../../utils/api';
 import { AUTH_ERROR_MESSAGES, AUTH_TOKEN_STORAGE_KEY } from '../constants';
+import {
+  discardProjectsBootPrefetch,
+  startProjectsBootPrefetch,
+} from '../../../hooks/projectsBootPrefetch';
 import type {
   AuthContextValue,
   AuthProviderProps,
@@ -52,6 +56,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setUser(null);
     setToken(null);
     clearStoredToken();
+    // Any project-list prefetch started for the session being cleared must
+    // never be handed to a later, unrelated boot (e.g. login as someone else
+    // after a 401, without a full page reload).
+    discardProjectsBootPrefetch();
   }, []);
 
   const checkOnboardingStatus = useCallback(async () => {
@@ -79,11 +87,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setIsLoading(true);
       setError(null);
 
+      // A stored token is our best available signal, before any round trip
+      // resolves, that the eventual project fetch will be authorized — start
+      // it now so it runs concurrently with the status/user/onboarding
+      // checks below instead of only after ProtectedRoute unblocks.
+      if (token) {
+        startProjectsBootPrefetch();
+      }
+
       const statusResponse = await api.auth.status();
       const statusPayload = await parseJsonSafely<AuthStatusPayload>(statusResponse);
 
       if (statusPayload?.needsSetup) {
         setNeedsSetup(true);
+        discardProjectsBootPrefetch();
         return;
       }
 
@@ -93,7 +110,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return;
       }
 
-      const userResponse = await api.auth.user();
+      // `user` and `onboardingStatus` don't depend on each other's result, so
+      // fire both round trips concurrently instead of chaining them — this
+      // turns a 3-hop serial waterfall (status -> user -> onboarding) into 2
+      // parallel branches after the initial status check.
+      const [userResponse] = await Promise.all([api.auth.user(), checkOnboardingStatus()]);
       if (!userResponse.ok) {
         clearSession();
         return;
@@ -106,10 +127,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       setUser(userPayload.user);
-      await checkOnboardingStatus();
     } catch (caughtError) {
       console.error('[Auth] Auth status check failed:', caughtError);
       setError(AUTH_ERROR_MESSAGES.authStatusCheckFailed);
+      discardProjectsBootPrefetch();
     } finally {
       setIsLoading(false);
     }
@@ -128,6 +149,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (IS_PLATFORM) {
       setUser({ username: 'platform-user' });
       setNeedsSetup(false);
+      startProjectsBootPrefetch();
       void checkOnboardingStatus().finally(() => {
         setIsLoading(false);
       });
@@ -140,6 +162,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // SSE, uploads) working unchanged; the server ignores it in this mode.
       setSession({ username: 'local' }, 'auth-disabled');
       setNeedsSetup(false);
+      startProjectsBootPrefetch();
       void checkOnboardingStatus().finally(() => {
         setIsLoading(false);
       });
