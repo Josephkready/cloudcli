@@ -101,8 +101,9 @@ a verdict. Give it a long window (90+ days — rare is not dead), and rule out
 ## Visual QA (video-debugger)
 
 `vdebug/` records the app's core journeys as video + checkpoint frames across a
-mobile/tablet/desktop/ultrawide matrix, runs DOM layout checks at every
-checkpoint, and (with `--judge`) has a vision model on OpenRouter review the
+matrix of real screens (iPhone 13 Pro, iPad Pro 11", 2K, 4K, and half-2K / third-4K
+windows; `mobile`/`tablet`/`desktop`/`ultrawide` still work as aliases), runs DOM
+layout checks at every checkpoint, and (with `--judge`) has a vision model on OpenRouter review the
 deduped video frames, animations included. Run it against the throwaway fixture
 server — synthetic transcripts, mock chat provider, never your real sessions:
 
