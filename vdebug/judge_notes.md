@@ -29,3 +29,9 @@
   control's own box for full-width rows with no neighbour to steal from — see `Reasoning`'s
   trigger and some rows in `SidebarHeader`. Either way, the control's own painted box can look
   smaller than 44px by design; its actual hit box is not. Don't flag these as too-small to tap.
+  `MessageCopyControl`'s format-select chevron combines `touch:hit-h-44` with `min-w-6` (24px):
+  the overlay only floors height, and its width tracks the painted box, so a painted box under
+  the 24px minimum width still leaves an undersized hit area even with the overlay applied —
+  `min-w-6` widens the painted box itself (with `inline-flex items-center justify-center` to
+  keep the icon centred) rather than widening the overlay past the box, which would spill into
+  the copy button 2px away in the same `gap-0.5` row.

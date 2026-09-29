@@ -109,6 +109,11 @@ describe('MessageCopyControl interactions', () => {
     const chevron = screen.getByRole('button', { name: /select copy format/i });
     expect(chevron.className).toContain('min-w-6');
     expect(chevron.className).toContain('touch:hit-h-44');
+    // `min-w-6` only grows the box; without these the icon would sit flush
+    // left instead of centred in the wider button.
+    expect(chevron.className).toContain('inline-flex');
+    expect(chevron.className).toContain('items-center');
+    expect(chevron.className).toContain('justify-center');
   });
 
   it('resets to the default format when messageType changes', () => {
