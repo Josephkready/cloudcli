@@ -98,6 +98,41 @@ Reading the output takes judgement: zero usage is a *candidate* for removal, not
 a verdict. Give it a long window (90+ days — rare is not dead), and rule out
 "unused because it's broken or undiscoverable" before trusting a zero.
 
+## Visual QA (video-debugger)
+
+`vdebug/` records the app's core journeys as video + checkpoint frames across a
+mobile/tablet/desktop/ultrawide matrix, runs DOM layout checks at every
+checkpoint, and (with `--judge`) has a vision model on OpenRouter review the
+deduped video frames, animations included. Run it against the throwaway fixture
+server — synthetic transcripts, mock chat provider, never your real sessions:
+
+```bash
+npx tsx --tsconfig bench/tsconfig.json vdebug/serve-fixture.ts   # prints VDEBUG_BASE_URL=...
+python3 vdebug/vdebug.py list
+python3 vdebug/vdebug.py record --base-url $VDEBUG_BASE_URL --viewports all --judge
+```
+
+Read `vdebug-runs/latest/report.md` (gitignored). `--judge` needs
+`OPENROUTER_API_KEY` and `ffmpeg`; Python needs `playwright`. Flows live in
+`vdebug/flows/` (role/label/testid locators only). **After changing front-end
+code, re-record the flows that touch those screens before opening a PR.** Full
+method: the `video-debugger` skill.
+
+**Real-user flow capture.** `public/vd-recorder.js` sends intent events to
+`POST /api/_vd/events`, stored in `flows.db` beside `DATABASE_PATH`
+(`/var/lib/cloudcli/flows.db` on dante; override with `VD_FLOWS_DB`). No input
+values, no tab titles, and no names from `data-vd-mask` regions (transcript,
+composer, conversation/project lists, search results, session tabs, editor);
+automation (`navigator.webdriver`) is never recorded. Retention is 30 days
+(`VD_CAPTURE_RETENTION_DAYS`), pruned in-process. `VD_CAPTURE_ENABLED=false`
+turns it off. The script tag's `data-sample` (in `index.html`, default `1.0`) is the
+fraction of browser sessions recorded; `0` records none. Mine it once real traffic accumulates:
+
+```bash
+python3 vdebug/capture/flowstore.py stats --db /var/lib/cloudcli/flows.db
+python3 vdebug/capture/flowstore.py mine  --db /var/lib/cloudcli/flows.db --min-sessions 3 --out /tmp/mined.json
+```
+
 ## Reporting bugs
 
 The bug icon in the app's top panel opens a reporter: write what went wrong, and

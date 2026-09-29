@@ -499,7 +499,7 @@ export default function SidebarConversationsList({
         const SectionIcon = meta.icon;
 
         return (
-          <div key={status} className="space-y-1">
+          <div data-vd-mask="" key={status} className="space-y-1">
             <div className="flex items-center gap-1.5 px-1 py-1">
               <SectionIcon className={cn('h-3 w-3 flex-shrink-0', meta.iconClassName)} />
               <span className="text-xs font-medium text-foreground">{t(meta.labelKey, meta.labelFallback)}</span>

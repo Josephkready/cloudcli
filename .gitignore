@@ -154,3 +154,5 @@ cloudcli-sidebar.html
 test-results/
 playwright-report/
 playwright/.cache/
+vdebug-runs/
+__pycache__/

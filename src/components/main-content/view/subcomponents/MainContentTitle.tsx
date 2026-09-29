@@ -75,7 +75,7 @@ export default function MainContentTitle({
   const showChatNewSession = activeTab === 'chat' && !selectedSession;
 
   return (
-    <div className="scrollbar-hide flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+    <div data-vd-mask="" className="scrollbar-hide flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
       {showSessionIcon && (
         <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
           <SessionProviderLogo provider={selectedSession?.__provider} className="h-4 w-4" />

@@ -106,6 +106,13 @@
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
     <!--
+      video-debugger real-user flow capture (intent events only, no content; see
+      server/modules/vdebug-capture/). The server swaps this for a no-op when
+      VD_CAPTURE_ENABLED=false. Deferred and dependency-free: it can never block
+      or break the app.
+    -->
+    <script src="/vd-recorder.js" data-endpoint="/api/_vd/events" data-sample="1.0" defer></script>
+    <!--
       The service worker is registered in src/main.jsx and nowhere else (#372).
       An inline copy used to run here on `load` as well: harmless, since both
       calls resolve to the same registration for the same script and scope, but

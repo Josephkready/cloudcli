@@ -128,7 +128,7 @@ export default function SidebarNewConversationButton({
       </Button>
 
       {isOpen && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg">
+        <div data-vd-mask="" className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg">
           <Command filter={filterFolders}>
             {/* No autoFocus: opening the picker is a *browse* action — most users
                 have a handful of folders and want to tap one, so raising the
