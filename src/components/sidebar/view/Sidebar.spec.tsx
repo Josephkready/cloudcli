@@ -277,4 +277,46 @@ describe('Sidebar', () => {
       'proj-1',
     );
   });
+
+  // Sidebar perf audit finding 1: SidebarProjectItem/SidebarSessionItem/
+  // SidebarProjectSessions/ConversationRow are React.memo'd downstream, which
+  // only holds if the callback props Sidebar.tsx builds are referentially
+  // stable across a render that doesn't touch them. This pins that contract
+  // directly instead of relying on RowMemoization.render-count.spec.tsx alone
+  // (that spec proves memo() behaves correctly given already-stable props; it
+  // can't catch a regression in Sidebar.tsx itself, e.g. a useCallback losing
+  // its memoization or gaining an unstable dependency).
+  it('keeps its callback props referentially stable across an unrelated re-render', () => {
+    const controller = makeController();
+    useSidebarController.mockReturnValue(controller);
+
+    const { rerender } = render(<Sidebar {...baseSidebarProps} />);
+    const before = {
+      onDeleteArchivedSession: capturedContentProps.onDeleteArchivedSession,
+      onConversationResultClick: capturedContentProps.onConversationResultClick,
+      onRefresh: capturedContentProps.onRefresh,
+      onCreateProject: capturedContentProps.onCreateProject,
+      projectListProps: capturedContentProps.projectListProps as Record<string, unknown>,
+    };
+
+    // An unrelated prop change — `settingsInitialTab` only flows to
+    // SidebarModals, never into projectListProps or the callbacks above —
+    // forces Sidebar to re-render without touching them.
+    rerender(<Sidebar {...baseSidebarProps} settingsInitialTab="voice" />);
+
+    expect(capturedContentProps.onDeleteArchivedSession).toBe(before.onDeleteArchivedSession);
+    expect(capturedContentProps.onConversationResultClick).toBe(before.onConversationResultClick);
+    expect(capturedContentProps.onRefresh).toBe(before.onRefresh);
+    expect(capturedContentProps.onCreateProject).toBe(before.onCreateProject);
+
+    // The whole projectListProps object is also stable...
+    expect(capturedContentProps.projectListProps).toBe(before.projectListProps);
+    // ...specifically because every callback inside it is, which is what
+    // actually lets SidebarProjectItem/SidebarProjectSessions/
+    // SidebarSessionItem's React.memo skip re-rendering.
+    const after = capturedContentProps.projectListProps as Record<string, unknown>;
+    for (const key of ['onSaveProjectName', 'onStartEditingSession', 'onCancelEditingSession', 'onSaveEditingSession']) {
+      expect(after[key]).toBe(before.projectListProps[key]);
+    }
+  });
 });

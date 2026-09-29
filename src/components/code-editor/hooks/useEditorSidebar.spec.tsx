@@ -1,8 +1,9 @@
 import { act, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { useEditorSidebar } from './useEditorSidebar';
 import type { Project } from '../../../types/app';
+
+import { useEditorSidebar } from './useEditorSidebar';
 
 type Sidebar = ReturnType<typeof useEditorSidebar>;
 
@@ -20,6 +21,15 @@ function Harness({ isMobile = false, project = null }: { isMobile?: boolean; pro
 }
 
 const project = { projectId: 'proj-1' } as Project;
+
+// The resize drag handler now rAF-throttles: it stores the latest mousemove
+// event and applies it on the next animation frame instead of synchronously
+// on every event (see the sidebar/code-editor perf audit's finding 5). Tests
+// that dispatch a mousemove and assert the resulting width need to flush one
+// frame first.
+const flushAnimationFrame = () => new Promise<void>((resolve) => {
+  requestAnimationFrame(() => resolve());
+});
 
 describe('useEditorSidebar', () => {
   it('opens a file, normalizing backslashes and deriving the display name', () => {
@@ -60,13 +70,14 @@ describe('useEditorSidebar', () => {
     expect(sidebar.editorExpanded).toBe(false);
   });
 
-  it('does not start a resize on mobile', () => {
+  it('does not start a resize on mobile', async () => {
     render(<Harness project={project} isMobile />);
     const event = { preventDefault: vi.fn() } as unknown as React.MouseEvent<HTMLDivElement>;
 
     act(() => sidebar.handleResizeStart(event));
-    act(() => {
+    await act(async () => {
       document.dispatchEvent(new MouseEvent('mousemove', { clientX: 100 }));
+      await flushAnimationFrame();
     });
 
     // Resize never armed, so a subsequent drag has no effect on width.
@@ -74,7 +85,7 @@ describe('useEditorSidebar', () => {
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
 
-  it('drags the handle to resize within min/max bounds, then stops on mouseup', () => {
+  it('drags the handle to resize within min/max bounds, then stops on mouseup', async () => {
     const { getByTestId } = render(<Harness project={project} />);
     const container = getByTestId('main');
     vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({
@@ -94,20 +105,23 @@ describe('useEditorSidebar', () => {
     expect(startEvent.preventDefault).toHaveBeenCalled();
     expect(document.body.style.cursor).toBe('col-resize');
 
-    act(() => {
+    await act(async () => {
       document.dispatchEvent(new MouseEvent('mousemove', { clientX: 600 }));
+      await flushAnimationFrame();
     });
     expect(sidebar.editorWidth).toBe(400);
 
     // Below min width: ignored, width stays put.
-    act(() => {
+    await act(async () => {
       document.dispatchEvent(new MouseEvent('mousemove', { clientX: 999 }));
+      await flushAnimationFrame();
     });
     expect(sidebar.editorWidth).toBe(400);
 
     // Above max width (80% of 1000 = 800): ignored.
-    act(() => {
+    await act(async () => {
       document.dispatchEvent(new MouseEvent('mousemove', { clientX: -100 }));
+      await flushAnimationFrame();
     });
     expect(sidebar.editorWidth).toBe(400);
 
@@ -117,21 +131,55 @@ describe('useEditorSidebar', () => {
     expect(document.body.style.cursor).toBe('');
 
     // Resizing has stopped, so further drags no longer move the width.
-    act(() => {
+    await act(async () => {
       document.dispatchEvent(new MouseEvent('mousemove', { clientX: 700 }));
+      await flushAnimationFrame();
     });
     expect(sidebar.editorWidth).toBe(400);
   });
 
-  it('mousemove is a no-op while not resizing, and cleans up when the container is missing', () => {
+  // Two mousemove events within the same animation frame must coalesce into
+  // one applied update (using only the latest position), not two — that's
+  // the whole point of the rAF gate (finding 5).
+  it('coalesces multiple mousemove events within one animation frame', async () => {
+    const { getByTestId } = render(<Harness project={project} />);
+    const container = getByTestId('main');
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({
+      right: 1000,
+      width: 1000,
+      left: 0,
+      top: 0,
+      bottom: 0,
+      height: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const startEvent = { preventDefault: vi.fn() } as unknown as React.MouseEvent<HTMLDivElement>;
+    act(() => sidebar.handleResizeStart(startEvent));
+
+    await act(async () => {
+      // Two events fired back-to-back, before any animation frame runs.
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 550 }));
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 600 }));
+      await flushAnimationFrame();
+    });
+
+    // Only the latest (clientX: 600 -> width 400) should have been applied.
+    expect(sidebar.editorWidth).toBe(400);
+  });
+
+  it('mousemove is a no-op while not resizing, and cleans up when the container is missing', async () => {
     render(<Harness project={project} />);
-    act(() => {
+    await act(async () => {
       document.dispatchEvent(new MouseEvent('mousemove', { clientX: 100 }));
+      await flushAnimationFrame();
     });
     expect(sidebar.editorWidth).toBe(500);
   });
 
-  it('mousemove is a no-op once the handle is detached from its container', () => {
+  it('mousemove is a no-op once the handle is detached from its container', async () => {
     // Simulates the handle's immediate parent being removed from the DOM out
     // from under an in-flight drag (e.g. the editor panel closing mid-resize):
     // `editorContainer.parentElement` (mainContainer) goes null, and the resize
@@ -145,11 +193,12 @@ describe('useEditorSidebar', () => {
 
     editorContainer.remove();
 
-    expect(() => {
-      act(() => {
+    await expect(
+      act(async () => {
         document.dispatchEvent(new MouseEvent('mousemove', { clientX: 100 }));
-      });
-    }).not.toThrow();
+        await flushAnimationFrame();
+      }),
+    ).resolves.not.toThrow();
     expect(sidebar.editorWidth).toBe(500);
   });
 });

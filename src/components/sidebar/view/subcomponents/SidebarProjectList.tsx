@@ -19,6 +19,10 @@ export type SidebarProjectListProps = {
   editingProject: string | null;
   editingName: string;
   initialSessionsLoaded: Set<string>;
+  // Kept here (not forwarded to `SidebarProjectItem`/session rows below —
+  // those read the shared `useMinuteClock` tick directly instead, see the
+  // sidebar perf audit's finding 4) purely because `SidebarContent` still
+  // reads `projectListProps.currentTime` for the archived-sessions view.
   currentTime: Date;
   editingSession: string | null;
   editingSessionName: string;
@@ -63,7 +67,6 @@ export default function SidebarProjectList({
   editingProject,
   editingName,
   initialSessionsLoaded,
-  currentTime,
   editingSession,
   editingSessionName,
   deletingProjects,
@@ -131,7 +134,6 @@ export default function SidebarProjectList({
               sessions={getProjectSessions(project)}
               initialSessionsLoaded={initialSessionsLoaded.has(project.projectId)}
               isLoadingMoreSessions={loadingMoreProjects.has(project.projectId)}
-              currentTime={currentTime}
               editingSession={editingSession}
               editingSessionName={editingSessionName}
               onEditingNameChange={onEditingNameChange}

@@ -33,5 +33,7 @@ describe('WARMABLE_SURFACES', () => {
       const mod = (await load()) as { default?: unknown };
       expect(mod.default).toBeDefined();
     }
-  });
+    // Evaluates the real xterm + CodeMirror module graphs, which can take well
+    // over the default 5s when the full suite runs on a loaded machine.
+  }, 30_000);
 });

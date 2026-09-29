@@ -203,13 +203,43 @@ export const createSessionViewModel = (
   };
 };
 
+// Keyed on the `project.sessions` array reference (not the project, which is
+// rebuilt more often e.g. by `projectsWithResolvedStarState`) so a project
+// whose only change is an optimistic star flip still reuses the same sorted
+// session list. `getAllSessions` is called once per visible project on every
+// Sidebar render (via `SidebarProjectList`), plus again independently for the
+// archived view and `buildConversationList` — without this cache each call
+// re-maps and re-sorts the full session array from scratch.
+//
+// This relies on `project.sessions` (and its elements) being treated as
+// immutable by every producer — `useProjectsState.pure.ts`'s merge/upsert/
+// remove paths all build a *new* array rather than mutating the existing one
+// in place, so a real content change always shows up as a new reference here.
+// An in-place `.push()`/mutation of an existing sessions array (or of a
+// session object already inside it) would silently return stale cached data;
+// don't add one without also busting this cache.
+const allSessionsCache = new WeakMap<ProjectSession[], SessionWithProvider[]>();
+
 export const getAllSessions = (project: Project): SessionWithProvider[] => {
-  return (project.sessions || []).map((session) => ({
-    ...session,
-    __provider: getSessionProvider(session),
-  })).sort(
-    (a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime(),
-  );
+  const sessions = project.sessions;
+  if (!sessions || sessions.length === 0) {
+    return [];
+  }
+
+  const cached = allSessionsCache.get(sessions);
+  if (cached) {
+    return cached;
+  }
+
+  const sorted = sessions
+    .map((session) => ({
+      ...session,
+      __provider: getSessionProvider(session),
+    }))
+    .sort((a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime());
+
+  allSessionsCache.set(sessions, sorted);
+  return sorted;
 };
 
 export const getProjectLastActivity = (project: Project): Date => {
