@@ -114,7 +114,10 @@ describe('useFileMentions — the @ dropdown', () => {
     act(() => rendered.result.current.setCursorPosition('hello @ind'.length));
 
     await waitFor(() => expect(rendered.result.current.showFileDropdown).toBe(true));
-    expect(rendered.result.current.filteredFiles.map((f) => f.name)).toEqual(['index.ts']);
+    // Filtering is debounced (FILE_MENTION_DEBOUNCE_MS) after the dropdown opens.
+    await waitFor(() =>
+      expect(rendered.result.current.filteredFiles.map((f) => f.name)).toEqual(['index.ts']),
+    );
   });
 
   it('closes the dropdown once a space follows the @', async () => {

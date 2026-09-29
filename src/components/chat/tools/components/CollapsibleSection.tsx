@@ -15,6 +15,11 @@ interface CollapsibleSectionProps {
    *  false for interactive content (e.g. question/answer prompts) the user
    *  should see in full without an inner scrollbar. */
   capHeight?: boolean;
+  /** Defer mounting `children` until first expanded (see `CollapsibleContent`'s
+   *  `lazyMount`). Use for heavy children (e.g. a diff computation) that
+   *  shouldn't run while the section is collapsed. Default false preserves
+   *  existing always-mounted behaviour. */
+  lazyMount?: boolean;
 }
 
 /**
@@ -30,6 +35,7 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   children,
   className = '',
   capHeight = true,
+  lazyMount = false,
 }) => {
   return (
     <Collapsible defaultOpen={open} className={cn('group/section', className)}>
@@ -83,7 +89,7 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
         </CollapsibleTrigger>
       )}
 
-      <CollapsibleContent>
+      <CollapsibleContent lazyMount={lazyMount}>
         {/* Cap expanded tool output so a large result can't dominate the chat
             (#58). Renderers with their own tighter cap (TextContent max-h-80,
             Bash max-h-80) scroll first, so this outer bound only binds for

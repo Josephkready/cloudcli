@@ -150,7 +150,7 @@ describe('ToolRenderer dispatch', () => {
   describe('collapsible / diff', () => {
     it('renders a diff viewer for Edit when createDiff is provided, and wires title-click to onFileOpen', () => {
       const onFileOpen = vi.fn();
-      render(
+      const { container } = render(
         <ToolRenderer
           toolName="Edit"
           toolInput={{ file_path: '/src/App.tsx', old_string: 'old', new_string: 'new' }}
@@ -159,10 +159,29 @@ describe('ToolRenderer dispatch', () => {
           onFileOpen={onFileOpen}
         />,
       );
-      expect(identityDiff).toHaveBeenCalledWith('old', 'new');
       // Title is the filename, and clicking it should trigger onFileOpen with the diff strings.
       fireEvent.click(screen.getByText('App.tsx'));
       expect(onFileOpen).toHaveBeenCalledWith('/src/App.tsx', { old_string: 'old', new_string: 'new' });
+
+      // Diffs default collapsed and are lazy-mounted (#WP6), so createDiff has
+      // not run yet — expand via the chevron trigger to mount the diff viewer.
+      expect(identityDiff).not.toHaveBeenCalled();
+      const trigger = container.querySelector('button[aria-expanded="false"]');
+      expect(trigger).not.toBeNull();
+      fireEvent.click(trigger as HTMLButtonElement);
+      expect(identityDiff).toHaveBeenCalledWith('old', 'new');
+    });
+
+    it('does not compute the diff while the Edit accordion stays collapsed', () => {
+      render(
+        <ToolRenderer
+          toolName="Edit"
+          toolInput={{ file_path: '/src/App.tsx', old_string: 'old', new_string: 'new' }}
+          mode="input"
+          createDiff={identityDiff}
+        />,
+      );
+      expect(identityDiff).not.toHaveBeenCalled();
     });
 
     it('omits the diff viewer entirely when createDiff is not provided', () => {

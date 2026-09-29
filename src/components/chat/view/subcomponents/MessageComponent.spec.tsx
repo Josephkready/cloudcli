@@ -351,6 +351,32 @@ describe('MessageComponent — plain content rendering', () => {
     expect(screen.getByText('{not valid json')).toBeInTheDocument();
   });
 
+  it('does not re-parse JSON content on a re-render where message.content is unchanged', () => {
+    // WP6 fix: JSON detection/pretty-printing is memoized on formattedMessageContent,
+    // so a re-render triggered by an unrelated prop must not re-run JSON.parse.
+    const parseSpy = vi.spyOn(JSON, 'parse');
+    const message = { type: 'assistant', content: '{"a":1,"b":2}' } as ChatMessage;
+    const { rerender } = render(
+      <MessageComponent message={message} prevMessage={null} createDiff={() => []} provider="claude" />,
+    );
+    expect(screen.getByText('JSON Response')).toBeInTheDocument();
+    const callsAfterFirstRender = parseSpy.mock.calls.length;
+    expect(callsAfterFirstRender).toBeGreaterThan(0);
+
+    // Re-render with the same message object but a changed unrelated prop.
+    rerender(
+      <MessageComponent
+        message={message}
+        prevMessage={null}
+        createDiff={() => []}
+        provider="claude"
+        showRawParameters
+      />,
+    );
+    expect(parseSpy.mock.calls.length).toBe(callsAfterFirstRender);
+    parseSpy.mockRestore();
+  });
+
   it('renders assistant content through Markdown', () => {
     renderMessage({ type: 'assistant', content: '**bold text**' });
     expect(screen.getByText('bold text').tagName).toBe('STRONG');
