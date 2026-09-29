@@ -5,7 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { ScrollFade, Tooltip } from '../../../../shared/view/ui';
 import type { MainContentHeaderProps } from '../../types/types';
 import { recordFeatureUse } from '../../../../utils/featureUsage';
-import BugReportDialog from '../../../bug-report/BugReportDialog';
+import LazySurface, { lazySurface } from '../../../lazy/LazySurface';
+import { loadBugReportDialog } from '../../../lazy/surfaceLoaders';
 import {
   readBrowserEnvironment,
   type BrowserEnvironment,
@@ -15,6 +16,13 @@ import MobileMenuButton from './MobileMenuButton';
 import MainContentTabSwitcher from './MainContentTabSwitcher';
 import MainContentTitle from './MainContentTitle';
 import MainContentSessionTabs from './MainContentSessionTabs';
+
+// Rarely used relative to chat itself (issue: entry-chunk audit E, WP7) — kept
+// out of the entry chunk like every other header-reachable surface. Gated on
+// `bugReportOpen` below rather than rendered unconditionally, mirroring the
+// `editingFile &&` pattern in MainContent.tsx: mounting a lazy component is
+// what triggers its import, so the guard is what keeps it off the boot path.
+const BugReportDialog = lazySurface(loadBugReportDialog);
 
 export default function MainContentHeader({
   activeTab,
@@ -134,14 +142,18 @@ export default function MainContentHeader({
         onNewSession={onNewSession}
       />
 
-      <BugReportDialog
-        open={bugReportOpen}
-        onOpenChange={handleReportBugOpenChange}
-        activeTab={activeTab}
-        selectedProject={selectedProject}
-        selectedSession={selectedSession}
-        capturedEnvironment={reportEnvironment}
-      />
+      {bugReportOpen && (
+        <LazySurface fallback={null}>
+          <BugReportDialog
+            open={bugReportOpen}
+            onOpenChange={handleReportBugOpenChange}
+            activeTab={activeTab}
+            selectedProject={selectedProject}
+            selectedSession={selectedSession}
+            capturedEnvironment={reportEnvironment}
+          />
+        </LazySurface>
+      )}
     </div>
   );
 }

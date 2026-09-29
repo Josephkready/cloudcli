@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 import { ToolRenderer } from './ToolRenderer';
 
@@ -117,7 +117,7 @@ describe('ToolRenderer dispatch', () => {
   });
 
   describe('plan type', () => {
-    it('renders PlanDisplay with a computed title and markdown content for exit_plan_mode', () => {
+    it('renders PlanDisplay with a computed title and markdown content for exit_plan_mode', async () => {
       render(
         <ToolRenderer
           toolName="exit_plan_mode"
@@ -126,7 +126,11 @@ describe('ToolRenderer dispatch', () => {
         />,
       );
       expect(screen.getByText('Implementation plan')).toBeInTheDocument();
-      expect(screen.getByText('Do the thing')).toBeInTheDocument();
+      // `Markdown` is demand-loaded (perf-audit package WP7): a plain-text
+      // fallback shows first, then this once the renderer chunk resolves.
+      await waitFor(() => {
+        expect(screen.getByText('Do the thing')).toBeInTheDocument();
+      });
     });
 
     it('marks a plan as streaming while awaiting a result', () => {
@@ -195,7 +199,7 @@ describe('ToolRenderer dispatch', () => {
   });
 
   describe('collapsible / markdown (Task tool, transitively renders Markdown.tsx)', () => {
-    it('renders the subagent prompt as markdown content', () => {
+    it('renders the subagent prompt as markdown content', async () => {
       render(
         <ToolRenderer
           toolName="Task"
@@ -204,7 +208,11 @@ describe('ToolRenderer dispatch', () => {
         />,
       );
       expect(screen.getByText(/Subagent \/ general-purpose: do work/)).toBeInTheDocument();
-      expect(screen.getByText('do', { selector: 'strong' })).toBeInTheDocument();
+      // `Markdown` is demand-loaded (perf-audit package WP7): a plain-text
+      // fallback shows first, then this once the renderer chunk resolves.
+      await waitFor(() => {
+        expect(screen.getByText('do', { selector: 'strong' })).toBeInTheDocument();
+      });
     });
 
     it('renders the subagent result content', () => {
