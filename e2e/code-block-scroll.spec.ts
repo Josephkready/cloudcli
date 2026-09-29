@@ -2,9 +2,12 @@ import { test, expect } from './fixtures';
 
 import {
   MOCK_CODE_BLOCK_SENTINEL,
+  MOCK_DIFF_FILE,
   MOCK_LONG_CODE_LINE,
   MOCK_LONG_INLINE_TOKEN,
 } from '../server/routes/mock-agent-fixtures.js';
+
+const MOCK_DIFF_FILE_NAME = MOCK_DIFF_FILE.split('/').pop()!;
 
 /**
  * A fenced code block in chat must keep its line structure and scroll sideways.
@@ -153,6 +156,15 @@ test.describe('fenced code blocks scroll instead of wrapping', () => {
   test('a tool diff scrolls as one surface, keeping the gutter aligned', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 900 });
     await sendCodeSurfaceTurn(page);
+
+    // The Edit tool's diff accordion defaults collapsed and, unlike the other
+    // surfaces in this suite, is lazy-mounted (WP6 perf fix): its content isn't
+    // in the DOM at all until first expanded. Open it via its chevron trigger
+    // (the title button next to it opens the file instead of toggling).
+    const titleButton = page.getByRole('button', { name: MOCK_DIFF_FILE_NAME });
+    await expect(titleButton).toBeVisible();
+    const diffRow = titleButton.locator('..');
+    await diffRow.locator('button[aria-expanded]').first().click();
 
     const scroller = page.locator('.chat-message [data-scrolls-x]').first();
     await expect(scroller).toBeVisible();
