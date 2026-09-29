@@ -16,11 +16,16 @@ const api = {
   user: {
     onboardingStatus: vi.fn(),
   },
+  projects: vi.fn(),
 };
 
 vi.mock('@/utils/api', () => ({ api }));
 
 const { AuthProvider, useAuth } = await import('./AuthContext');
+const {
+  __resetProjectsBootPrefetchForTests,
+  consumeProjectsBootPrefetch,
+} = await import('../../../hooks/projectsBootPrefetch');
 
 function jsonResponse(body: unknown, ok = true) {
   return { ok, json: async () => body } as Response;
@@ -72,6 +77,8 @@ describe('AuthContext', () => {
     config.IS_PLATFORM = false;
     config.AUTH_DISABLED = false;
     vi.clearAllMocks();
+    __resetProjectsBootPrefetchForTests();
+    api.projects.mockResolvedValue(jsonResponse([]));
   });
 
   afterEach(() => {
@@ -136,6 +143,7 @@ describe('AuthContext', () => {
     localStorage.setItem('auth-token', 'stale-token');
     api.auth.status.mockResolvedValue(jsonResponse({ needsSetup: false }));
     api.auth.user.mockResolvedValue(jsonResponse({}, false));
+    api.user.onboardingStatus.mockResolvedValue(jsonResponse({ hasCompletedOnboarding: true }));
 
     render(
       <AuthProvider>
@@ -151,6 +159,7 @@ describe('AuthContext', () => {
     localStorage.setItem('auth-token', 'stale-token');
     api.auth.status.mockResolvedValue(jsonResponse({ needsSetup: false }));
     api.auth.user.mockResolvedValue(jsonResponse({}));
+    api.user.onboardingStatus.mockResolvedValue(jsonResponse({ hasCompletedOnboarding: true }));
 
     render(
       <AuthProvider>
@@ -505,5 +514,69 @@ describe('AuthContext', () => {
     expect(screen.getByTestId('token')).toHaveTextContent('auth-disabled');
     expect(localStorage.getItem('auth-token')).toBe('auth-disabled');
     expect(api.auth.status).not.toHaveBeenCalled();
+  });
+
+  describe('projects boot prefetch (WP4 #1)', () => {
+    it('starts GET /api/projects in parallel with user+onboarding when a token is stored', async () => {
+      localStorage.setItem('auth-token', 'stored-token');
+      api.auth.status.mockResolvedValue(jsonResponse({ needsSetup: false }));
+      api.auth.user.mockResolvedValue(jsonResponse({ user: { username: 'restored' } }));
+      api.user.onboardingStatus.mockResolvedValue(jsonResponse({ hasCompletedOnboarding: true }));
+
+      render(
+        <AuthProvider>
+          <Probe />
+        </AuthProvider>,
+      );
+
+      await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('restored'));
+      expect(api.projects).toHaveBeenCalledTimes(1);
+      // A live prefetch is sitting there for useProjectsState to consume.
+      expect(consumeProjectsBootPrefetch()).not.toBeNull();
+    });
+
+    it('does not start a prefetch when there is no stored token', async () => {
+      api.auth.status.mockResolvedValue(jsonResponse({ needsSetup: false }));
+
+      render(
+        <AuthProvider>
+          <Probe />
+        </AuthProvider>,
+      );
+
+      await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+      expect(api.projects).not.toHaveBeenCalled();
+    });
+
+    it('discards the prefetch when the stored token is rejected by /auth/user', async () => {
+      localStorage.setItem('auth-token', 'stale-token');
+      api.auth.status.mockResolvedValue(jsonResponse({ needsSetup: false }));
+      api.auth.user.mockResolvedValue(jsonResponse({}, false));
+      api.user.onboardingStatus.mockResolvedValue(jsonResponse({ hasCompletedOnboarding: true }));
+
+      render(
+        <AuthProvider>
+          <Probe />
+        </AuthProvider>,
+      );
+
+      await waitFor(() => expect(screen.getByTestId('token')).toHaveTextContent('none'));
+      expect(api.projects).toHaveBeenCalledTimes(1);
+      expect(consumeProjectsBootPrefetch()).toBeNull();
+    });
+
+    it('starts a prefetch for the platform user and for auth-disabled mode', async () => {
+      config.IS_PLATFORM = true;
+      api.user.onboardingStatus.mockResolvedValue(jsonResponse({ hasCompletedOnboarding: true }));
+
+      render(
+        <AuthProvider>
+          <Probe />
+        </AuthProvider>,
+      );
+
+      await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+      expect(api.projects).toHaveBeenCalledTimes(1);
+    });
   });
 });

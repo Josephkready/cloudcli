@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { version } from '../../package.json';
@@ -173,20 +173,21 @@ export function VersionCheckProvider({ children }: { children: ReactNode }) {
     };
   }, [checkNow]);
 
+  const contextValue = useMemo<VersionCheckValue>(
+    () => ({
+      currentVersion: version,
+      installMode,
+      runningVersion,
+      restartRequired,
+      newBuildAvailable,
+      build: serverBuild,
+      checkNow,
+    }),
+    [installMode, runningVersion, restartRequired, newBuildAvailable, serverBuild, checkNow],
+  );
+
   return (
-    <VersionCheckContext.Provider
-      value={{
-        currentVersion: version,
-        installMode,
-        runningVersion,
-        restartRequired,
-        newBuildAvailable,
-        build: serverBuild,
-        checkNow,
-      }}
-    >
-      {children}
-    </VersionCheckContext.Provider>
+    <VersionCheckContext.Provider value={contextValue}>{children}</VersionCheckContext.Provider>
   );
 }
 

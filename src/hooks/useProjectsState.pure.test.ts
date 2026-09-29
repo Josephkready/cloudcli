@@ -103,6 +103,168 @@ describe('projectsHaveChanges', () => {
     delete withoutFlag.isStarred;
     assert.equal(projectsHaveChanges(base, [withoutFlag]), false);
   });
+
+  it('is true when a session is added, removed, or reordered', () => {
+    const withExtra = [project({ sessions: [session('s1'), session('s2')] })];
+    assert.equal(projectsHaveChanges(base, withExtra), true);
+    assert.equal(projectsHaveChanges(withExtra, base), true);
+
+    const reordered = [project({ sessions: [session('s2'), session('s1')] })];
+    assert.equal(projectsHaveChanges(withExtra, reordered), true);
+  });
+
+  it('is true for each field the sidebar/main-content UI actually reads off a session', () => {
+    const fieldOverrides: Partial<ProjectSession>[] = [
+      { id: 's1-renamed' },
+      { title: 'new title' },
+      { summary: 'new summary' },
+      { name: 'new name' },
+      { createdAt: '2026-08-01T00:00:00.000Z' },
+      { created_at: '2026-08-01T00:00:00.000Z' },
+      { updated_at: '2026-08-01T00:00:00.000Z' },
+      { lastActivity: '2026-08-01T00:00:00.000Z' },
+      { last_completed_at: '2026-08-01T00:00:00.000Z' },
+      { last_viewed_at: '2026-08-01T00:00:00.000Z' },
+      { messageCount: 42 },
+      { origin: 'cli' },
+      { liveStatus: 'working' },
+      { provider: 'codex' },
+      { __provider: 'codex' },
+      { __projectId: 'other-project' },
+    ];
+
+    for (const overrides of fieldOverrides) {
+      const changed = [project({ sessions: [session('s1', overrides)] })];
+      assert.equal(
+        projectsHaveChanges(base, changed),
+        true,
+        `expected a change to be detected for ${JSON.stringify(overrides)}`,
+      );
+    }
+  });
+
+  // Equivalence with the previous `serialize(sessions) !== serialize(sessions)`
+  // implementation, on payloads shaped like real server responses (only the
+  // known ProjectSession fields set -- no extraneous index-signature fields),
+  // which is the class of input the field-wise comparator is provably
+  // equivalent for.
+  describe('sessionsHaveChanges agrees with the old whole-array JSON.stringify comparison', () => {
+    const legacySessionsHaveChanges = (prev: ProjectSession[], next: ProjectSession[]): boolean =>
+      JSON.stringify(prev ?? null) !== JSON.stringify(next ?? null);
+
+    const fullSession = (id: string, overrides: Partial<ProjectSession> = {}): ProjectSession => ({
+      id,
+      title: `title ${id}`,
+      summary: `summary ${id}`,
+      name: `name ${id}`,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      created_at: '2026-07-01T00:00:00.000Z',
+      updated_at: '2026-07-01T00:00:00.000Z',
+      lastActivity: '2026-07-01T00:00:00.000Z',
+      last_completed_at: null,
+      last_viewed_at: null,
+      messageCount: 3,
+      origin: 'cloudcli',
+      liveStatus: 'idle',
+      provider: 'claude',
+      __provider: 'claude',
+      __projectId: 'p1',
+      ...overrides,
+    });
+
+    const cases: Array<[string, ProjectSession[], ProjectSession[]]> = [
+      ['identical', [fullSession('s1'), fullSession('s2')], [fullSession('s1'), fullSession('s2')]],
+      ['a field changed', [fullSession('s1')], [fullSession('s1', { summary: 'changed' })]],
+      ['a session appended', [fullSession('s1')], [fullSession('s1'), fullSession('s2')]],
+      ['a session removed', [fullSession('s1'), fullSession('s2')], [fullSession('s1')]],
+      ['reordered', [fullSession('s1'), fullSession('s2')], [fullSession('s2'), fullSession('s1')]],
+      ['both empty', [], []],
+      ['null-ish last_completed_at vs set', [fullSession('s1')], [fullSession('s1', { last_completed_at: '2026-07-02T00:00:00.000Z' })]],
+    ];
+
+    for (const [label, prev, next] of cases) {
+      it(label, () => {
+        assert.equal(
+          projectsHaveChanges([project({ sessions: prev })], [project({ sessions: next })]),
+          legacySessionsHaveChanges(prev, next),
+        );
+      });
+    }
+  });
+
+  it('agrees with the legacy comparison on a 50-project x 100-session fixture, and is fast', () => {
+    const legacySessionsHaveChanges = (prev: ProjectSession[], next: ProjectSession[]): boolean =>
+      JSON.stringify(prev ?? null) !== JSON.stringify(next ?? null);
+
+    const buildFixture = (mutateLastSessionSummary: boolean): Project[] =>
+      Array.from({ length: 50 }, (_, projectIndex) =>
+        project({
+          projectId: `p${projectIndex}`,
+          sessions: Array.from({ length: 100 }, (_, sessionIndex) => {
+            const id = `p${projectIndex}-s${sessionIndex}`;
+            const isLastSessionOfLastProject =
+              mutateLastSessionSummary && projectIndex === 49 && sessionIndex === 99;
+            return session(id, {
+              title: `title ${id}`,
+              createdAt: '2026-07-01T00:00:00.000Z',
+              updated_at: '2026-07-01T00:00:00.000Z',
+              messageCount: sessionIndex,
+              liveStatus: 'idle',
+              summary: isLastSessionOfLastProject ? 'mutated' : `summary ${id}`,
+            });
+          }),
+        }));
+
+    const prevFixture = buildFixture(false);
+    const unchangedFixture = buildFixture(false);
+    const changedFixture = buildFixture(true);
+
+    // Agreement with the legacy whole-array-stringify check, project by project.
+    for (let index = 0; index < prevFixture.length; index += 1) {
+      const legacy = legacySessionsHaveChanges(
+        prevFixture[index].sessions ?? [],
+        unchangedFixture[index].sessions ?? [],
+      );
+      assert.equal(projectsHaveChanges([prevFixture[index]], [unchangedFixture[index]]), legacy);
+    }
+
+    assert.equal(projectsHaveChanges(prevFixture, unchangedFixture), false);
+    assert.equal(projectsHaveChanges(prevFixture, changedFixture), true);
+
+    // Measure: field-wise comparison should be meaningfully cheaper than
+    // building two full JSON strings of every session in a 50x100 fixture.
+    const iterations = 50;
+    const start = performance.now();
+    for (let i = 0; i < iterations; i += 1) {
+      projectsHaveChanges(prevFixture, unchangedFixture);
+    }
+    const fieldWiseMs = (performance.now() - start) / iterations;
+
+    const legacyStart = performance.now();
+    for (let i = 0; i < iterations; i += 1) {
+      prevFixture.some((p, index) => {
+        const other = unchangedFixture[index];
+        return (
+          JSON.stringify(p.sessionMeta ?? null) !== JSON.stringify(other.sessionMeta ?? null) ||
+          legacySessionsHaveChanges(p.sessions ?? [], other.sessions ?? [])
+        );
+      });
+    }
+    const legacyMs = (performance.now() - legacyStart) / iterations;
+
+    console.log(
+      `[projectsHaveChanges 50x100 fixture] field-wise: ${fieldWiseMs.toFixed(3)}ms/call, ` +
+        `legacy JSON.stringify: ${legacyMs.toFixed(3)}ms/call`,
+    );
+
+    // The "nothing changed" case is the one that runs continuously in the
+    // background (idle reconnects, snapshot-stale pings) -- it must be
+    // materially cheaper, not just not-slower.
+    assert.ok(
+      fieldWiseMs < legacyMs,
+      `expected field-wise (${fieldWiseMs.toFixed(3)}ms) to be faster than legacy (${legacyMs.toFixed(3)}ms)`,
+    );
+  });
 });
 
 describe('mergeSessionProviderLists', () => {

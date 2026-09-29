@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import React from 'react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThemeProvider, useTheme } from './ThemeContext';
@@ -93,5 +94,41 @@ describe('ThemeContext theme-color sync (#371)', () => {
     expect(screen.getByRole('button')).toHaveTextContent('dark');
     fireEvent.click(screen.getByRole('button'));
     expect(screen.getByRole('button')).toHaveTextContent('light');
+  });
+
+  it('keeps a memoized context value stable across unrelated parent re-renders (WP4 #4)', () => {
+    localStorage.setItem('theme', 'light');
+    let memoRenderCount = 0;
+    let toggle: (() => void) | null = null;
+
+    const MemoConsumer = React.memo(function MemoConsumer() {
+      const { toggleDarkMode } = useTheme();
+      toggle = toggleDarkMode;
+      memoRenderCount += 1;
+      return null;
+    });
+
+    function Harness({ tick }: { tick: number }) {
+      return (
+        <ThemeProvider>
+          <span data-testid="tick">{tick}</span>
+          <MemoConsumer />
+        </ThemeProvider>
+      );
+    }
+
+    const { rerender } = render(<Harness tick={0} />);
+    expect(memoRenderCount).toBe(1);
+    const firstToggle = toggle;
+
+    // Re-rendering the provider's parent with unrelated state must not
+    // recreate `value` (and therefore must not re-render a memoized consumer)
+    // when isDarkMode/toggleDarkMode haven't changed.
+    act(() => {
+      rerender(<Harness tick={1} />);
+    });
+
+    expect(memoRenderCount).toBe(1);
+    expect(toggle).toBe(firstToggle);
   });
 });
