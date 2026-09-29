@@ -20,7 +20,7 @@
     "usage": "tsx --tsconfig server/tsconfig.json server/cli.js usage",
     "server:dev-watch": "tsx watch --tsconfig server/tsconfig.json server/index.js",
     "client": "vite",
-    "build": "npm run build:client && npm run build:server",
+    "build": "concurrently --kill-others-on-fail --names client,server -c auto \"npm run build:client\" \"npm run build:server\"",
     "build:client": "vite build && npm run build:precompress",
     "build:precompress": "tsx --tsconfig server/tsconfig.json server/shared/precompress-assets.ts dist public",
     "prebuild:server": "node -e \"require('node:fs').rmSync('dist-server', { recursive: true, force: true })\"",

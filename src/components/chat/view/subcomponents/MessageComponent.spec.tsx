@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ChatMessage } from '../../types/types';
@@ -377,9 +377,14 @@ describe('MessageComponent — plain content rendering', () => {
     parseSpy.mockRestore();
   });
 
-  it('renders assistant content through Markdown', () => {
+  it('renders assistant content through Markdown', async () => {
     renderMessage({ type: 'assistant', content: '**bold text**' });
-    expect(screen.getByText('bold text').tagName).toBe('STRONG');
+    // `Markdown` is demand-loaded (perf-audit package WP7): the raw text shows
+    // through a plain-text fallback first, then real markdown once the
+    // renderer chunk resolves.
+    await waitFor(() => {
+      expect(screen.getByText('bold text').tagName).toBe('STRONG');
+    });
   });
 
   it('renders non-assistant plain content as preformatted text, not Markdown', () => {

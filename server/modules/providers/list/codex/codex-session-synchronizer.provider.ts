@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { stat } from 'node:fs/promises';
 
+import type { DiscoveredSessionInput } from '@/modules/database/index.js';
 import { sessionsDb } from '@/modules/database/index.js';
 import { iterateJsonlLines } from '@/shared/jsonl.js';
 import { shouldExcludeProjectPath } from '@/shared/project-exclude.js';
@@ -9,6 +10,7 @@ import {
   buildLookupMap,
   extractFirstValidJsonlData,
   findFilesRecursivelyModifiedAfter,
+  mapWithConcurrency,
   normalizeSessionName,
   readFileHead,
   readFileTail,
@@ -32,6 +34,12 @@ type CodexTitleCandidates = {
 const CODEX_TITLE_SCAN_BYTES = 256 * 1024;
 
 /**
+ * Upper bound on concurrent transcript reads during a scan, mirroring the
+ * Claude synchronizer's `CLAUDE_SYNC_CONCURRENCY` (same directory tree).
+ */
+const CODEX_SYNC_CONCURRENCY = 12;
+
+/**
  * Session indexer for Codex transcript artifacts.
  */
 export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
@@ -50,12 +58,33 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
       since ?? null
     );
 
-    let processed = 0;
-    for (const filePath of files) {
-      const parsed = await this.processSessionFile(filePath, nameMap);
-      if (!parsed) {
+    // Read/parse transcripts with bounded concurrency, mirroring the Claude
+    // synchronizer's pattern in the same directory tree: overlap filesystem
+    // I/O across a large session library instead of scanning strictly serially.
+    const parsedRecords = await mapWithConcurrency(
+      files,
+      CODEX_SYNC_CONCURRENCY,
+      async (filePath) => {
+        const parsed = await this.processSessionFile(filePath, nameMap);
+        if (!parsed) {
+          return null;
+        }
+
+        const timestamps = await readFileTimestamps(filePath);
+        return { filePath, parsed, timestamps };
+      }
+    );
+
+    // DB reads/writes stay serial and in on-disk order after the concurrent
+    // parse, same as Claude: mutation-free parsing overlaps, but the
+    // "was it already named" check + upsert run in program order so two files
+    // that map to the same session id can't race each other.
+    const sessionInputs: DiscoveredSessionInput[] = [];
+    for (const record of parsedRecords) {
+      if (!record) {
         continue;
       }
+      const { filePath, parsed, timestamps } = record;
 
       const existingSession = sessionsDb.getSessionByProviderSessionId(parsed.sessionId)
         ?? sessionsDb.getSessionById(parsed.sessionId);
@@ -66,20 +95,22 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
         }
       }
 
-      const timestamps = await readFileTimestamps(filePath);
-      sessionsDb.createSession(
-        parsed.sessionId,
-        this.provider,
-        parsed.projectPath,
-        parsed.sessionName,
-        timestamps.createdAt,
-        timestamps.updatedAt,
-        filePath
-      );
-      processed += 1;
+      sessionInputs.push({
+        providerSessionId: parsed.sessionId,
+        provider: this.provider,
+        projectPath: parsed.projectPath,
+        customName: parsed.sessionName,
+        createdAt: timestamps.createdAt,
+        updatedAt: timestamps.updatedAt,
+        jsonlPath: filePath,
+      });
     }
 
-    return processed;
+    // Batch the upserts in one transaction (Claude synchronizer's #188 fix):
+    // per-row commits each fsync once, which dominates a large cold scan.
+    sessionsDb.createSessions(sessionInputs);
+
+    return sessionInputs.length;
   }
 
   /**

@@ -446,25 +446,29 @@ test('path traversal cannot be used to reach a variant outside the asset root', 
         await stat(path.join(outsideDir, 'secret.js.br'));
 
         const middleware = createPrecompressedAssets({ root: distDir });
-        const call = (url: string): { url: string; nexted: boolean } => {
+        // The sibling-file check runs on fs.promises.stat now (no more
+        // blocking fs.statSync on the request path), so `next()` firing is
+        // the only signal the rewrite decision is done — wait for it instead
+        // of reading req.url synchronously right after calling middleware().
+        const call = (url: string): Promise<{ url: string; nexted: boolean }> => {
             const req = { method: 'GET', url, headers: { 'accept-encoding': 'br' } };
-            let nexted = false;
-            middleware(req as never, {} as never, () => {
-                nexted = true;
+            return new Promise((resolve) => {
+                middleware(req as never, {} as never, () => {
+                    resolve({ url: req.url, nexted: true });
+                });
             });
-            return { url: req.url, nexted };
         };
 
         // Positive control: an in-root asset IS rewritten, so the negative case
         // below is a rejection and not an accident of the fixture.
-        assert.equal(call('/assets/app.js').url, '/assets/app.js.br');
+        assert.equal((await call('/assets/app.js')).url, '/assets/app.js.br');
 
         for (const escaping of [
             '/assets/../../outside/secret.js',
             '/../outside/secret.js',
             '/assets/%2e%2e/%2e%2e/outside/secret.js',
         ]) {
-            const result = call(escaping);
+            const result = await call(escaping);
             assert.equal(result.url, escaping, `${escaping} must not be rewritten`);
             assert.equal(result.nexted, true, `${escaping} must be passed on untouched`);
         }

@@ -35,6 +35,20 @@ test('compileGlobToRegex: regex metacharacters in literals are escaped', () => {
   assert.equal(regex.test('/pathXwith(parens)/file+1'), false);
 });
 
+test('compileGlobToRegex: memoizes the compiled RegExp per pattern string', () => {
+  // Perf fix under test: recompiling the same pattern on every call is what
+  // made a cold session-library sync re-run the glob compiler thousands of
+  // times for identical output. Asserting reference equality (not just equal
+  // behavior) is what would actually fail if the memoization were reverted.
+  const first = compileGlobToRegex('/unique-memo-check/**');
+  const second = compileGlobToRegex('/unique-memo-check/**');
+  assert.equal(first, second);
+
+  // A different pattern must still get its own (different) compiled regex.
+  const other = compileGlobToRegex('/another-unique-memo-check/**');
+  assert.notEqual(first, other);
+});
+
 test('parseEnvExcludePatterns: returns null when env var is undefined', () => {
   assert.equal(parseEnvExcludePatterns(undefined), null);
 });
