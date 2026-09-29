@@ -47,6 +47,70 @@ export const normalizeSessionProvider = (session: ProjectSession): ProjectSessio
   __provider: getSessionProvider(session),
 });
 
+// Every `ProjectSession` field actually read anywhere in sidebar/main-content
+// rendering, sorting, or filtering (row title/date, sort key, the "Done"
+// indicator, the CLI-origin badge, provider logo, live-status badge) --
+// audited against F.report.md finding #2. `ProjectSession` also carries a
+// `[key: string]: unknown` index signature for forward-compat server fields,
+// but nothing in that rendering path reads through it today; a field added
+// there later that should also gate a re-render needs to be added here too
+// (missing it only means an unchanged-looking row isn't redrawn on the next
+// reconcile, not that stale data is shown -- the field itself still updates
+// in state, `projectsHaveChanges` just wouldn't have flagged it as "changed").
+const SESSION_COMPARE_FIELDS = [
+  'id',
+  'title',
+  'summary',
+  'name',
+  'createdAt',
+  'created_at',
+  'updated_at',
+  'lastActivity',
+  'last_completed_at',
+  'last_viewed_at',
+  'messageCount',
+  'origin',
+  'liveStatus',
+  'provider',
+  '__provider',
+  '__projectId',
+] as const satisfies readonly (keyof ProjectSession)[];
+
+/**
+ * Field-wise replacement for `serialize(sessions) !== serialize(sessions)`.
+ * Whole-array `JSON.stringify` of every session (summaries, timestamps, every
+ * flag) on both sides of the comparison was O(total loaded sessions) work
+ * done twice, on every `fetchProjects`/silent-refresh/sidebar-refresh call
+ * (F.report.md finding #2) -- including background reconciles the user never
+ * directly triggered. This walks both arrays once, short-circuits on length,
+ * and stops at the first field that actually differs instead of building two
+ * full JSON strings first.
+ */
+export const sessionsHaveChanges = (
+  prevSessions: ProjectSession[] | undefined,
+  nextSessions: ProjectSession[] | undefined,
+): boolean => {
+  const prev = prevSessions ?? [];
+  const next = nextSessions ?? [];
+
+  if (prev.length !== next.length) {
+    return true;
+  }
+
+  for (let index = 0; index < next.length; index += 1) {
+    const prevSession = prev[index];
+    const nextSession = next[index];
+
+    for (const field of SESSION_COMPARE_FIELDS) {
+      if (prevSession[field] !== nextSession[field]) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+};
+
 export const projectsHaveChanges = (
   prevProjects: Project[],
   nextProjects: Project[],
@@ -67,7 +131,7 @@ export const projectsHaveChanges = (
       nextProject.fullPath !== prevProject.fullPath ||
       Boolean(nextProject.isStarred) !== Boolean(prevProject.isStarred) ||
       serialize(nextProject.sessionMeta) !== serialize(prevProject.sessionMeta) ||
-      serialize(nextProject.sessions) !== serialize(prevProject.sessions)
+      sessionsHaveChanges(prevProject.sessions, nextProject.sessions)
     );
   });
 };

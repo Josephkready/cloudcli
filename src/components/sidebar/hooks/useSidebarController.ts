@@ -26,6 +26,8 @@ import {
   sortProjects,
 } from '../utils/utils';
 
+import { useMinuteClock } from './useMinuteClock';
+
 type SnippetHighlight = {
   start: number;
   end: number;
@@ -123,7 +125,11 @@ export function useSidebarController({
   const [showNewProject, setShowNewProject] = useState(false);
   const [editingName, setEditingName] = useState('');
   const [initialSessionsLoaded, setInitialSessionsLoaded] = useState<Set<string>>(new Set());
-  const [currentTime, setCurrentTime] = useState(new Date());
+  // Shared once-a-minute clock (see useMinuteClock) instead of a private
+  // setInterval — the archived-sessions view (the one remaining consumer of
+  // this value; sidebar rows read the clock directly now, see finding 4)
+  // still needs a ticking "now" to age its timestamps.
+  const currentTime = useMinuteClock();
   const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>(() => readProjectSortOrder());
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [editingSession, setEditingSession] = useState<string | null>(null);
@@ -157,14 +163,6 @@ export function useSidebarController({
   const isSidebarCollapsed = !isMobile && !sidebarVisible;
   const activeSessionIds = useMemo(() => new Set(activeSessions.keys()), [activeSessions]);
   const runningSessionsCount = activeSessionIds.size;
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 60000);
-
-    return () => clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     setInitialSessionsLoaded(new Set());
@@ -438,15 +436,24 @@ export function useSidebarController({
     [onSessionSelect],
   );
 
+  // Precompute the starred-project ids once per `projects` change instead of
+  // scanning the whole array with `.some()` inside `resolveProjectStarState`,
+  // which SidebarProjectList previously called once per row on every render —
+  // an O(n^2) scan over the project list.
+  const starredProjectIds = useMemo(
+    () => new Set(projects.filter((project) => Boolean(project.isStarred)).map((project) => project.projectId)),
+    [projects],
+  );
+
   const resolveProjectStarState = useCallback(
     (projectId: string): boolean => {
       if (optimisticStarByProjectId.has(projectId)) {
         return Boolean(optimisticStarByProjectId.get(projectId));
       }
 
-      return projects.some((project) => project.projectId === projectId && Boolean(project.isStarred));
+      return starredProjectIds.has(projectId);
     },
-    [optimisticStarByProjectId, projects],
+    [optimisticStarByProjectId, starredProjectIds],
   );
 
   const toggleStarProject = useCallback((projectId: string) => {

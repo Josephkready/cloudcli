@@ -7,11 +7,10 @@ import test from 'node:test';
 import { CodexProviderAuth } from './codex-auth.provider.js';
 
 // checkInstalled() shells out to `${CODEX_CLI_PATH || 'codex'} --version` via
-// cross-spawn's sync API. cross-spawn's sync API does NOT throw for a missing
-// executable -- it resolves with `result.error` set to the ENOENT error --
-// so pointing CODEX_CLI_PATH at a real executable / a nonexistent path
-// deterministically controls the "installed" branch without touching the
-// real Codex CLI.
+// node:child_process's async execFile, which rejects for a missing
+// executable (ENOENT) -- so pointing CODEX_CLI_PATH at a real executable / a
+// nonexistent path deterministically controls the "installed" branch
+// without touching the real Codex CLI.
 const REAL_EXECUTABLE = '/bin/echo';
 const MISSING_EXECUTABLE = '/definitely/does/not/exist/codex-cli';
 

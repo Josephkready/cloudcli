@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useDeviceSettings } from '../../../hooks/useDeviceSettings';
@@ -7,7 +7,7 @@ import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { useSidebarController } from '../hooks/useSidebarController';
 import { usePaletteOps } from '../../../contexts/PaletteOpsContext';
 import type { LLMProvider } from '../../../types/app';
-import type { SidebarProps } from '../types/types';
+import type { ArchivedSessionListItem, SidebarProps } from '../types/types';
 
 import SidebarCollapsed from './subcomponents/SidebarCollapsed';
 import SidebarContent from './subcomponents/SidebarContent';
@@ -128,54 +128,165 @@ function Sidebar({
     void paletteOps.refreshProjects();
   };
 
-  const projectListProps: SidebarProjectListProps = {
-    projects,
-    filteredProjects,
-    selectedProject,
-    selectedSession,
-    isLoading,
-    loadingProgress,
-    expandedProjects,
-    editingProject,
-    editingName,
-    initialSessionsLoaded,
-    currentTime,
-    editingSession,
-    editingSessionName,
-    deletingProjects,
-    getProjectSessions,
-    loadingMoreProjects,
-    activeSessions,
-    isProjectStarred,
-    onEditingNameChange: setEditingName,
-    onToggleProject: toggleProject,
-    onProjectSelect: handleProjectSelect,
-    onToggleStarProject: toggleStarProject,
-    onStartEditingProject: startEditing,
-    onCancelEditingProject: cancelEditing,
-    onSaveProjectName: (projectName) => {
+  // Stabilized so `React.memo` on the row components (SidebarProjectItem,
+  // SidebarSessionItem, SidebarProjectSessions, ConversationRow) actually
+  // holds: an inline arrow recreated every Sidebar render would defeat memo
+  // just as badly as no memo at all, since it always compares unequal.
+  const onSaveProjectName = useCallback(
+    (projectName: string) => {
       void saveProjectName(projectName);
     },
-    onDeleteProject: requestProjectDelete,
-    onSessionSelect: handleSessionClick,
-    onDeleteSession: showDeleteSessionConfirmation,
-    onArchiveSession: archiveSession,
-    onLoadMoreSessions: loadMoreSessionsForProject,
-    onNewSession,
-    onEditingSessionNameChange: setEditingSessionName,
-    onStartEditingSession: (sessionId, initialName) => {
+    [saveProjectName],
+  );
+
+  const onStartEditingSession = useCallback(
+    (sessionId: string, initialName: string) => {
       setEditingSession(sessionId);
       setEditingSessionName(initialName);
     },
-    onCancelEditingSession: () => {
-      setEditingSession(null);
-      setEditingSessionName('');
-    },
-    onSaveEditingSession: (projectName: string, sessionId: string, summary: string, provider: LLMProvider) => {
+    [setEditingSession, setEditingSessionName],
+  );
+
+  const onCancelEditingSession = useCallback(() => {
+    setEditingSession(null);
+    setEditingSessionName('');
+  }, [setEditingSession, setEditingSessionName]);
+
+  const onSaveEditingSession = useCallback(
+    (projectName: string, sessionId: string, summary: string, provider: LLMProvider) => {
       void updateSessionSummary(projectName, sessionId, summary, provider);
     },
-    t,
-  };
+    [updateSessionSummary],
+  );
+
+  const onDeleteArchivedSession = useCallback(
+    (session: ArchivedSessionListItem) => {
+      showDeleteSessionConfirmation(
+        session.projectId,
+        session.sessionId,
+        session.sessionTitle,
+        session.provider,
+        { isArchived: true },
+      );
+    },
+    [showDeleteSessionConfirmation],
+  );
+
+  const onConversationResultClick = useCallback(
+    (projectId: string | null, sessionId: string, provider: string, messageTimestamp?: string | null, messageSnippet?: string | null) => {
+      // `projectId` (DB key) is the canonical identifier post-migration.
+      // The server emits null when it can't resolve a project row for
+      // the search hit; treat that as "no project" and still navigate
+      // to the session so the user can open it from the URL.
+      const resolvedProvider = (provider || 'claude') as LLMProvider;
+      const project = projectId ? projects.find(p => p.projectId === projectId) : null;
+      const searchTarget = { __searchTargetTimestamp: messageTimestamp || null, __searchTargetSnippet: messageSnippet || null };
+      const sessionObj = {
+        id: sessionId,
+        __provider: resolvedProvider,
+        __projectId: projectId ?? undefined,
+        ...searchTarget,
+      };
+      if (project) {
+        handleProjectSelect(project);
+        const sessions = getProjectSessions(project);
+        const existing = sessions.find(s => s.id === sessionId);
+        if (existing) {
+          handleSessionClick({ ...existing, ...searchTarget }, project.projectId);
+        } else {
+          handleSessionClick(sessionObj, project.projectId);
+        }
+      } else {
+        handleSessionClick(sessionObj, projectId ?? '');
+      }
+    },
+    [projects, handleProjectSelect, getProjectSessions, handleSessionClick],
+  );
+
+  const onRefreshProjects = useCallback(() => {
+    void refreshProjects();
+  }, [refreshProjects]);
+
+  const onCreateProject = useCallback(() => setShowNewProject(true), [setShowNewProject]);
+
+  const projectListProps: SidebarProjectListProps = useMemo(
+    () => ({
+      projects,
+      filteredProjects,
+      selectedProject,
+      selectedSession,
+      isLoading,
+      loadingProgress,
+      expandedProjects,
+      editingProject,
+      editingName,
+      initialSessionsLoaded,
+      currentTime,
+      editingSession,
+      editingSessionName,
+      deletingProjects,
+      getProjectSessions,
+      loadingMoreProjects,
+      activeSessions,
+      isProjectStarred,
+      onEditingNameChange: setEditingName,
+      onToggleProject: toggleProject,
+      onProjectSelect: handleProjectSelect,
+      onToggleStarProject: toggleStarProject,
+      onStartEditingProject: startEditing,
+      onCancelEditingProject: cancelEditing,
+      onSaveProjectName,
+      onDeleteProject: requestProjectDelete,
+      onSessionSelect: handleSessionClick,
+      onDeleteSession: showDeleteSessionConfirmation,
+      onArchiveSession: archiveSession,
+      onLoadMoreSessions: loadMoreSessionsForProject,
+      onNewSession,
+      onEditingSessionNameChange: setEditingSessionName,
+      onStartEditingSession,
+      onCancelEditingSession,
+      onSaveEditingSession,
+      t,
+    }),
+    [
+      projects,
+      filteredProjects,
+      selectedProject,
+      selectedSession,
+      isLoading,
+      loadingProgress,
+      expandedProjects,
+      editingProject,
+      editingName,
+      initialSessionsLoaded,
+      currentTime,
+      editingSession,
+      editingSessionName,
+      deletingProjects,
+      getProjectSessions,
+      loadingMoreProjects,
+      activeSessions,
+      isProjectStarred,
+      setEditingName,
+      toggleProject,
+      handleProjectSelect,
+      toggleStarProject,
+      startEditing,
+      cancelEditing,
+      onSaveProjectName,
+      requestProjectDelete,
+      handleSessionClick,
+      showDeleteSessionConfirmation,
+      archiveSession,
+      loadMoreSessionsForProject,
+      onNewSession,
+      setEditingSessionName,
+      onStartEditingSession,
+      onCancelEditingSession,
+      onSaveEditingSession,
+      t,
+    ],
+  );
 
   return (
     <>
@@ -228,47 +339,11 @@ function Sidebar({
             onRestoreArchivedProject={restoreArchivedProject}
             onArchivedSessionClick={openArchivedSession}
             onRestoreArchivedSession={restoreArchivedSession}
-            onDeleteArchivedSession={(session) => {
-              showDeleteSessionConfirmation(
-                session.projectId,
-                session.sessionId,
-                session.sessionTitle,
-                session.provider,
-                { isArchived: true },
-              );
-            }}
-            onConversationResultClick={(projectId: string | null, sessionId: string, provider: string, messageTimestamp?: string | null, messageSnippet?: string | null) => {
-              // `projectId` (DB key) is the canonical identifier post-migration.
-              // The server emits null when it can't resolve a project row for
-              // the search hit; treat that as "no project" and still navigate
-              // to the session so the user can open it from the URL.
-              const resolvedProvider = (provider || 'claude') as LLMProvider;
-              const project = projectId ? projects.find(p => p.projectId === projectId) : null;
-              const searchTarget = { __searchTargetTimestamp: messageTimestamp || null, __searchTargetSnippet: messageSnippet || null };
-              const sessionObj = {
-                id: sessionId,
-                __provider: resolvedProvider,
-                __projectId: projectId ?? undefined,
-                ...searchTarget,
-              };
-              if (project) {
-                handleProjectSelect(project);
-                const sessions = getProjectSessions(project);
-                const existing = sessions.find(s => s.id === sessionId);
-                if (existing) {
-                  handleSessionClick({ ...existing, ...searchTarget }, project.projectId);
-                } else {
-                  handleSessionClick(sessionObj, project.projectId);
-                }
-              } else {
-                handleSessionClick(sessionObj, projectId ?? '');
-              }
-            }}
-            onRefresh={() => {
-              void refreshProjects();
-            }}
+            onDeleteArchivedSession={onDeleteArchivedSession}
+            onConversationResultClick={onConversationResultClick}
+            onRefresh={onRefreshProjects}
             isRefreshing={isRefreshing}
-            onCreateProject={() => setShowNewProject(true)}
+            onCreateProject={onCreateProject}
             onCollapseSidebar={handleCollapseSidebar}
             restartRequired={restartRequired}
             currentVersion={currentVersion}

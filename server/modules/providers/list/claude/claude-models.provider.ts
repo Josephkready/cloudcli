@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
@@ -11,6 +11,7 @@ import type {
 } from '@/shared/types.js';
 import {
   buildDefaultProviderCurrentActiveModel,
+  readFileTail,
   writeProviderSessionActiveModelChange,
 } from '@/shared/utils.js';
 import { extractTaggedContent } from '@/modules/providers/shared/transcript/transcript-text.js';
@@ -323,12 +324,50 @@ export const resolveClaudeSessionModelFromTranscript = (
   return null;
 };
 
+/**
+ * How much of the end of a transcript to search for the most recent model
+ * event before falling back to a full read. Mirrors
+ * `claude-token-usage.provider.ts`'s `USAGE_SCAN_TAIL_BYTES` and
+ * `session-live-status.service.ts`'s tail-read pattern: a model change is a
+ * recent event, so the answer is almost always in the last few turns.
+ */
+const ACTIVE_MODEL_TAIL_BYTES = 256 * 1024;
+const ACTIVE_MODEL_MAX_TAIL_BYTES = 4 * 1024 * 1024;
+
 const readClaudeSessionModelFromJsonl = async (
   sessionId: string,
   jsonlPath: string,
 ): Promise<ProviderCurrentActiveModel | null> => {
-  const content = await readFile(jsonlPath, 'utf8');
-  const model = resolveClaudeSessionModelFromTranscript(sessionId, content);
+  // `resolveClaudeSessionModelFromTranscript` already scans newest-first and
+  // returns on the first hit, so it was already designed to want only the
+  // tail; loading the whole transcript first was the one part left undone.
+  // Grow the window if the tail parsed nothing (e.g. it landed entirely
+  // inside one oversized tool_use event), bounded by the file size and a
+  // hard cap, falling back to a full read only if that cap is reached.
+  //
+  // `size` is a single snapshot, but each `readFileTail` call below re-stats
+  // the file, so a transcript that grows mid-loop can make this bound stale
+  // by one write. `resolveClaudeSessionModelFromTranscript` already tolerates
+  // malformed/partial lines via try/catch, so a stale bound only affects loop
+  // termination timing (one extra or one fewer growth step), never a wrong
+  // parsed result -- the same tradeoff `session-live-status.service.ts`'s
+  // tail read already accepts.
+  const { size } = await stat(jsonlPath);
+  let windowBytes = ACTIVE_MODEL_TAIL_BYTES;
+  let tail = await readFileTail(jsonlPath, windowBytes);
+  let model = resolveClaudeSessionModelFromTranscript(sessionId, tail);
+
+  while (!model && windowBytes < size && windowBytes < ACTIVE_MODEL_MAX_TAIL_BYTES) {
+    windowBytes = Math.min(windowBytes * 4, ACTIVE_MODEL_MAX_TAIL_BYTES);
+    tail = await readFileTail(jsonlPath, windowBytes);
+    model = resolveClaudeSessionModelFromTranscript(sessionId, tail);
+  }
+
+  if (!model && windowBytes < size) {
+    const content = await readFile(jsonlPath, 'utf8');
+    model = resolveClaudeSessionModelFromTranscript(sessionId, content);
+  }
+
   return model ? { model } : null;
 };
 

@@ -125,6 +125,41 @@ test('getAllSessions returns [] when a project has no sessions array', () => {
   assert.deepEqual(getAllSessions(project({ sessions: undefined })), []);
 });
 
+// Perf audit finding 3: SidebarProjectList calls getProjectSessions (->
+// getAllSessions) once per visible project on every Sidebar render; without
+// caching that's a fresh map+sort of the whole session array every time, even
+// when nothing changed. The fix caches by the `project.sessions` array
+// reference so an unrelated re-render (a different project's star toggling,
+// the shared clock tick, etc.) reuses the same sorted array — which also lets
+// SidebarProjectItem's React.memo (finding 1) see an unchanged `sessions`
+// prop instead of a new array reference every time.
+test('getAllSessions caches its result per `sessions` array reference', () => {
+  const sessions = [
+    session({ id: 'a', lastActivity: '2025-01-01T00:00:00.000Z' }),
+    session({ id: 'b', lastActivity: '2026-01-01T00:00:00.000Z' }),
+  ];
+  const p = project({ sessions });
+
+  const first = getAllSessions(p);
+  const second = getAllSessions(p);
+  assert.equal(first, second, 'repeat calls for the same sessions array reuse the cached result');
+
+  // A *new* project object wrapping the exact same `sessions` array (as
+  // `projectsWithResolvedStarState` produces via `{ ...project, isStarred }`
+  // when only some other project's star changed) still hits the cache.
+  const pWithDifferentIdentity: Project = { ...p, isStarred: true };
+  const third = getAllSessions(pWithDifferentIdentity);
+  assert.equal(third, first, 'a rebuilt project object sharing the same sessions array reuses the cache');
+
+  // A project whose sessions actually changed gets recomputed, not stale data.
+  const pWithNewSessions = project({
+    sessions: [session({ id: 'c', lastActivity: '2027-01-01T00:00:00.000Z' })],
+  });
+  const fourth = getAllSessions(pWithNewSessions);
+  assert.notEqual(fourth, first);
+  assert.deepEqual(fourth.map((s) => s.id), ['c']);
+});
+
 test('getProjectLastActivity returns the newest session date, or epoch 0 when empty', () => {
   assert.equal(getProjectLastActivity(project({ sessions: [] })).getTime(), 0);
   const p = project({

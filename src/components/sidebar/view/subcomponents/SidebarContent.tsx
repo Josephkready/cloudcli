@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { useCallback, type ReactNode } from 'react';
 import { Archive, ChevronRight, Folder, MessageSquare, RotateCcw, Search, Trash2 } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -6,7 +6,7 @@ import { cn } from '../../../../lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, ScrollArea } from '../../../../shared/view/ui';
 import type { Project } from '../../../../types/app';
 import type { ConversationSearchResults, SearchProgress } from '../../hooks/useSidebarController';
-import type { ArchivedProjectListItem, ArchivedSessionListItem, SidebarOverlay } from '../../types/types';
+import type { ArchivedProjectListItem, ArchivedSessionListItem, SessionWithProvider, SidebarOverlay } from '../../types/types';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import { getAllSessions } from '../../utils/utils';
 import { formatCompactAgeFromDate } from '../../../../utils/dateUtils';
@@ -191,16 +191,30 @@ export default function SidebarContent({
   // than flex-1, which would be inert there.
   const spacesScrollAreaClass = 'h-full overflow-y-auto overscroll-contain md:px-1.5 md:py-2';
 
+  // Stabilized so ConversationRow's React.memo (SidebarConversationsList.tsx)
+  // holds. SidebarContent itself re-renders whenever `projectListProps`
+  // changes reference (e.g. the 60s clock tick), but `onProjectSelect` /
+  // `onSessionSelect` underneath are already useCallback-stable in
+  // Sidebar.tsx, so this closure's own identity only changes when they do.
+  const { onProjectSelect, onSessionSelect } = projectListProps;
+  const handleConversationSelect = useCallback(
+    (session: SessionWithProvider, project: Project) => {
+      onProjectSelect(project);
+      onSessionSelect(session, project.projectId);
+    },
+    [onProjectSelect, onSessionSelect],
+  );
+
   const conversationsList = (
     <SidebarConversationsList
       projects={projects}
       activeSessions={projectListProps.activeSessions}
       selectedSession={projectListProps.selectedSession}
-      currentTime={projectListProps.currentTime}
-      onSelect={(session, project) => {
-        projectListProps.onProjectSelect(project);
-        projectListProps.onSessionSelect(session, project.projectId);
-      }}
+      // Deliberately not forwarding `projectListProps.currentTime` here: each
+      // conversation row reads the shared minute-clock tick directly (see the
+      // sidebar perf audit's finding 4), so this list re-rendering once a
+      // minute doesn't cascade into every row re-rendering too.
+      onSelect={handleConversationSelect}
       onNewConversation={projectListProps.onNewSession}
       onCreateProject={onCreateProject}
       editingSession={projectListProps.editingSession}
