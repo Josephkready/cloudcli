@@ -12,7 +12,7 @@ import type { ProviderSkill, ProviderSkillListOptions } from '@/shared/types.js'
  * `GET /:provider/skills` calls a picker open/project switch fires without
  * making an edited skill file wait long to show up.
  */
-const SKILLS_CACHE_TTL_MS = 5000;
+export const SKILLS_CACHE_TTL_MS = 5000;
 
 type CacheEntry = {
   expiresAt: number;
@@ -37,10 +37,17 @@ export const providerSkillsService = {
     options?: ProviderSkillListOptions,
   ): Promise<ProviderSkill[]> {
     const key = cacheKey(providerName, options);
-    const cached = cache.get(key);
     const now = Date.now();
-    if (cached && cached.expiresAt > now) {
-      return cached.skills;
+    const cached = cache.get(key);
+    if (cached) {
+      if (cached.expiresAt > now) {
+        return cached.skills;
+      }
+      // Sweep the expired entry now rather than leaving it in the map forever:
+      // the cache is only ever read lazily (no background timer), so without
+      // this an entry for every distinct (provider, workspacePath) a session
+      // ever visits would sit in memory for the life of the process.
+      cache.delete(key);
     }
 
     const provider = providerRegistry.resolveProvider(providerName);

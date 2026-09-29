@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 
-import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
+import { providerSkillsService, SKILLS_CACHE_TTL_MS } from '@/modules/providers/services/skills.service.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
   const original = os.homedir;
@@ -402,6 +402,39 @@ test('providerSkillsService caches a listing for the same provider+workspace wit
     assert.deepEqual(second, first, 'a same-key call within the TTL should be served from cache');
     assert.ok(!second.some((skill) => skill.name === 'late-skill'));
   } finally {
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('providerSkillsService re-scans once a cached listing outlives the TTL', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-cache-ttl-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await fs.mkdir(workspacePath, { recursive: true });
+
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  try {
+    const userSkillsRoot = path.join(tempRoot, '.claude', 'skills');
+    await writeSkill(userSkillsRoot, 'seen-first-dir', 'seen-first', 'Seen on the first call');
+
+    const first = await providerSkillsService.listProviderSkills('claude', { workspacePath });
+    assert.ok(first.some((skill) => skill.name === 'seen-first'));
+
+    await writeSkill(userSkillsRoot, 'seen-after-ttl-dir', 'seen-after-ttl', 'Added after the TTL expired');
+
+    // Still inside the TTL: the stale (pre-write) list is served from cache.
+    mock.timers.tick(SKILLS_CACHE_TTL_MS - 1);
+    const stillCached = await providerSkillsService.listProviderSkills('claude', { workspacePath });
+    assert.deepEqual(stillCached, first);
+
+    // Past the TTL: the entry must be evicted and the filesystem re-scanned,
+    // so the skill added while the first entry was live becomes visible.
+    mock.timers.tick(2);
+    const afterExpiry = await providerSkillsService.listProviderSkills('claude', { workspacePath });
+    assert.ok(afterExpiry.some((skill) => skill.name === 'seen-after-ttl'));
+  } finally {
+    mock.timers.reset();
     restoreHomeDir();
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

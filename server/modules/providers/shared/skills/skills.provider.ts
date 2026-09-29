@@ -144,6 +144,13 @@ export abstract class SkillsProvider implements IProviderSkills {
     return skillsPerSource.flat();
   }
 
+  // CAVEAT for whoever wires this up to a route: `services/skills.service.ts`
+  // caches `listSkills` results for `SKILLS_CACHE_TTL_MS` per
+  // (provider, workspacePath). Nothing here invalidates that cache, so a
+  // write immediately followed by a `GET /:provider/skills` within the TTL
+  // window can serve the stale pre-write list. No current route calls
+  // `addSkills`/`removeSkill`, so this is latent rather than live — but the
+  // caller that does wire one up must clear (or wait out) that cache first.
   async addSkills(input: ProviderSkillCreateInput): Promise<ProviderSkill[]> {
     const globalSkillSource = await this.getGlobalSkillSource();
     if (!globalSkillSource) {
@@ -254,6 +261,8 @@ export abstract class SkillsProvider implements IProviderSkills {
     return pendingInstalls.map((install) => install.skill);
   }
 
+  // Same skills-cache caveat as `addSkills` above: this mutates disk directly
+  // and does not invalidate `services/skills.service.ts`'s listing cache.
   async removeSkill(
     input: ProviderSkillRemoveInput,
   ): Promise<{ removed: boolean; provider: LLMProvider; directoryName: string }> {

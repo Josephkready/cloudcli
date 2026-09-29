@@ -33,6 +33,8 @@ type ParsedAntigravitySession = {
 
 type HistoryMetadata = { projectPath?: string; sessionName?: string };
 
+type HistoryMetadataLookup = (sessionId: string) => HistoryMetadata | undefined | Promise<HistoryMetadata | undefined>;
+
 export function getAntigravitySessionIdFromTranscriptPath(filePath: string): string | null {
   const parts = filePath.split(path.sep);
   const brainIndex = parts.lastIndexOf('brain');
@@ -100,7 +102,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
           return null;
         }
 
-        const parsed = await this.processTranscriptFile(filePath, historyMap);
+        const parsed = await this.processTranscriptFile(filePath, (sessionId) => historyMap.get(sessionId));
         if (!parsed || shouldExcludeProjectPath(parsed.projectPath)) {
           return null;
         }
@@ -150,8 +152,15 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
       return null;
     }
 
-    const historyMap = await this.buildHistoryMetadataMap();
-    const parsed = await this.processTranscriptFile(filePath, historyMap);
+    // The watcher's file-change path indexes one transcript at a time, so
+    // building the whole history map here (as the batch `synchronize()` path
+    // does) would turn a bounded, first-match scan into a full-file scan on
+    // every change event. Use the single-session lookup instead: it keeps the
+    // original newest-first, stop-on-first-match semantics for this hot path.
+    const parsed = await this.processTranscriptFile(
+      filePath,
+      (sessionId) => this.lookupHistoryMetadataForSession(sessionId),
+    );
     if (!parsed || shouldExcludeProjectPath(parsed.projectPath)) {
       return null;
     }
@@ -177,14 +186,14 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
 
   private async processTranscriptFile(
     filePath: string,
-    historyMap: Map<string, HistoryMetadata>,
+    lookupHistoryMetadata: HistoryMetadataLookup,
   ): Promise<ParsedAntigravitySession | null> {
     const sessionId = getAntigravitySessionIdFromTranscriptPath(filePath);
     if (!sessionId) {
       return null;
     }
 
-    const historyMetadata = historyMap.get(sessionId);
+    const historyMetadata = await lookupHistoryMetadata(sessionId);
     let projectPath = historyMetadata?.projectPath;
     let firstUserMessage = historyMetadata?.sessionName;
 
@@ -202,11 +211,18 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
         }
       }
     } catch (error) {
+      // A transcript read failure must not abort the whole batch: `synchronize()`
+      // defers all DB writes to one call after every file in the scan has been
+      // parsed (#188-style batching), so a throw here used to (pre-batching)
+      // only cost the files after this one in program order — now it would
+      // discard every already-parsed session in the same scan. Swallow and
+      // skip this file instead, matching the Claude/Codex synchronizers'
+      // per-file try/catch (extractFirstValidJsonlData / extractTitleCandidates).
       console.warn('[Antigravity] Failed to read transcript', {
         sessionId,
         error: error instanceof Error ? error.message : 'Unknown read error',
       });
-      throw error;
+      return null;
     }
 
     if (!projectPath) {
@@ -218,6 +234,35 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
       projectPath,
       sessionName: normalizeSessionName(firstUserMessage, UNTITLED_SESSION),
     };
+  }
+
+  /**
+   * Looks up one session's history metadata by scanning `history.jsonl`
+   * newest-first and stopping at the first match — the original per-file
+   * lookup this synchronizer used before batch scans got `buildHistoryMetadataMap`.
+   * Kept for `synchronizeFile`'s single-file hot path (the watcher's
+   * file-change handler), where building the whole map for one lookup would
+   * turn a bounded scan into a full-file scan on every change event.
+   */
+  private async lookupHistoryMetadataForSession(sessionId: string): Promise<HistoryMetadata | undefined> {
+    try {
+      const lines = (await readFile(this.historyPath, 'utf8')).split(/\r?\n/);
+      // The history can be observed while agy is appending a partial line;
+      // iterateJsonlLines skips those.
+      for (const parsed of iterateJsonlLines(lines, { fromEnd: true })) {
+        const entry = readObjectRecord(parsed);
+        if (readOptionalString(entry?.conversationId) !== sessionId) {
+          continue;
+        }
+        return {
+          projectPath: readOptionalString(entry?.workspace),
+          sessionName: readOptionalString(entry?.display),
+        };
+      }
+    } catch {
+      // History is an optional metadata source; transcripts remain authoritative.
+    }
+    return undefined;
   }
 
   /**
