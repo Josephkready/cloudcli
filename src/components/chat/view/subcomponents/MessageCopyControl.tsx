@@ -188,7 +188,13 @@ const MessageCopyControl = ({
             ref={triggerRef}
             type="button"
             onClick={() => (isDropdownOpen ? setIsDropdownOpen(false) : openDropdown())}
-            className={`touch:hit-h-44 rounded px-1 py-0.5 transition-colors ${toneClass}`}
+            // `touch:hit-h-44` only floors the *height* of the tap target at
+            // 44px — its width still matches the painted box, which here was
+            // ~20px (icon + padding), under the 24px minimum. `min-w-6`
+            // widens the painted box itself to 24px so the hit area grows
+            // with it, instead of an absolute overlay that could spill into
+            // the copy button 2px away in this tight `gap-0.5` row.
+            className={`touch:hit-h-44 inline-flex min-w-6 items-center justify-center rounded px-1 py-0.5 transition-colors ${toneClass}`}
             aria-label={t('copyMessage.selectFormat', { defaultValue: 'Select copy format' })}
             title={t('copyMessage.selectFormat', { defaultValue: 'Select copy format' })}
           >
