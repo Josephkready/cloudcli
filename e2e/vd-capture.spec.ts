@@ -90,6 +90,12 @@ test('data-vd-unmask re-exposes a control inside a mask, and a submit flushes at
   // A flush interval far past the assertion timeout: only the submit's own flush can land it.
   await page.addInitScript(() => {
     (window as unknown as { VD_CAPTURE: object }).VD_CAPTURE = { captureAutomation: true, flushMs: 600_000 };
+    // Another script owning the key with a different shape: reusing it would send an id the
+    // server rejects (and lose the whole session), so the recorder must mint a fresh one.
+    if (!sessionStorage.getItem('vd_seeded')) {
+      sessionStorage.setItem('vd_seeded', '1');
+      sessionStorage.setItem('vd_session', JSON.stringify({ id: 'not-ours!', start: 'x' }));
+    }
   });
   await page.goto('/');
   await expect(page.locator('[data-slot="prompt-input-textarea"]')).toBeVisible();
@@ -98,12 +104,15 @@ test('data-vd-unmask re-exposes a control inside a mask, and a submit flushes at
     host.innerHTML =
       '<div data-vd-mask><button type="button" data-vd-unmask>Harmless action</button>' +
       '<button type="button">zebra-masked-label</button></div>' +
-      '<form action="javascript:void 0"><button type="submit">Vd submit</button></form>';
+      '<form action="javascript:void 0"><button type="submit">Vd submit</button></form>' +
+      // A labelled, non-interactive region: its label is content and must never be climbed to.
+      '<div role="region" aria-label="zebra-region-label"><span id="vd-plain">plain text</span></div>';
     host.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#fff';
     document.body.appendChild(host);
   });
   await page.getByRole('button', { name: 'Harmless action' }).click();
   await page.getByRole('button', { name: 'zebra-masked-label' }).click();
+  await page.locator('#vd-plain').click();
   await page.getByRole('button', { name: 'Vd submit' }).click();
 
   const dbPath = path.join(server.home, 'flows.db');
@@ -123,4 +132,6 @@ test('data-vd-unmask re-exposes a control inside a mask, and a submit flushes at
   expect(unmasked, 'data-vd-unmask keeps the name').toBeTruthy();
   expect(typeof unmasked!.d?.x).toBe('number');
   expect(JSON.stringify(rows)).not.toContain('zebra');
+  const plain = clicks.find((c) => c.t.id === 'vd-plain');
+  expect(plain?.t.tag, 'a click outside any control stays on the element, not a region').toBe('span');
 });

@@ -113,7 +113,11 @@ python3 vdebug/vdebug.py list
 python3 vdebug/vdebug.py record --base-url $VDEBUG_BASE_URL --viewports all --judge
 ```
 
-Read `vdebug-runs/latest/report.md` (gitignored). `--judge` needs
+Pass `--viewports iphone-13-pro,2k` (or `all,kiosk=2560x1600`) to narrow or extend the
+matrix, and `--reset-cmd CMD` to restore app state before every recording. The judge is
+also sent `vdebug/judge_notes.md`, the app's intentional designs (the jump-to-bottom
+button, horizontally scrolling code blocks, the 44px `::after` touch overlays, …) — add
+to it when the judge flags something that is by design. Read `vdebug-runs/latest/report.md` (gitignored). `--judge` needs
 `OPENROUTER_API_KEY` and `ffmpeg`; Python needs `playwright`. Flows live in
 `vdebug/flows/` (role/label/testid locators only). **After changing front-end
 code, re-record the flows that touch those screens before opening a PR.** Full

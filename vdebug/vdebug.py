@@ -2,8 +2,14 @@
 """vdebug — record user flows across a responsive viewport matrix, optionally AI-judge them.
 
     vdebug.py list
-    vdebug.py record --base-url http://localhost:8000 [--flow NAME ...] [--viewports mobile,desktop]
-                     [--judge [--model M] [--fps 10]] [--fail-on error|check|major|never]
+    vdebug.py record --base-url http://localhost:8000 [--flow NAME ...]
+                     [--viewports all | iphone-13-pro,2k | all,kiosk=2560x1600]
+                     [--reset-cmd CMD] [--judge [--model M] [--fps 10]]
+                     [--fail-on error|check|major|never]
+
+Viewports are real screens: iphone-13-pro, ipad-pro-11, 2k, 4k, half-2k, third-4k
+(mobile/tablet/desktop/ultrawide are aliases). --reset-cmd runs before every flow x
+viewport to restore app state; a failing reset fails that recording.
 
 Each flow is a Python file in flows/ (see flows/example_home.py) that drives a Playwright
 page and calls vd.mark("label") at every state worth judging. For every flow × viewport
@@ -19,7 +25,8 @@ model's findings. <out>/latest always points at the newest run.
 --judge (judge.py) cuts each video.webm into frames at --fps, drops consecutive duplicates,
 and sends every remaining frame in one request — so the model sees animations and
 transitions, not just the settled checkpoint states. The frames it sent are kept in
-<flow>/<viewport>/film/ and linked from report.md.
+<flow>/<viewport>/film/ and linked from report.md. judge_notes.md (beside this file) lists
+the app's intentional designs; it is sent with every judge request so they aren't flagged.
 
 Needs: `pip install playwright && playwright install chromium`; --judge also needs ffmpeg and
 OPENROUTER_API_KEY.
@@ -306,6 +313,7 @@ def record_one(browser, flow: Flow, vp: Viewport, base_url: str, run_dir: pathli
 
 def run_reset(cmd: str, log=print) -> str | None:
     """Run --reset-cmd (restores app state between recordings). Returns an error string or None."""
+    log(f"  reset: {cmd}")
     try:
         proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
