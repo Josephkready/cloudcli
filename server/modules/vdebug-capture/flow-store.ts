@@ -20,7 +20,13 @@
  *   - no input values: `input` events carry only `{kind, length}`;
  *   - `nav.title` is DROPPED: the tab title here carries the selected project's
  *     name, so it is never stored even if a client sends it;
+ *   - no query values: `path` keeps query keys only, re-applied server-side;
  *   - no raw user agent: reduced to mobile|tablet|desktop;
+ *   - `change.value` is the one field whose *content* the server cannot judge:
+ *     the recorder only sends it for elements opted in with
+ *     `data-vd-capture-value` (none are, today). The server caps its length.
+ *   - store-wide ceilings (MAX_TOTAL_SESSIONS / MAX_TOTAL_EVENTS) bound the db
+ *     even against a client that mints a new session id per request;
  *   - the recorder already omits accessible names under `[data-vd-mask]`
  *     (transcript, composer, conversation list, search results).
  */
@@ -89,6 +95,14 @@ export const DATA_KEYS: Record<string, readonly string[]> = {
 export const MAX_EVENTS_PER_BATCH = 500;
 export const MAX_STR = 200;
 export const MAX_EVENTS_PER_SESSION = 5000;
+/**
+ * Store-wide ceilings. `session_id` is client-minted, so the per-session cap alone
+ * cannot bound the db: a scripted caller could mint a fresh id per request. Past
+ * either ceiling, new sessions are refused (existing ones may still append up to
+ * their own cap) until retention pruning frees room.
+ */
+export const MAX_TOTAL_SESSIONS = 20_000;
+export const MAX_TOTAL_EVENTS = 1_000_000;
 const SESSION_ID = /^[A-Za-z0-9]{8,64}$/;
 
 /** The batch is malformed; the endpoint answers 400. */
@@ -123,6 +137,20 @@ function sortedJson(obj: Record<string, unknown>): string {
   const out: Record<string, unknown> = {};
   for (const key of Object.keys(obj).sort()) out[key] = obj[key];
   return JSON.stringify(out);
+}
+
+/**
+ * Server-side twin of the recorder's cleanPath(): keep query KEYS, drop their values
+ * and any fragment, so a tampered client still cannot store `?q=secret`.
+ */
+export function cleanPath(value: unknown): string | null {
+  const raw = capStr(value, 1000);
+  if (raw === null) return null;
+  const [pathname, query] = raw.split('#', 1)[0].split(/\?(.*)/s, 2);
+  const keys = query
+    ? '?' + query.split('&').filter(Boolean).map((kv) => `${kv.split('=')[0]}=`).join('&')
+    : '';
+  return (pathname + keys).slice(0, MAX_STR);
 }
 
 function cleanTarget(target: unknown): string | null {
@@ -192,6 +220,12 @@ export class FlowStore {
         | undefined;
       let count = 0;
       if (!row) {
+        const totals = this.db
+          .prepare('SELECT COUNT(*) AS sessions, COALESCE(SUM(event_count), 0) AS events FROM sessions')
+          .get() as { sessions: number; events: number };
+        if (totals.sessions >= MAX_TOTAL_SESSIONS || totals.events >= MAX_TOTAL_EVENTS) {
+          return { stored: 0, duplicate: 0, invalid: 0, capped: true };
+        }
         this.db
           .prepare(
             'INSERT INTO sessions (id, started_at, last_seen_at, viewport_w, viewport_h, ua_class) VALUES (?, ?, ?, ?, ?, ?)',
@@ -223,7 +257,7 @@ export class FlowStore {
           continue;
         }
         const changes = insert.run(
-          sid, seq, tMs, ev.type, capStr(ev.path), cleanTarget(ev.target), cleanData(ev.type, ev.data),
+          sid, seq, tMs, ev.type, cleanPath(ev.path), cleanTarget(ev.target), cleanData(ev.type, ev.data),
         ).changes;
         stored += changes;
         duplicate += 1 - changes;

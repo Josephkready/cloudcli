@@ -164,6 +164,115 @@ test('resolveVdebugCaptureConfig: defaults beside DATABASE_PATH, env overrides, 
     assert.equal(resolveVdebugCaptureConfig({ VD_CAPTURE_ENABLED: off }).enabled, false, off);
   }
   assert.equal(resolveVdebugCaptureConfig({ VD_CAPTURE_ENABLED: 'true' }).enabled, true);
-  assert.equal(resolveVdebugCaptureConfig({ VD_CAPTURE_RETENTION_DAYS: '-3' }).retentionDays, 30);
+  for (const bad of ['-3', '0', 'abc', '']) {
+    assert.equal(resolveVdebugCaptureConfig({ VD_CAPTURE_RETENTION_DAYS: bad }).retentionDays, 30, bad);
+  }
   assert.match(resolveVdebugCaptureConfig({}).dbPath, /\.cloudcli[\\/]flows\.db$/);
+});
+
+/** Drives the router directly with an injected clock, no HTTP server. */
+async function withClockRouter(
+  config: VdebugCaptureConfig,
+  fn: (call: (body: string) => Promise<number>, clock: { t: number }, lines: string[]) => Promise<void>,
+) {
+  const clock = { t: 1_000_000 };
+  const { lines, logger } = quietLogger();
+  const app = express();
+  app.use(createVdebugCaptureRouter(config, { logger, now: () => clock.t }));
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+  try {
+    await fn((body) => post(`http://127.0.0.1:${port}`, body).then((r) => r.status), clock, lines);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+test('a failed db open is retried after the backoff, and capture resumes', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'vd-capture-retry-'));
+  const blocker = path.join(dir, 'state');
+  writeFileSync(blocker, 'a file where the state dir should be');
+  const config: VdebugCaptureConfig = {
+    enabled: true, dbPath: path.join(blocker, 'flows.db'), retentionDays: 30, maxBatchesPerMinute: 300,
+  };
+  try {
+    await withClockRouter(config, async (call, clock) => {
+      assert.equal(await call(goodBatch), 503);
+      rmSync(blocker); // the operator fixes the state path
+      assert.equal(await call(goodBatch), 503, 'still inside the backoff window');
+      clock.t += 61_000;
+      assert.equal(await call(goodBatch), 204, 'reopened after the backoff');
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('retention prune runs at most daily from the request path', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'vd-capture-prune-'));
+  const config: VdebugCaptureConfig = {
+    enabled: true, dbPath: path.join(dir, 'flows.db'), retentionDays: 30, maxBatchesPerMinute: 10_000,
+  };
+  const staleBatch = JSON.stringify({ session_id: 'stalesession1', events: [{ seq: 0, t: 0, type: 'click' }] });
+  const count = () => {
+    const store = new FlowStore(config.dbPath);
+    try {
+      return (store.db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE id = 'stalesession1'").get() as { n: number }).n;
+    } finally {
+      store.close();
+    }
+  };
+  const ageStale = () => {
+    const store = new FlowStore(config.dbPath);
+    try {
+      store.db.prepare("UPDATE sessions SET last_seen_at = '2000-01-01T00:00:00+00:00' WHERE id = 'stalesession1'").run();
+    } finally {
+      store.close();
+    }
+  };
+  try {
+    await withClockRouter(config, async (call, clock) => {
+      await new Promise((resolve) => setImmediate(resolve)); // startup prune has run
+      assert.equal(await call(staleBatch), 204);
+      ageStale();
+      assert.equal(await call(goodBatch), 204);
+      assert.equal(count(), 1, 'no second prune within the same day');
+      clock.t += 86_400_000 + 1;
+      assert.equal(await call(goodBatch), 204);
+      assert.equal(count(), 0, 'pruned once a day has passed');
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('rate-limit hits are logged once per window and startup logs the db path', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'vd-capture-log-'));
+  const infos: string[] = [];
+  const warns: string[] = [];
+  const app = express();
+  app.use(createVdebugCaptureRouter(
+    { enabled: true, dbPath: path.join(dir, 'flows.db'), retentionDays: 30, maxBatchesPerMinute: 1 },
+    { logger: { warn: (m: string) => warns.push(m), info: (m: string) => infos.push(m) } },
+  ));
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    assert.equal((await post(base, goodBatch)).status, 204);
+    assert.equal((await post(base, goodBatch)).status, 429);
+    assert.equal((await post(base, goodBatch)).status, 429);
+    assert.equal(warns.filter((w) => w.includes('rate limit')).length, 1);
+    assert.equal(infos.length, 1);
+    assert.match(infos[0], /enabled: db=.*flows\.db, retention=30d/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

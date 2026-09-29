@@ -101,41 +101,6 @@ a verdict. Give it a long window (90+ days — rare is not dead), and rule out
 ## Visual QA (video-debugger)
 
 `vdebug/` records the app's core journeys as video + checkpoint frames across a
-mobile / tablet / desktop / ultrawide matrix, runs DOM layout checks at every
-checkpoint, and (with `--judge`) has a cheap multimodal model on OpenRouter review
-the deduped video frames, so animation glitches get caught as well as static layout bugs.
-Always run it against the throwaway fixture server, never your real library:
-
-```bash
-npx tsx --tsconfig bench/tsconfig.json vdebug/serve-fixture.ts   # prints VDEBUG_BASE_URL; Ctrl-C to stop
-python3 vdebug/vdebug.py list
-python3 vdebug/vdebug.py record --base-url $VDEBUG_BASE_URL --viewports all --judge   # needs OPENROUTER_API_KEY + ffmpeg
-```
-
-The fixture server seeds synthetic transcripts in a temp HOME and answers chat turns
-with the in-process mock provider, so no real Claude session is ever started. Read
-`vdebug-runs/latest/report.md` (gitignored). After changing front-end code,
-re-record the flows that touch it before opening a PR. Flows live in `vdebug/flows/`
-(role/label/testid locators only).
-
-**Real-user flow capture.** `public/vd-recorder.js` sends *intent* events (route
-changes, clicks, submits, scroll depth, JS errors) to `POST /api/_vd/events`, which
-stores them in `flows.db` beside `DATABASE_PATH` (prod: `/var/lib/cloudcli/flows.db`;
-override with `VD_FLOWS_DB`). It never records input values, query values, the tab
-title, a user id or the raw user agent, and regions marked `data-vd-mask` (transcript,
-composer, conversation/project lists, search results, open-session tabs, editor)
-contribute no accessible names. Sessions older than `VD_CAPTURE_RETENTION_DAYS`
-(default 30) are pruned in-app. `VD_CAPTURE_ENABLED=false` turns it off. Failures are
-logged and swallowed, never surfaced. Mine the flows once data accumulates:
-
-```bash
-python3 vdebug/capture/flowstore.py stats --db /var/lib/cloudcli/flows.db
-python3 vdebug/capture/flowstore.py mine  --db /var/lib/cloudcli/flows.db --min-sessions 3 --out /tmp/mined.json
-```
-
-## Visual QA (video-debugger)
-
-`vdebug/` records the app's core journeys as video + checkpoint frames across a
 mobile/tablet/desktop/ultrawide matrix, runs DOM layout checks at every
 checkpoint, and (with `--judge`) has a vision model on OpenRouter review the
 deduped video frames, animations included. Run it against the throwaway fixture
@@ -160,7 +125,8 @@ values, no tab titles, and no names from `data-vd-mask` regions (transcript,
 composer, conversation/project lists, search results, session tabs, editor);
 automation (`navigator.webdriver`) is never recorded. Retention is 30 days
 (`VD_CAPTURE_RETENTION_DAYS`), pruned in-process. `VD_CAPTURE_ENABLED=false`
-turns it off. Mine it once real traffic accumulates:
+turns it off. The script tag's `data-sample` (in `index.html`, default `1.0`) is the
+fraction of browser sessions recorded; `0` records none. Mine it once real traffic accumulates:
 
 ```bash
 python3 vdebug/capture/flowstore.py stats --db /var/lib/cloudcli/flows.db

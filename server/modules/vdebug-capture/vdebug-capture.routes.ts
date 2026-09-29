@@ -58,7 +58,7 @@ export function resolveVdebugCaptureConfig(env: NodeJS.ProcessEnv = process.env)
   };
 }
 
-type Logger = Pick<Console, 'warn'>;
+type Logger = Pick<Console, 'warn'> & Partial<Pick<Console, 'info'>>;
 
 export function createVdebugCaptureRouter(
   config: VdebugCaptureConfig,
@@ -126,7 +126,12 @@ export function createVdebugCaptureRouter(
         windowCount = 0;
       }
       windowCount += 1;
-      if (windowCount > config.maxBatchesPerMinute) return res.status(429).end();
+      if (windowCount > config.maxBatchesPerMinute) {
+        if (windowCount === config.maxBatchesPerMinute + 1) {
+          warn(`rate limit hit (${config.maxBatchesPerMinute} batches/min); answering 429`);
+        }
+        return res.status(429).end();
+      }
 
       const s = getStore();
       if (!s) return res.status(503).end();
@@ -155,6 +160,7 @@ export function createVdebugCaptureRouter(
 
   // Startup prune, off the request path; never blocks boot or throws.
   if (config.enabled) {
+    logger.info?.(`[vd-capture] enabled: db=${config.dbPath}, retention=${config.retentionDays}d`);
     setImmediate(() => {
       const s = getStore();
       if (s) maybePrune(s);

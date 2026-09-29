@@ -10,6 +10,8 @@ import {
   FLOWS_SCHEMA_SQL,
   FlowStore,
   MAX_EVENTS_PER_BATCH,
+  MAX_TOTAL_SESSIONS,
+  cleanPath,
   MAX_EVENTS_PER_SESSION,
   MAX_STR,
   uaClass,
@@ -196,4 +198,47 @@ test('public/vd-recorder.js parses, and never reads document.title or input valu
   // The only `.value` read is the opt-in data-vd-capture-value branch and the length count.
   assert.match(code, /length: \(el\.value \|\| ""\)\.length/);
   assert.match(code, /hasAttribute\("data-vd-capture-value"\)/);
+});
+
+test('change.value is stored only when the client sends it (the data-vd-capture-value opt-in)', () => {
+  withStore((store) => {
+    store.ingest(batch([
+      { seq: 0, t: 0, type: 'change', data: { kind: 'checkbox', value: true } },
+      { seq: 1, t: 1, type: 'change', data: { kind: 'select-one' } },
+    ]));
+    const rows = events(store);
+    assert.deepEqual(JSON.parse(rows[0].data!), { kind: 'checkbox', value: true });
+    assert.deepEqual(JSON.parse(rows[1].data!), { kind: 'select-one' });
+  });
+});
+
+test('cleanPath strips query values and fragments server-side', () => {
+  assert.equal(cleanPath('/session/abc?q=secret&page=2#frag'), '/session/abc?q=&page=');
+  assert.equal(cleanPath('/x?flag'), '/x?flag=');
+  assert.equal(cleanPath('/plain'), '/plain');
+  assert.equal(cleanPath('/a#only-hash'), '/a');
+  assert.equal(cleanPath(null), null);
+  assert.equal(cleanPath('/' + 'p'.repeat(999))?.length, MAX_STR);
+  withStore((store) => {
+    store.ingest(batch([{ seq: 0, t: 0, type: 'nav', path: '/?token=hunter2', data: { kind: 'load' } }]));
+    assert.equal(events(store)[0].path, '/?token=');
+  });
+});
+
+test('store-wide ceiling refuses new sessions but lets existing ones append', () => {
+  withStore((store) => {
+    store.ingest(batch([{ seq: 0, t: 0, type: 'click' }]));
+    const insert = store.db.prepare(
+      "INSERT INTO sessions (id, started_at, last_seen_at, event_count) VALUES (?, '2026-01-01', '2099-01-01', 0)",
+    );
+    store.db.transaction(() => {
+      for (let i = 1; i < MAX_TOTAL_SESSIONS; i += 1) insert.run(`filler${String(i).padStart(8, '0')}`);
+    })();
+    const refused = store.ingest(batch([{ seq: 0, t: 0, type: 'click' }], { session_id: 'brandnewsession1' }));
+    assert.deepEqual(refused, { stored: 0, duplicate: 0, invalid: 0, capped: true });
+    const created = store.db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE id = 'brandnewsession1'").get();
+    assert.equal((created as { n: number }).n, 0);
+    const existing = store.ingest(batch([{ seq: 1, t: 1, type: 'click' }]));
+    assert.equal(existing.stored, 1);
+  });
 });
