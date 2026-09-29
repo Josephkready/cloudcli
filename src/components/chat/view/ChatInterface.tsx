@@ -19,11 +19,19 @@ import { shouldOfferResume } from '../utils/interruptedResume';
 import { retryPendingSends } from '../utils/pendingSendRetry';
 import { readPendingSends, writePendingSends } from '../utils/pendingSends';
 import { sendSubscribeBatch } from '../utils/subscribeTargets';
+import LazySurface, { lazySurface } from '../../lazy/LazySurface';
 
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
-import CommandResultModal from './subcomponents/CommandResultModal';
 import { InterruptedRunBanner } from './subcomponents/InterruptedRunBanner';
+
+// `/model`, `/cost`, `/status`, `/help` command output (~30 KB, perf-audit
+// package WP7) is reachable only by typing a slash command — rare next to
+// chat itself — so it is demand-loaded like the other header-reachable
+// surfaces. Gated on `commandModalPayload` below rather than rendered
+// unconditionally: the component already renders a closed `Dialog` with no
+// payload, but mounting a lazy component is what triggers its import.
+const CommandResultModal = lazySurface(() => import('./subcomponents/CommandResultModal'));
 
 function ChatInterface({
   selectedProject,
@@ -492,16 +500,20 @@ function ChatInterface({
         </div>
       </div>
 
-      <CommandResultModal
-        payload={commandModalPayload}
-        onClose={closeCommandModal}
-        providerModelCatalog={providerModelCatalog}
-        providerModelCacheCatalog={providerModelCacheCatalog}
-        providerModelsRefreshing={providerModelsRefreshing}
-        onHardRefreshProviderModels={hardRefreshProviderModels}
-        currentSessionId={currentSessionId || selectedSession?.id || null}
-        onSelectProviderModel={selectProviderModel}
-      />
+      {commandModalPayload && (
+        <LazySurface fallback={null}>
+          <CommandResultModal
+            payload={commandModalPayload}
+            onClose={closeCommandModal}
+            providerModelCatalog={providerModelCatalog}
+            providerModelCacheCatalog={providerModelCacheCatalog}
+            providerModelsRefreshing={providerModelsRefreshing}
+            onHardRefreshProviderModels={hardRefreshProviderModels}
+            currentSessionId={currentSessionId || selectedSession?.id || null}
+            onSelectProviderModel={selectProviderModel}
+          />
+        </LazySurface>
+      )}
     </PermissionContext.Provider>
   );
 }

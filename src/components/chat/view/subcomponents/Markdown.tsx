@@ -1,274 +1,59 @@
-import React, { Suspense, lazy, useContext, useMemo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { useTranslation } from 'react-i18next';
+import { Suspense, lazy } from 'react';
+import type { ReactNode } from 'react';
 
-import MermaidDiagram from '../../../../shared/markdown/MermaidDiagram';
-import PlainCodeBlock from '../../../../shared/markdown/PlainCodeBlock';
-// Demand-loaded: this is the only edge that kept Prism in the entry chunk.
-const PrismCodeBlock = lazy(() => import('../../../../shared/markdown/PrismCodeBlock'));
-import { ALWAYS_COMPLETE, createMermaidFenceGate, isMermaidClassName } from '../../../../shared/markdown/mermaidFences';
-import { useMathPlugins } from '../../../../shared/markdown/useMathPlugins';
-import { normalizeInlineCodeFences } from '../../utils/chatFormatting';
-import { copyTextToClipboard } from '../../../../utils/clipboard';
-import { usePaletteOps } from '../../../../contexts/PaletteOpsContext';
-import { useTheme } from '../../../../contexts/ThemeContext';
+import { loadMarkdownRenderer } from '../../../lazy/surfaceLoaders';
 
 type MarkdownProps = {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 };
 
 /**
- * Answers "has this fence finished streaming?" for the message being rendered.
+ * Demand-loaded shell around the real renderer (perf-audit package WP7).
  *
- * A context rather than a prop because `components.code` has to keep a stable
- * identity: react-markdown treats the components map as a set of component
- * types, so rebuilding the `code` entry whenever the message text changes — i.e.
- * on every streamed token — would unmount and remount every code block in the
- * message, resetting the copy button and re-suspending the highlighter. Reading
- * the gate from context re-renders the consumer instead of replacing it.
+ * react-markdown + remark-gfm + the micromark/mdast/unified stack is ~450 KB
+ * pre-minify — by far the biggest single contributor to the entry chunk — and
+ * `app_boot` (composer + conversation list usable) never needs it: nothing
+ * renders a message body until a conversation is actually opened. So the real
+ * work lives in `MarkdownRenderer.tsx`, loaded through `React.lazy` here.
  *
- * The default renders everything, so any other consumer of `CodeBlock` behaves
- * exactly as it did before mermaid existed.
+ * Unlike shell/editor, this chunk is NOT idle-warmed: almost every session
+ * renders markdown, and a cold reload straight into a conversation paints the
+ * cached transcript immediately — waiting for the load event plus an idle slot
+ * (or never, on a metered connection) would show the plain fallback. Instead
+ * the fetch starts when this module is evaluated, i.e. as the entry chunk runs:
+ * it is off the render-blocking path but in flight in parallel with the boot
+ * API calls. A failed eager fetch is retried once on first render.
+ *
+ * `MarkdownFallback` below renders the raw text in the same `whitespace-pre-wrap`
+ * box the real renderer's paragraphs use, so the swap from fallback to
+ * rendered markdown is a content change, not a layout jump — and so a message
+ * is never blank while the chunk is in flight. The virtualized transcript
+ * (`ChatMessagesPane.tsx`) already re-measures every row via
+ * `rowVirtualizer.measureElement`'s `ResizeObserver` whenever a row's real
+ * height differs from its estimate (Prism/Mermaid/images already do this
+ * today), so the height change when the real renderer mounts is handled by
+ * the same mechanism, not a new one.
  */
-const MermaidFenceGateContext = React.createContext<(code: string) => boolean>(ALWAYS_COMPLETE);
+const eagerRenderer = loadMarkdownRenderer();
+// Swallow here so a failed eager fetch is not an unhandled rejection; the lazy
+// factory below retries it.
+eagerRenderer.catch(() => {});
+const LazyMarkdownRenderer = lazy(() => eagerRenderer.catch(() => loadMarkdownRenderer()));
 
-// Links to the wider web (or in-page anchors) keep normal browser navigation;
-// everything else is treated as a workspace file reference.
-const isExternalHref = (href?: string): boolean =>
-  !!href && (/^(https?:|mailto:|tel:|data:)/i.test(href) || href.startsWith('#'));
-
-// Strip a trailing `:line` / `:line:col` suffix (e.g. `src/foo.ts:130`).
-const stripLineSuffix = (value: string): string => value.replace(/:\d+(?::\d+)?$/, '');
-
-// A usable file path contains a separator or a filename with an extension.
-const looksLikeFilePath = (value?: string): value is string => {
-  if (!value) {
-    return false;
-  }
-  const cleaned = stripLineSuffix(value.trim());
-  if (!cleaned || cleaned === '#') {
-    return false;
-  }
-  return /[\\/]/.test(cleaned) || /\.[a-z0-9]+$/i.test(cleaned);
-};
-
-// Extract plain text from link children so a reference rendered only as link
-// text (e.g. `[src/foo.ts]()` with an empty href) can still be opened.
-const childrenToText = (children: React.ReactNode): string => {
-  if (typeof children === 'string' || typeof children === 'number') {
-    return String(children);
-  }
-  if (Array.isArray(children)) {
-    return children.map(childrenToText).join('');
-  }
-  if (React.isValidElement(children)) {
-    return childrenToText((children.props as { children?: React.ReactNode }).children);
-  }
-  return '';
-};
-
-type CodeBlockProps = {
-  node?: any;
-  inline?: boolean;
-  className?: string;
-  children?: React.ReactNode;
-};
-
-const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockProps) => {
-  const { t } = useTranslation('chat');
-  const { isDarkMode } = useTheme();
-  const isFenceComplete = useContext(MermaidFenceGateContext);
-  const [copied, setCopied] = useState(false);
-  const raw = Array.isArray(children) ? children.join('') : String(children ?? '');
-  const looksMultiline = /[\r\n]/.test(raw);
-  const inlineDetected = inline || (node && node.type === 'inlineCode');
-  // Read the class list rather than the `language` parsed below: that regex is
-  // `\w`-only, so it reports `mermaid` for a ```mermaid-something fence too.
-  const isMermaid = !inlineDetected && isMermaidClassName(className);
-  const shouldInline = inlineDetected || (!looksMultiline && !isMermaid);
-
-  if (shouldInline) {
-    return (
-      <code
-        className={`whitespace-pre-wrap break-words rounded-md border border-gray-200 bg-gray-100 px-1.5 py-0.5 font-mono text-[0.9em] text-gray-900 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-100 ${className || ''
-          }`}
-        {...props}
-      >
-        {children}
-      </code>
-    );
-  }
-
-  const match = /language-(\w+)/.exec(className || '');
-  const language = match ? match[1] : 'text';
-
-  const codeBlock = (
-    <div className="group relative my-2">
-      {language && language !== 'text' && (
-        <div className="absolute left-3 top-2 z-10 text-xs font-medium uppercase text-gray-400">{language}</div>
-      )}
-
-      <button
-        type="button"
-        onClick={() =>
-          copyTextToClipboard(raw).then((success) => {
-            if (success) {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            }
-          })
-        }
-        className="absolute right-2 top-2 z-10 rounded-md border border-border bg-card/90 px-2 py-1 text-xs text-foreground/80 opacity-0 transition-opacity hover:bg-muted focus:opacity-100 active:opacity-100 group-hover:opacity-100"
-        title={copied ? t('codeBlock.copied') : t('codeBlock.copyCode')}
-        aria-label={copied ? t('codeBlock.copied') : t('codeBlock.copyCode')}
-      >
-        {copied ? (
-          <span className="flex items-center gap-1">
-            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
-              />
-            </svg>
-            {t('codeBlock.copied')}
-          </span>
-        ) : (
-          <span className="flex items-center gap-1">
-            <svg
-              className="h-3.5 w-3.5"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path>
-            </svg>
-            {t('codeBlock.copy')}
-          </span>
-        )}
-      </button>
-
-      {/*
-        The highlighter and its grammars are ~103 KB and were loading on boot
-        for every session, code or not (#287). The fallback renders the same
-        text at the same metrics, so what arrives is colour rather than layout.
-      */}
-      <Suspense fallback={<PlainCodeBlock code={raw} language={language} isDarkMode={isDarkMode} />}>
-        <PrismCodeBlock code={raw} language={language} isDarkMode={isDarkMode} />
-      </Suspense>
-    </div>
-  );
-
-  // A half-streamed fence is a prefix of a diagram, not a broken one: some
-  // prefixes fail to parse and some parse into a different diagram entirely, so
-  // rendering before the closing fence arrives means the picture rearranges on
-  // every token. Wait, and show the source in the meantime.
-  if (isMermaid && isFenceComplete(raw)) {
-    return <MermaidDiagram code={raw} fallback={codeBlock} />;
-  }
-
-  return codeBlock;
-};
-
-const markdownComponents = {
-  code: CodeBlock,
-  // CodeBlock renders its own syntax-highlighted <pre>; this passthrough stops
-  // react-markdown (and Tailwind Typography) from wrapping it in a second,
-  // dark-themed <pre> shell that would frame the block.
-  pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-  blockquote: ({ children }: { children?: React.ReactNode }) => (
-    <blockquote className="my-2 border-l-4 border-gray-300 pl-4 italic text-gray-600 dark:border-gray-600 dark:text-gray-400">
-      {children}
-    </blockquote>
-  ),
-  p: ({ children }: { children?: React.ReactNode }) => <div className="mb-2 last:mb-0">{children}</div>,
-  // Tailwind Typography's stock heading scale is oversized against the chat body
-  // (h1 ~30px vs ~14-16px body). Override h1-h6 with a gentle, proportional
-  // ramp so a `#`/`##` reads as a heading without dwarfing the surrounding text.
-  h1: ({ children }: { children?: React.ReactNode }) => <h1 className="mb-2 mt-4 text-xl font-semibold first:mt-0">{children}</h1>,
-  h2: ({ children }: { children?: React.ReactNode }) => <h2 className="mb-2 mt-4 text-lg font-semibold first:mt-0">{children}</h2>,
-  h3: ({ children }: { children?: React.ReactNode }) => <h3 className="mb-1.5 mt-3 text-base font-semibold first:mt-0">{children}</h3>,
-  h4: ({ children }: { children?: React.ReactNode }) => <h4 className="mb-1 mt-3 text-sm font-semibold first:mt-0">{children}</h4>,
-  h5: ({ children }: { children?: React.ReactNode }) => <h5 className="mb-1 mt-2 text-sm font-semibold first:mt-0">{children}</h5>,
-  h6: ({ children }: { children?: React.ReactNode }) => <h6 className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">{children}</h6>,
-  table: ({ children }: { children?: React.ReactNode }) => (
-    <div className="my-2 overflow-x-auto">
-      <table className="min-w-full border-collapse border border-gray-200 dark:border-gray-700">{children}</table>
-    </div>
-  ),
-  thead: ({ children }: { children?: React.ReactNode }) => <thead className="bg-gray-50 dark:bg-gray-800">{children}</thead>,
-  th: ({ children }: { children?: React.ReactNode }) => (
-    <th className="border border-gray-200 px-3 py-2 text-left text-sm font-semibold dark:border-gray-700">{children}</th>
-  ),
-  td: ({ children }: { children?: React.ReactNode }) => (
-    <td className="border border-gray-200 px-3 py-2 align-top text-sm dark:border-gray-700">{children}</td>
-  ),
-};
-
-export function Markdown({ children, className }: MarkdownProps) {
-  const content = normalizeInlineCodeFences(String(children ?? ''));
-  // KaTeX is lazy: `useMathPlugins` returns empty arrays until this message is
-  // found to contain math, so the common case never loads it (issue #269).
-  const { remarkMathPlugins, rehypeMathPlugins } = useMathPlugins(content);
-  const remarkPlugins = useMemo(() => [remarkGfm, ...remarkMathPlugins], [remarkMathPlugins]);
-  const { openFileInEditor } = usePaletteOps();
-  // Scanned from the source, because the parsed `code` node cannot tell a closed
-  // fence from one still arriving — CommonMark closes an unterminated fence at
-  // end of document, so both look identical by the time react-markdown sees them.
-  const isMermaidFenceComplete = useMemo(() => createMermaidFenceGate(content), [content]);
-
-  const components = useMemo(
-    () => ({
-      ...markdownComponents,
-      a: ({ href, children: linkChildren }: { href?: string; children?: React.ReactNode }) => {
-        // Prefer the href when it is a real path; otherwise fall back to the
-        // link text, since models often emit `[src/foo.ts]()` with an empty href.
-        const linkText = childrenToText(linkChildren);
-        const fileRef = looksLikeFilePath(href) ? href : looksLikeFilePath(linkText) ? linkText : undefined;
-
-        if (fileRef && !isExternalHref(href)) {
-          return (
-            <a
-              href={href || fileRef}
-              className="cursor-pointer text-blue-600 hover:underline dark:text-blue-400"
-              onClick={(event) => {
-                event.preventDefault();
-                openFileInEditor(stripLineSuffix(fileRef));
-              }}
-            >
-              {linkChildren}
-            </a>
-          );
-        }
-
-        return (
-          <a
-            href={href}
-            className="text-blue-600 hover:underline dark:text-blue-400"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {linkChildren}
-          </a>
-        );
-      },
-    }),
-    [openFileInEditor],
-  );
-
+function MarkdownFallback({ children, className }: MarkdownProps) {
+  const text = typeof children === 'string' ? children : String(children ?? '');
   return (
     <div className={className}>
-      <MermaidFenceGateContext.Provider value={isMermaidFenceComplete}>
-        <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypeMathPlugins} components={components as any}>
-          {content}
-        </ReactMarkdown>
-      </MermaidFenceGateContext.Provider>
+      <div className="mb-2 whitespace-pre-wrap break-words last:mb-0">{text}</div>
     </div>
+  );
+}
+
+export function Markdown({ children, className }: MarkdownProps) {
+  return (
+    <Suspense fallback={<MarkdownFallback className={className}>{children}</MarkdownFallback>}>
+      <LazyMarkdownRenderer className={className}>{children}</LazyMarkdownRenderer>
+    </Suspense>
   );
 }
