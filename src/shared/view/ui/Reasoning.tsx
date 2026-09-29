@@ -156,7 +156,11 @@ export const ReasoningTrigger = React.memo<ReasoningTriggerProps>(
     return (
       <CollapsibleTrigger
         className={cn(
-          'flex w-full items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground',
+          // `touch:min-h-44` (cloudcli B7): full-width row, so flooring its
+          // own painted height is safe (no neighbour to steal taps from),
+          // unlike the tight icon-button rows that use the `hit-h-44` overlay
+          // instead.
+          'touch:min-h-44 flex w-full items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground',
           className
         )}
         {...props}

@@ -119,6 +119,83 @@ function fakeContainer(scrollTop = 0, scrollHeight = 1000, clientHeight = 500) {
   } as unknown as HTMLDivElement;
 }
 
+/**
+ * A container that has one anchor row (`data-row-key="row-1"`) findable by
+ * both `querySelectorAll('[data-row-key]')` (capture) and
+ * `querySelector('[data-row-key="row-1"]')` (restore) — `captureScrollAnchor`
+ * and the restore `useLayoutEffect` both query the container this way (see
+ * `useChatSessionState.ts`). The row's `getBoundingClientRect` returns
+ * `rowTopAtCapture` on its first call and `rowTopAtRestore` on every call
+ * after, standing in for a real prepend having pushed it down the page
+ * between when the anchor was captured and when the restore effect re-reads
+ * its position — the exact scenario `resolveAnchoredScrollTop` exists for.
+ */
+function fakeContainerWithAnchorRow(
+  scrollTop: number,
+  scrollHeight: number,
+  clientHeight: number,
+  rowTopAtCapture: number,
+  rowTopAtRestore: number,
+) {
+  let rowRectCalls = 0;
+  const row = {
+    getAttribute: (name: string) => (name === 'data-row-key' ? 'row-1' : null),
+    getBoundingClientRect: () => {
+      rowRectCalls += 1;
+      return { top: rowRectCalls === 1 ? rowTopAtCapture : rowTopAtRestore };
+    },
+    offsetHeight: 40,
+  };
+  return {
+    scrollTop,
+    scrollHeight,
+    clientHeight,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    getBoundingClientRect: () => ({ top: 0 }),
+    querySelectorAll: () => [row],
+    querySelector: (selector: string) => (selector === '[data-row-key="row-1"]' ? row : null),
+    firstElementChild: null,
+  } as unknown as HTMLDivElement;
+}
+
+/**
+ * A container with no anchor row (`querySelectorAll` returns `[]`, so
+ * `captureScrollAnchor` returns `null` and the restore effect must take the
+ * `resolveRestoreScrollTop` fallback branch) whose `scrollHeight` grows from
+ * `before` to `after` partway through the read sequence a real
+ * `handleScroll` → `loadOlderMessages` → restore pass makes: once via
+ * `readScrollMetrics` on entry, once capturing the fallback right after
+ * `fetchMore` resolves (still pre-prepend — the DOM hasn't re-rendered yet),
+ * and once more inside the restore `useLayoutEffect` after the prepend has
+ * actually landed. A static `scrollHeight` (as in `fakeContainer`) can't
+ * distinguish "the fallback math ran and produced this number" from "the
+ * effect never ran at all and scrollTop was simply never touched".
+ */
+function fakeContainerWithGrowingHeight(
+  scrollTop: number,
+  clientHeight: number,
+  before: number,
+  after: number,
+) {
+  let reads = 0;
+  return {
+    scrollTop,
+    get scrollHeight() {
+      reads += 1;
+      // The first two reads (readScrollMetrics, then the fallback capture)
+      // both see the pre-prepend height; only the restore effect's read,
+      // after the new render has committed, sees the grown one.
+      return reads <= 2 ? before : after;
+    },
+    clientHeight,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    querySelectorAll: () => [],
+    firstElementChild: null,
+  } as unknown as HTMLDivElement;
+}
+
 beforeEach(() => {
   authenticatedFetch.mockReset();
   authenticatedFetch.mockResolvedValue({ ok: false, json: async () => ({}) });
@@ -472,14 +549,23 @@ describe('useChatSessionState — external message update', () => {
 
 describe('useChatSessionState — pagination via loadOlderMessages/handleScroll', () => {
   it('loads an older page when scrolled near the top', async () => {
-    const olderSlot = makeSlot({ hasMore: true, total: 40, serverMessages: [makeMessage('older', -1)] });
-    const sessionStore = makeSessionStore();
+    // See `fakeContainerWithGrowingHeight`'s doc comment: `getMessages` and
+    // `scrollHeight` both have to actually change once `fetchMore` resolves,
+    // or a `scrollTop` assertion below can't tell "the restore math ran" from
+    // "the effect never fired and scrollTop was simply never touched".
+    let liveMessages = [makeMessage('newest', 0)];
+    const sessionStore = makeSessionStore(liveMessages);
+    sessionStore.getMessages = vi.fn(() => liveMessages);
     sessionStore.fetchFromServer = vi.fn(async () => makeSlot({ hasMore: true, total: 40 }));
-    sessionStore.fetchMore = vi.fn(async () => olderSlot);
+    sessionStore.fetchMore = vi.fn(async () => {
+      liveMessages = [makeMessage('older', -1), ...liveMessages];
+      return makeSlot({ hasMore: true, total: 40, serverMessages: [makeMessage('older', -1)] });
+    });
     const { result } = renderSessionState(sessionStore, { selectedSession: { id: 's1' } as ProjectSession });
     await waitFor(() => expect(result.current.hasMoreMessages).toBe(true));
 
-    const container = fakeContainer(10, 1000, 500);
+    // The prepend grows the scrolled content by 300px (1000 -> 1300).
+    const container = fakeContainerWithGrowingHeight(10, 500, 1000, 1300);
     setContainer(result.current.scrollContainerRef, container);
 
     await act(async () => {
@@ -487,6 +573,46 @@ describe('useChatSessionState — pagination via loadOlderMessages/handleScroll'
     });
 
     expect(sessionStore.fetchMore).toHaveBeenCalledWith('s1', { limit: expect.any(Number) });
+    // No anchor row exists on this fake container (`querySelectorAll` returns
+    // `[]`), so the restore effect falls back to `resolveRestoreScrollTop`:
+    // fallback.top (10) + max(scrollHeight-at-restore (1300) - fallback.height
+    // captured right after the fetch resolved (1000), 0) = 310.
+    expect(container.scrollTop).toBe(310);
+  });
+
+  it('restores scroll against the anchor row\'s live post-prepend position, not a scrollHeight delta (cloudcli B1)', async () => {
+    // `chatMessages` is derived from `sessionStore.getMessages(...)`
+    // (`useChatSessionState.ts`'s `storeMessages`/`chatMessages` memo), which
+    // only recomputes when that call returns a genuinely new array — so
+    // `getMessages` here has to actually grow once `fetchMore` resolves for
+    // the restore `useLayoutEffect` (keyed on `chatMessages.length`) to fire
+    // at all. `makeSessionStore`'s default fixed-array stub can't exercise
+    // this path; the other pagination tests below only assert `fetchMore` was
+    // called, never that a resulting scrollTop lands anywhere in particular.
+    let liveMessages = [makeMessage('newest', 0)];
+    const sessionStore = makeSessionStore(liveMessages);
+    sessionStore.getMessages = vi.fn(() => liveMessages);
+    sessionStore.fetchFromServer = vi.fn(async () => makeSlot({ hasMore: true, total: 40 }));
+    sessionStore.fetchMore = vi.fn(async () => {
+      liveMessages = [makeMessage('older', -1), ...liveMessages];
+      return makeSlot({ hasMore: true, total: 40, serverMessages: [makeMessage('older', -1)] });
+    });
+    const { result } = renderSessionState(sessionStore, { selectedSession: { id: 's1' } as ProjectSession });
+    await waitFor(() => expect(result.current.hasMoreMessages).toBe(true));
+
+    // The anchor row sits 200px below the container's top edge at capture
+    // time; by the time the restore effect re-reads it, its rect has moved to
+    // 350px — standing in for ~150px of prepended content pushing it down.
+    const container = fakeContainerWithAnchorRow(10, 1000, 500, 200, 350);
+    setContainer(result.current.scrollContainerRef, container);
+
+    await act(async () => {
+      await result.current.handleScroll();
+    });
+
+    // resolveAnchoredScrollTop({ currentScrollTop: 10, anchorElementTop: 350,
+    // anchor: { offset: 200 }, maxScrollTop: 500 }) = 10 + (350 - 200) = 160.
+    expect(container.scrollTop).toBe(160);
   });
 
   it('marks all messages loaded once an older page reports no more and none returned', async () => {

@@ -316,10 +316,15 @@ function SidebarProjectItem({
                   <div className="truncate text-sm font-normal text-foreground" title={project.displayName}>
                     {project.displayName}
                   </div>
-                  <div className="text-xs text-muted-foreground">
+                  {/* `truncate` (cloudcli B4): unlike the title above, this row
+                      had no overflow handling of its own, so on a long path
+                      the text ran past its own flex item's box and under the
+                      edit/delete/chevron controls next to it rather than
+                      stopping short of them. */}
+                  <div className="truncate text-xs text-muted-foreground" title={project.fullPath}>
                     {sessionCountLabel}
                     {project.fullPath !== project.displayName && (
-                      <span className="ml-1 opacity-60" title={project.fullPath}>
+                      <span className="ml-1 opacity-60">
                         {' - '}
                         {project.fullPath.length > 25 ? `...${project.fullPath.slice(-22)}` : project.fullPath}
                       </span>

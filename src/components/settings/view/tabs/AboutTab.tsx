@@ -49,7 +49,7 @@ export default function AboutTab() {
               href={releasesUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+              className="touch:hit-h-44 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               v{currentVersion}
             </a>
@@ -78,7 +78,7 @@ export default function AboutTab() {
           href={GITHUB_REPO_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+          className="touch:hit-h-44 flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
         >
           <GitHubIcon className="h-4 w-4" />
           GitHub
@@ -87,7 +87,7 @@ export default function AboutTab() {
           href={DISCORD_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+          className="touch:hit-h-44 flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
         >
           <DiscordIcon className="h-4 w-4" />
           Discord
@@ -96,7 +96,7 @@ export default function AboutTab() {
           href={DOCS_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+          className="touch:hit-h-44 flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
         >
           <ExternalLink className="h-3.5 w-3.5" />
           Docs
@@ -105,7 +105,7 @@ export default function AboutTab() {
           href={CLOUDCLI_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+          className="touch:hit-h-44 flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
         >
           <ExternalLink className="h-3.5 w-3.5" />
           cloudcli.ai
@@ -123,7 +123,7 @@ export default function AboutTab() {
             href={CLOUDCLI_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:underline"
+            className="touch:hit-h-44 mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:underline"
           >
             Learn more
             <ExternalLink className="h-3 w-3" />

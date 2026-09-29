@@ -12,6 +12,7 @@ import type {
 } from '../../../../types/app';
 import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import { resolveMessagesPaneView } from '../../utils/messagesPaneView';
+import { estimateRowHeight } from '../../utils/rowHeightEstimate';
 import { groupConsecutiveTools, isToolGroupItem, type MessageListItem } from '../../utils/toolGrouping';
 
 import MessageComponent from './MessageComponent';
@@ -20,28 +21,18 @@ import ToolGroupContainer from './ToolGroupContainer';
 
 // A row's real height is unknown until it mounts and reports itself via
 // `measureElement` (markdown/Prism/Mermaid/images all vary a message's height
-// wildly) — this is only the guess the virtualizer uses to decide the initial
-// visible range before that measurement lands. It does not need to be
-// accurate, only in the right order of magnitude so the first paint doesn't
-// under- or over-render.
-const VIRTUAL_ROW_ESTIMATE_PX = 96;
+// wildly) — `estimateRowHeight` (./chat/utils/rowHeightEstimate) is only the
+// base guess the virtualizer uses to decide the initial visible range before
+// that measurement lands.
 // Rendered a little beyond the viewport in each direction so a small scroll or
 // a keyboard-driven scroll-into-view doesn't show a blank frame while the next
 // row mounts.
 const VIRTUAL_OVERSCAN = 8;
 
-// A stable (module-level, never-changing) reference. `useVirtualizer` keys an
-// internal measurement memo on this function's *identity*, not its return
-// value (`@tanstack/virtual-core`'s `getMeasurementOptions`/`getMeasurements`
-// memo chain, index.js ~592-720) — a fresh closure here on every render would
-// invalidate that memo every render and force a full O(n) re-scan of every
-// row's position on every scroll-driven re-render, exactly the cost this PR
-// exists to remove. It takes no arguments that vary, so there is nothing to
-// memoize away by hooking it; a plain top-level function is the stable
-// reference.
-function estimateVirtualRowSize(): number {
-  return VIRTUAL_ROW_ESTIMATE_PX;
-}
+// `estimateRowHeight`'s content-length heuristic (cloudcli B2) lives in
+// ./chat/utils/rowHeightEstimate so its arithmetic is unit-testable without a
+// DOM; see that module's doc comment for why the estimate looks like content
+// length in the first place.
 
 interface ChatMessagesPaneProps {
   scrollContainerRef: RefObject<HTMLDivElement>;
@@ -264,8 +255,7 @@ function ChatMessagesPane({
 
   // `scrollContainerRef` itself never changes identity across renders (it's
   // the same ref object handed in by the parent), so this closure can be
-  // memoized with no dependencies at all — same reasoning as
-  // `estimateVirtualRowSize` above: a stable reference here keeps
+  // memoized with no dependencies at all — a stable reference here keeps
   // `useVirtualizer`'s internal measurement memo from invalidating on every
   // render that isn't actually a scroll or resize.
   const getVirtualScrollElement = useCallback(
@@ -273,23 +263,28 @@ function ChatMessagesPane({
     [scrollContainerRef],
   );
 
-  // Unlike the two above, this one's dependencies are real: the key a row
-  // gets genuinely must change when the underlying message list changes
-  // (a new message, a reorder, a prepend). `useCallback` here means it ONLY
-  // changes reference when `groupedVisibleMessages`/`getRowKey` actually did —
-  // not on every incidental re-render (e.g. a scroll-driven one where the
-  // data hasn't moved) — which is what keeps the memo chain above cheap on
-  // the hot (scroll) path instead of defeating it the same way an inline
-  // arrow here would.
+  // These two share the same real-dependency reasoning: the key/estimate a
+  // row gets genuinely must change when the underlying message list changes
+  // (a new message, a reorder, a prepend). `useCallback` here means each ONLY
+  // changes reference when `groupedVisibleMessages` (plus, for the key,
+  // `getRowKey`) actually did — not on every incidental re-render (e.g. a
+  // scroll-driven one where the data hasn't moved) — which is what keeps the
+  // measurement memo above cheap on the hot (scroll) path instead of
+  // defeating it the same way an inline arrow here would.
   const getVirtualItemKey = useCallback(
     (index: number) => getRowKey(groupedVisibleMessages[index]),
     [getRowKey, groupedVisibleMessages],
   );
 
+  const getVirtualItemEstimatedSize = useCallback(
+    (index: number) => estimateRowHeight(groupedVisibleMessages[index]),
+    [groupedVisibleMessages],
+  );
+
   const rowVirtualizer = useVirtualizer({
     count: renderFlat ? 0 : groupedVisibleMessages.length,
     getScrollElement: getVirtualScrollElement,
-    estimateSize: estimateVirtualRowSize,
+    estimateSize: getVirtualItemEstimatedSize,
     overscan: VIRTUAL_OVERSCAN,
     getItemKey: getVirtualItemKey,
   });
@@ -395,6 +390,11 @@ function ChatMessagesPane({
                 <div
                   key={virtualRow.key}
                   data-index={virtualRow.index}
+                  // Stable across a prepend (same `getItemKey` the virtualizer
+                  // itself is keyed on) so scroll restore can re-locate the
+                  // reader's anchor row by identity instead of by its
+                  // now-shifted index (cloudcli B1).
+                  data-row-key={virtualRow.key}
                   ref={rowVirtualizer.measureElement}
                   style={{
                     position: 'absolute',

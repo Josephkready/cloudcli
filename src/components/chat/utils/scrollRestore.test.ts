@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveRestoreScrollTop, type ScrollRestoreState } from './scrollRestore';
+import { resolveAnchoredScrollTop, resolveRestoreScrollTop, type ScrollRestoreState } from './scrollRestore';
 
 /*
  * Prepending older messages moves everything the user was looking at down the
@@ -49,4 +49,63 @@ test('toStart lands at the beginning of the thread regardless of prior offset (#
 
 test('toStart lands at the beginning even from the very top of a short thread', () => {
   assert.equal(resolveRestoreScrollTop({ mode: 'toStart', top: 0, height: 200 }, 200), 0);
+});
+
+/*
+ * cloudcli B1: the raw scrollHeight/scrollTop delta above assumes the
+ * newly-prepended rows already have their final measured height by the time
+ * it runs, and that the reader hasn't scrolled since the pre-fetch snapshot
+ * was taken. Anchoring to a specific row's live position holds regardless of
+ * either.
+ */
+
+test('resolveAnchoredScrollTop keeps the anchor row at the same offset below the top edge', () => {
+  // The anchor sat 120px below the container's top edge at capture time. The
+  // prepend pushed its rect down to 640px; landing back at +120 needs the
+  // scrollTop nudged forward by exactly that 520px delta.
+  assert.equal(
+    resolveAnchoredScrollTop({
+      currentScrollTop: 900,
+      anchorElementTop: 640,
+      anchor: { key: 'message-user-42', offset: 120 },
+      maxScrollTop: 10_000,
+    }),
+    1420,
+  );
+});
+
+test('resolveAnchoredScrollTop is a no-op when the anchor has not moved', () => {
+  assert.equal(
+    resolveAnchoredScrollTop({
+      currentScrollTop: 500,
+      anchorElementTop: 50,
+      anchor: { key: 'message-user-1', offset: 50 },
+      maxScrollTop: 10_000,
+    }),
+    500,
+  );
+});
+
+test('resolveAnchoredScrollTop never goes negative', () => {
+  assert.equal(
+    resolveAnchoredScrollTop({
+      currentScrollTop: 30,
+      anchorElementTop: 0,
+      anchor: { key: 'message-user-1', offset: 200 },
+      maxScrollTop: 10_000,
+    }),
+    0,
+  );
+});
+
+test('resolveAnchoredScrollTop never overshoots the container', () => {
+  assert.equal(
+    resolveAnchoredScrollTop({
+      currentScrollTop: 100,
+      anchorElementTop: 5_000,
+      anchor: { key: 'message-user-1', offset: 0 },
+      maxScrollTop: 400,
+    }),
+    400,
+  );
 });

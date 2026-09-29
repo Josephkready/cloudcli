@@ -34,7 +34,7 @@ export default function PremiumFeatureCard({
             href={CLOUDCLI_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:underline"
+            className="touch:hit-h-44 mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:underline"
           >
             {ctaText}
             <ExternalLink className="h-3 w-3" />

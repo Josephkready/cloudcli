@@ -128,7 +128,10 @@ export const OneLineDisplay: React.FC<OneLineDisplayProps> = ({
         <span className="text-[10px] text-muted-foreground/40">/</span>
         <button
           onClick={handleAction}
-          className="truncate font-mono text-xs text-primary transition-colors hover:text-primary/80 hover:underline"
+          // `touch:hit-h-44` (cloudcli B7): the file name itself stays a
+          // compact inline label; the tappable height is floored at 44px on
+          // touch devices via the overlay, not by growing this row.
+          className="touch:hit-h-44 truncate font-mono text-xs text-primary transition-colors hover:text-primary/80 hover:underline"
           title={value}
         >
           {displayName}

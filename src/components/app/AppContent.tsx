@@ -221,7 +221,13 @@ function AppContentInner() {
         </div>
       ) : (
         <div
-          className={`fixed inset-0 z-50 flex transition-[opacity,visibility] duration-base ease-out ${sidebarOpen ? 'visible opacity-100' : 'invisible opacity-0'
+          // Only `visibility` transitions on the wrapper (cloudcli B3): CSS
+          // opacity on an ancestor makes its whole subtree translucent, so
+          // putting it here faded the opaque panel below right along with the
+          // backdrop, showing both layers of text at once mid-transition.
+          // Each child now owns its own transition instead — the backdrop
+          // fades, the panel slides.
+          className={`fixed inset-0 z-50 flex transition-[visibility] duration-base ease-out ${sidebarOpen ? 'visible' : 'invisible'
             }`}
           // Its own offset, not the shell's: this overlay is `position: fixed`,
           // so it resolves against the viewport and inherits nothing from the
@@ -230,7 +236,8 @@ function AppContentInner() {
           style={keyboardAwareBottomStyle()}
         >
           <button
-            className="fixed inset-0 bg-background/80 transition-opacity duration-base ease-out"
+            className={`fixed inset-0 bg-background/80 transition-opacity duration-base ease-out ${sidebarOpen ? 'opacity-100' : 'opacity-0'
+              }`}
             onClick={(event) => {
               event.stopPropagation();
               setSidebarOpen(false);

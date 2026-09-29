@@ -241,6 +241,19 @@ describe('BugReportDialog', () => {
     expect(screen.getByText('s1')).toBeInTheDocument();
   });
 
+  it('scrolls the expanded metadata panel into view (cloudcli B5)', async () => {
+    // "Show" only relabels the toggle; the panel it reveals can render below
+    // the dialog's own scroll fold on mobile/tablet with nothing to carry the
+    // reader there. Expanding should carry them there itself.
+    const scrollIntoViewSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    renderDialog();
+
+    await userEvent.click(screen.getByRole('button', { name: /Session details attached/ }));
+
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: 'nearest' });
+    scrollIntoViewSpy.mockRestore();
+  });
+
   it('renders nothing when closed', () => {
     renderDialog(false);
     expect(screen.queryByRole('dialog')).toBeNull();

@@ -151,7 +151,11 @@ const MessageCopyControl = ({
         onClick={handleCopyClick}
         title={copyTitle}
         aria-label={copyTitle}
-        className={`inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors ${toneClass}`}
+        // `touch:hit-h-44` (cloudcli B7): the painted control stays this
+        // compact by design (many of these sit in a tight row under a
+        // reply), but its centred overlay floors the *tappable* height at
+        // 44px on real touch devices without growing anything visually.
+        className={`touch:hit-h-44 inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors ${toneClass}`}
       >
         {copied ? (
           <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -184,7 +188,7 @@ const MessageCopyControl = ({
             ref={triggerRef}
             type="button"
             onClick={() => (isDropdownOpen ? setIsDropdownOpen(false) : openDropdown())}
-            className={`rounded px-1 py-0.5 transition-colors ${toneClass}`}
+            className={`touch:hit-h-44 rounded px-1 py-0.5 transition-colors ${toneClass}`}
             aria-label={t('copyMessage.selectFormat', { defaultValue: 'Select copy format' })}
             title={t('copyMessage.selectFormat', { defaultValue: 'Select copy format' })}
           >

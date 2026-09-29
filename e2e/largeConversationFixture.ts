@@ -61,6 +61,12 @@ export interface LargeConversationHandles {
    * accidentally matching a row another test already asserts on.
    */
   searchTargetMessageText: string;
+  /** Deterministic text for any row index, for tests that need an anchor
+   * somewhere other than the handful of fixed handles above (e.g. "whatever
+   * lands inside the second load-older page"). Mirrors the seeding loop's own
+   * `messageText` exactly, so it only ever matches a row this fixture
+   * actually wrote. */
+  messageText: (index: number) => string;
 }
 
 /**
@@ -192,5 +198,6 @@ export function seedLargeConversation(
     lastMessageText: messageText(rowCount - 1),
     afterMermaidMessageText: messageText(mermaidIndex + 1),
     searchTargetMessageText,
+    messageText,
   };
 }
