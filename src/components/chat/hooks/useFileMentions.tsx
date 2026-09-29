@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Dispatch, KeyboardEvent, RefObject, SetStateAction } from 'react';
 import { api } from '../../../utils/api';
 import { recordFeatureUse } from '../../../utils/featureUsage';
@@ -65,7 +65,6 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
   const [selectedFileIndex, setSelectedFileIndex] = useState(-1);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [atSymbolPosition, setAtSymbolPosition] = useState(-1);
-  const filterTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -139,8 +138,11 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
 
     // Debounce the actual filter pass (like useSlashCommands's command
     // query) so a large project's file list isn't re-scanned on every
-    // keystroke while composing a mention — only once typing pauses.
-    filterTimerRef.current = window.setTimeout(() => {
+    // keystroke while composing a mention — only once typing pauses. A plain
+    // local timer id is enough: React always runs this effect's own cleanup
+    // before the next run (deps change) or unmount, so a stale timer can
+    // never outlive the render it was scheduled from.
+    const timerId = window.setTimeout(() => {
       const query = textAfterAt.toLowerCase();
       const matchingFiles = lowercasedFileList
         .filter(({ nameLower, pathLower }) => nameLower.includes(query) || pathLower.includes(query))
@@ -151,7 +153,7 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
     }, FILE_MENTION_DEBOUNCE_MS);
 
     return () => {
-      window.clearTimeout(filterTimerRef.current);
+      window.clearTimeout(timerId);
     };
   }, [input, cursorPosition, lowercasedFileList]);
 

@@ -128,6 +128,27 @@ describe('useFileMentions — the @ dropdown', () => {
     await waitFor(() => expect(rendered.result.current.showFileDropdown).toBe(false));
   });
 
+  it('only reflects the latest query when it changes before the debounce fires', async () => {
+    // A stale in-flight debounce timer from an earlier keystroke must not
+    // clobber the result of a newer one (the fast-path fix for #WP6 dropped a
+    // useRef for the timer id in favor of a plain effect-cleanup-cancelled
+    // local, so this pins that the cancellation still happens correctly).
+    const { rendered } = setup('hello @i');
+    await waitFor(() => expect(mockGetFiles).toHaveBeenCalled());
+    act(() => rendered.result.current.setCursorPosition('hello @i'.length));
+    await waitFor(() => expect(rendered.result.current.showFileDropdown).toBe(true));
+
+    // Change the query well before the 150ms debounce for "@i" can fire.
+    rendered.rerender({ selectedProject: project(), currentInput: 'hello @App' });
+    act(() => rendered.result.current.setCursorPosition('hello @App'.length));
+
+    await waitFor(() =>
+      expect(rendered.result.current.filteredFiles.map((f) => f.name)).toEqual(['App.tsx']),
+    );
+    // The stale "@i" query's match (index.ts) never leaks into the final result.
+    expect(rendered.result.current.filteredFiles.map((f) => f.name)).not.toContain('index.ts');
+  });
+
   it('closes the dropdown when there is no @ before the cursor', async () => {
     const { rendered } = setup('hello world');
     await waitFor(() => expect(mockGetFiles).toHaveBeenCalled());

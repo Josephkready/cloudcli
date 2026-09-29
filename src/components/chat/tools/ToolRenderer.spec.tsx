@@ -184,6 +184,27 @@ describe('ToolRenderer dispatch', () => {
       expect(identityDiff).not.toHaveBeenCalled();
     });
 
+    it('keeps the diff content mounted (does not recompute) after collapsing again', () => {
+      const { container } = render(
+        <ToolRenderer
+          toolName="Edit"
+          toolInput={{ file_path: '/src/App.tsx', old_string: 'old', new_string: 'new' }}
+          mode="input"
+          createDiff={identityDiff}
+        />,
+      );
+
+      const trigger = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement;
+      fireEvent.click(trigger); // expand — first mount, computes the diff once
+      expect(identityDiff).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(trigger); // collapse again — lazyMount keeps content mounted
+      fireEvent.click(trigger); // re-expand
+      expect(identityDiff).toHaveBeenCalledTimes(1);
+      // The already-rendered diff row is still in the DOM the whole time.
+      expect(screen.getByText('old|new')).toBeInTheDocument();
+    });
+
     it('omits the diff viewer entirely when createDiff is not provided', () => {
       const { container } = render(
         <ToolRenderer
