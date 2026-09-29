@@ -12,7 +12,12 @@ import { readPendingSends, writePendingSends } from '../utils/pendingSends';
 import { sendSubscribeBatch } from '../utils/subscribeTargets';
 import { stabilizeMessageIdentities } from '../utils/messageIdentity';
 import { reconcileTokenBudget } from '../utils/tokenBudget';
-import { resolveRestoreScrollTop, type ScrollRestoreState } from '../utils/scrollRestore';
+import {
+  resolveAnchoredScrollTop,
+  resolveRestoreScrollTop,
+  type ScrollAnchor,
+  type ScrollRestoreState,
+} from '../utils/scrollRestore';
 import {
   isGestureActive,
   isNearBottom as metricsAreNearBottom,
@@ -30,6 +35,53 @@ const MESSAGES_PER_PAGE = 20;
 /** Keys that scroll the focused pane — reader input for auto-follow (#540). */
 const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 const INITIAL_VISIBLE_MESSAGES = 100;
+
+/**
+ * `ChatMessagesPane`'s virtualized rows carry this attribute (value = the
+ * same key `useVirtualizer`'s `getItemKey` uses), so it survives a prepend
+ * even though the row's index shifts. See `captureScrollAnchor` (cloudcli B1).
+ */
+const SCROLL_ANCHOR_SELECTOR = '[data-row-key]';
+
+/**
+ * A pending older-messages prepend can restore either by re-locating a
+ * specific row (`anchor`, preferred — correct regardless of whether rows
+ * have finished measuring, and regardless of how much further the reader
+ * scrolled while the fetch was in flight) or, failing that, by the previous
+ * raw scrollHeight/scrollTop delta (`fallback` — best-effort only; see
+ * `resolveRestoreScrollTop`'s doc comment for why it can land wrong).
+ */
+interface PendingScrollRestore {
+  mode: 'preserve';
+  anchor: ScrollAnchor | null;
+  fallback: ScrollRestoreState;
+}
+
+/**
+ * Finds the topmost row still at least partially below the scroll
+ * container's own top edge, and how far below that edge it currently sits.
+ * Read again post-prepend (against the row's *new* position) to compute the
+ * scrollTop that puts it back there — see `resolveAnchoredScrollTop`.
+ *
+ * DOM-order == visual top-to-bottom order here because
+ * `rowVirtualizer.getVirtualItems()` (what `ChatMessagesPane` maps over)
+ * always returns rows in ascending index order, and heights are never
+ * negative.
+ */
+function captureScrollAnchor(container: HTMLDivElement): ScrollAnchor | null {
+  const rows = container.querySelectorAll<HTMLElement>(SCROLL_ANCHOR_SELECTOR);
+  if (rows.length === 0) return null;
+  const containerTop = container.getBoundingClientRect().top;
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i];
+    const offset = row.getBoundingClientRect().top - containerTop;
+    if (offset + row.offsetHeight > 0) {
+      const key = row.getAttribute('data-row-key');
+      if (key) return { key, offset };
+    }
+  }
+  return null;
+}
 
 interface UseChatSessionStateArgs {
   selectedProject: Project | null;
@@ -144,7 +196,7 @@ export function useChatSessionState({
   const isLoadingMoreRef = useRef(false);
   const allMessagesLoadedRef = useRef(false);
   const topLoadLockRef = useRef(false);
-  const pendingScrollRestoreRef = useRef<ScrollRestoreState | null>(null);
+  const pendingScrollRestoreRef = useRef<PendingScrollRestore | null>(null);
   const pendingInitialScrollRef = useRef(true);
   const messagesOffsetRef = useRef(0);
   /*
@@ -398,8 +450,6 @@ export function useChatSessionState({
       // scroll that had silently reached the network looking identical to one
       // that had simply stopped (cloudcli#510 review).
       setIsLoadingMoreMessages(true);
-      const previousScrollHeight = container.scrollHeight;
-      const previousScrollTop = container.scrollTop;
 
       try {
         const slot = await sessionStore.fetchMore(selectedSession.id, {
@@ -420,10 +470,19 @@ export function useChatSessionState({
         }
 
         // Incremental page: hold the reader's place across the prepend.
+        //
+        // Captured here — right after the fetch resolves, immediately before
+        // the state updates below queue the prepend — rather than before the
+        // `await`, so it reflects wherever the reader has actually scrolled
+        // to by now instead of a snapshot from whenever this fetch started
+        // (cloudcli B1). The anchor is a specific row's identity + its
+        // current offset below the container's top edge, not a raw
+        // scrollHeight/scrollTop pair, so restoring it doesn't depend on the
+        // newly-prepended rows having already measured their final height.
         pendingScrollRestoreRef.current = {
           mode: 'preserve',
-          height: previousScrollHeight,
-          top: previousScrollTop,
+          anchor: captureScrollAnchor(container),
+          fallback: { mode: 'preserve', height: container.scrollHeight, top: container.scrollTop },
         };
         setHasMoreMessages(slot.hasMore);
         setTotalMessages(slot.total);
@@ -496,7 +555,31 @@ export function useChatSessionState({
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) return;
     const restore = pendingScrollRestoreRef.current;
     const container = scrollContainerRef.current;
-    container.scrollTop = resolveRestoreScrollTop(restore, container.scrollHeight);
+
+    // Prefer re-locating the anchor row by identity: its *current* rect
+    // reflects whatever real (measured, not estimated) height the newly
+    // prepended rows actually ended up with, which a scrollHeight snapshot
+    // taken at capture time cannot (cloudcli B1). Only when the row can't be
+    // found at all (e.g. it scrolled out of the DOM range entirely) does this
+    // fall back to the old delta, which is still better than nothing.
+    const anchorEl = restore.anchor
+      ? container.querySelector<HTMLElement>(
+          `[data-row-key="${CSS.escape(restore.anchor.key)}"]`,
+        )
+      : null;
+
+    if (restore.anchor && anchorEl) {
+      const anchorElementTop = anchorEl.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      container.scrollTop = resolveAnchoredScrollTop({
+        currentScrollTop: container.scrollTop,
+        anchorElementTop,
+        anchor: restore.anchor,
+        maxScrollTop: container.scrollHeight - container.clientHeight,
+      });
+    } else {
+      container.scrollTop = resolveRestoreScrollTop(restore.fallback, container.scrollHeight);
+    }
+
     pendingScrollRestoreRef.current = null;
   }, [chatMessages.length]);
 

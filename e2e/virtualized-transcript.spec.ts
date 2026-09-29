@@ -246,6 +246,52 @@ test('history arrives by scrolling alone — there is no "load all" control to p
   await expect(removedControls).toHaveCount(0);
 });
 
+test('keeps the reader\'s place across a load-more page instead of jumping (cloudcli B1)', async ({ page }) => {
+  await page.goto(`/session/${fixture.sessionId}`);
+  await expect(page.getByText(fixture.lastMessageText)).toBeVisible({ timeout: 30_000 });
+
+  const container = page.locator('.chat-messages-pane');
+
+  // First page load-older: the initial fetch covers the most recent 20 raw
+  // rows (indices ~500-519 of this fixture's 520), so one scroll-triggered
+  // page reaches into the low 480s-490s. #493 is a plain text row safely
+  // inside that range and distinct from every other named handle in this
+  // fixture.
+  // Small, frequently-checked flicks rather than a few big ones: a big flick
+  // can load several pages in one go and scroll straight past this one
+  // specific row before it's ever checked for.
+  const anchorText = fixture.messageText(493);
+  const anchor = page.getByText(anchorText);
+  for (let attempt = 0; attempt < 30; attempt++) {
+    if (await anchor.count()) break;
+    await wheelUp(page, container, 600);
+    await page.waitForTimeout(250);
+  }
+  await expect(anchor).toBeVisible({ timeout: 20_000 });
+
+  // Read where the reader's message sits, then trigger a SECOND page load
+  // while it's on screen — exactly the "scrolling up loses the reader's
+  // place" repro (cloudcli B1): the old scrollHeight/scrollTop delta was
+  // captured before the fetch and could land anywhere once virtualized rows
+  // (still at their pre-measurement estimated height) settled.
+  const anchorYBefore = await stableY(anchor);
+  // A small nudge, not another big flick: the anchor is already near the top
+  // edge (that's how it was reached above), and the point is to cross the
+  // near-top pagination threshold again while it's still roughly where the
+  // reader left it — not to scroll clean past it.
+  await wheelUp(page, container, 150);
+
+  // The anchor must never fully leave the viewport mid-load...
+  await expect(anchor).toBeVisible({ timeout: 15_000 });
+  // ...and once the page settles, it moved by exactly what the reader's own
+  // 150px nudge accounts for — restored back to the same relative position
+  // under that scroll, not the "jumps, blanks, lands somewhere unrelated"
+  // sequence the report frames showed (which would show up here as a much
+  // larger or negative delta).
+  const anchorYAfter = await stableY(anchor);
+  expect(Math.abs(anchorYAfter - anchorYBefore - 150)).toBeLessThan(30);
+});
+
 test('a cross-conversation search jump lands on and highlights the target message', async ({ page }) => {
   // Deliberately starts at the app root, not the session directly: a search
   // jump has to work from anywhere, and this is the one path in the app that

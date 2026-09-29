@@ -99,6 +99,13 @@ export default function BugReportDialog({
   const [showMetadata, setShowMetadata] = useState(false);
   /** Reports filed via "File & add another" during this opening of the dialog. */
   const [filedCount, setFiledCount] = useState(0);
+  // "Show" on Session details only relabels itself to "Hide" (cloudcli B5) —
+  // the expanded list renders below whatever else is in the scroll area, and
+  // on mobile/tablet that's below the fold of the dialog's own max-height
+  // (`min(92dvh,44rem)`, see DialogContent below) with nothing to carry the
+  // reader's eye there. Scrolled into view on expand so opening it doesn't
+  // look like a no-op.
+  const metadataPanelRef = useRef<HTMLDivElement>(null);
 
   // Screenshots (dante-config skills/bug-report-button/SKILL.md §9): staged,
   // previewed, and compressed client-side, but never persisted anywhere — a
@@ -175,6 +182,15 @@ export default function BugReportDialog({
     }
     setStagedAttachments([]);
   }, [open]);
+
+  // Carries the reader to the newly-expanded metadata list (cloudcli B5):
+  // without this, "Show" only changed the toggle's own label while the panel
+  // it revealed rendered off-screen below the dialog's max-height, with
+  // nothing to indicate anything had happened.
+  useEffect(() => {
+    if (!showMetadata) return;
+    metadataPanelRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [showMetadata]);
 
   /**
    * The single entry point for every WIRED capture path — the file input and
@@ -471,7 +487,7 @@ export default function BugReportDialog({
                     </span>
                   </button>
                   {showMetadata && (
-                    <div className="border-t border-border/60 px-3.5 py-2 text-xs">
+                    <div ref={metadataPanelRef} className="border-t border-border/60 px-3.5 py-2 text-xs">
                       {metadataEntries.map(([key, value]) => (
                         <MetadataRow key={key} label={key} value={String(value)} />
                       ))}
