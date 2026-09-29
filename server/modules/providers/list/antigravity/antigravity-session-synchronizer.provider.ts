@@ -2,12 +2,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
+import type { DiscoveredSessionInput } from '@/modules/database/index.js';
 import { sessionsDb } from '@/modules/database/index.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 import { iterateJsonlLines } from '@/shared/jsonl.js';
 import { shouldExcludeProjectPath } from '@/shared/project-exclude.js';
 import {
   findFilesRecursivelyModifiedAfter,
+  mapWithConcurrency,
   normalizeSessionName,
   readFileTimestamps,
   readObjectRecord,
@@ -17,11 +19,19 @@ import {
 const PROVIDER = 'antigravity' as const;
 const UNTITLED_SESSION = 'Untitled Antigravity Session';
 
+/**
+ * Upper bound on concurrent transcript reads during a scan, mirroring the
+ * Claude synchronizer's `CLAUDE_SYNC_CONCURRENCY` (same directory tree).
+ */
+const ANTIGRAVITY_SYNC_CONCURRENCY = 12;
+
 type ParsedAntigravitySession = {
   sessionId: string;
   projectPath: string;
   sessionName?: string;
 };
+
+type HistoryMetadata = { projectPath?: string; sessionName?: string };
 
 export function getAntigravitySessionIdFromTranscriptPath(filePath: string): string | null {
   const parts = filePath.split(path.sep);
@@ -73,14 +83,66 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
 
   async synchronize(since?: Date): Promise<number> {
     const files = await findFilesRecursivelyModifiedAfter(this.brainDir, 'transcript.jsonl', since ?? null);
-    let processed = 0;
 
-    for (const filePath of files) {
-      if (await this.synchronizeFile(filePath)) {
-        processed += 1;
+    // history.jsonl only grows, and the old per-file `readHistoryMetadata`
+    // re-read + re-parsed the whole thing for every transcript in the batch
+    // (O(N x history size)). Build the lookup map once per scan instead.
+    const historyMap = await this.buildHistoryMetadataMap();
+
+    // Read/parse transcripts with bounded concurrency, mirroring the Claude
+    // synchronizer's pattern in the same directory tree: overlap filesystem
+    // I/O across a large session library instead of scanning strictly serially.
+    const parsedRecords = await mapWithConcurrency(
+      files,
+      ANTIGRAVITY_SYNC_CONCURRENCY,
+      async (filePath) => {
+        if (path.basename(filePath) !== 'transcript.jsonl') {
+          return null;
+        }
+
+        const parsed = await this.processTranscriptFile(filePath, historyMap);
+        if (!parsed || shouldExcludeProjectPath(parsed.projectPath)) {
+          return null;
+        }
+
+        const timestamps = await readFileTimestamps(filePath);
+        return { filePath, parsed, timestamps };
       }
+    );
+
+    // DB reads/writes stay serial and in on-disk order after the concurrent
+    // parse, same as Claude/Codex: the "keep existing name" check + upsert run
+    // in program order so two files that map to the same session id can't race.
+    const sessionInputs: DiscoveredSessionInput[] = [];
+    for (const record of parsedRecords) {
+      if (!record) {
+        continue;
+      }
+      const { filePath, parsed, timestamps } = record;
+
+      const existing = sessionsDb.getSessionByProviderSessionId(parsed.sessionId)
+        ?? sessionsDb.getSessionById(parsed.sessionId);
+      const existingName = existing?.custom_name?.trim();
+      const sessionName = existingName && existingName !== UNTITLED_SESSION
+        ? existingName
+        : parsed.sessionName;
+
+      sessionInputs.push({
+        providerSessionId: parsed.sessionId,
+        provider: PROVIDER,
+        projectPath: parsed.projectPath,
+        customName: sessionName,
+        createdAt: timestamps.createdAt,
+        updatedAt: timestamps.updatedAt,
+        jsonlPath: filePath,
+      });
     }
-    return processed;
+
+    // Batch the upserts in one transaction (Claude synchronizer's #188 fix):
+    // per-row commits each fsync once, which dominates a large cold scan.
+    sessionsDb.createSessions(sessionInputs);
+
+    return sessionInputs.length;
   }
 
   async synchronizeFile(filePath: string): Promise<string | null> {
@@ -88,7 +150,8 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
       return null;
     }
 
-    const parsed = await this.processTranscriptFile(filePath);
+    const historyMap = await this.buildHistoryMetadataMap();
+    const parsed = await this.processTranscriptFile(filePath, historyMap);
     if (!parsed || shouldExcludeProjectPath(parsed.projectPath)) {
       return null;
     }
@@ -112,13 +175,16 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
     );
   }
 
-  private async processTranscriptFile(filePath: string): Promise<ParsedAntigravitySession | null> {
+  private async processTranscriptFile(
+    filePath: string,
+    historyMap: Map<string, HistoryMetadata>,
+  ): Promise<ParsedAntigravitySession | null> {
     const sessionId = getAntigravitySessionIdFromTranscriptPath(filePath);
     if (!sessionId) {
       return null;
     }
 
-    const historyMetadata = await this.readHistoryMetadata(sessionId);
+    const historyMetadata = historyMap.get(sessionId);
     let projectPath = historyMetadata?.projectPath;
     let firstUserMessage = historyMetadata?.sessionName;
 
@@ -154,26 +220,34 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
     };
   }
 
-  private async readHistoryMetadata(
-    sessionId: string,
-  ): Promise<{ projectPath?: string; sessionName?: string } | null> {
+  /**
+   * Parses `history.jsonl` once into a `Map<conversationId, metadata>` instead
+   * of re-reading and re-scanning the whole (append-only, potentially
+   * multi-MB) file for every transcript in a batch. history.jsonl is
+   * append-only, so iterating forward and letting a later line overwrite an
+   * earlier one for the same conversation id yields the same "most recent
+   * entry" result the old newest-first, first-hit scan returned per file.
+   */
+  private async buildHistoryMetadataMap(): Promise<Map<string, HistoryMetadata>> {
+    const map = new Map<string, HistoryMetadata>();
     try {
       const lines = (await readFile(this.historyPath, 'utf8')).split(/\r?\n/);
       // The history can be observed while agy is appending a partial line;
       // iterateJsonlLines skips those.
-      for (const parsed of iterateJsonlLines(lines, { fromEnd: true })) {
+      for (const parsed of iterateJsonlLines(lines)) {
         const entry = readObjectRecord(parsed);
-        if (readOptionalString(entry?.conversationId) !== sessionId) {
+        const sessionId = readOptionalString(entry?.conversationId);
+        if (!sessionId) {
           continue;
         }
-        return {
+        map.set(sessionId, {
           projectPath: readOptionalString(entry?.workspace),
           sessionName: readOptionalString(entry?.display),
-        };
+        });
       }
     } catch {
       // History is an optional metadata source; transcripts remain authoritative.
     }
-    return null;
+    return map;
   }
 }

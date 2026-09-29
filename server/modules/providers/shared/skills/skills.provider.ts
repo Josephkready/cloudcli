@@ -12,11 +12,19 @@ import type {
 } from '@/shared/types.js';
 import {
   findProviderSkillMarkdownFiles,
+  mapWithConcurrency,
   readOptionalString,
   readProviderSkillMarkdownDefinitionFromContent,
   readProviderSkillMarkdownDefinition,
   AppError,
 } from '@/shared/utils.js';
+
+/**
+ * Upper bound on concurrent `SKILL.md` reads while listing one skill source,
+ * mirroring the session synchronizers' `mapWithConcurrency` bound in the same
+ * module tree.
+ */
+const SKILLS_READ_CONCURRENCY = 12;
 
 const resolveWorkspacePath = (workspacePath?: string): string =>
   path.resolve(workspacePath ?? process.cwd());
@@ -95,36 +103,45 @@ export abstract class SkillsProvider implements IProviderSkills {
   async listSkills(options?: ProviderSkillListOptions): Promise<ProviderSkill[]> {
     const workspacePath = resolveWorkspacePath(options?.workspacePath);
     const sources = await this.getSkillSources(workspacePath);
-    const skills: ProviderSkill[] = [];
 
-    for (const source of sources) {
-      const skillFiles = await findProviderSkillMarkdownFiles(source.rootDir, {
-        recursive: source.recursive,
-      });
-      for (const skillPath of skillFiles) {
-        try {
-          const definition = await readProviderSkillMarkdownDefinition(skillPath);
-          const command = source.commandForSkill
-            ? source.commandForSkill(definition.name)
-            : `${source.commandPrefix ?? '/'}${definition.name}`;
+    // Sources are scanned in order (their arrays are concatenated below in
+    // source order), but the possibly-tens-to-hundreds of `SKILL.md` reads
+    // within one source overlap with bounded concurrency instead of reading
+    // strictly serially.
+    const skillsPerSource = await Promise.all(
+      sources.map(async (source) => {
+        const skillFiles = await findProviderSkillMarkdownFiles(source.rootDir, {
+          recursive: source.recursive,
+        });
 
-          skills.push({
-            provider: this.provider,
-            name: definition.name,
-            description: definition.description,
-            command,
-            scope: source.scope,
-            sourcePath: skillPath,
-            pluginName: source.pluginName,
-            pluginId: source.pluginId,
-          });
-        } catch {
-          // A malformed or unreadable skill markdown file should not hide other valid skills.
-        }
-      }
-    }
+        const parsed = await mapWithConcurrency(skillFiles, SKILLS_READ_CONCURRENCY, async (skillPath): Promise<ProviderSkill | null> => {
+          try {
+            const definition = await readProviderSkillMarkdownDefinition(skillPath);
+            const command = source.commandForSkill
+              ? source.commandForSkill(definition.name)
+              : `${source.commandPrefix ?? '/'}${definition.name}`;
 
-    return skills;
+            return {
+              provider: this.provider,
+              name: definition.name,
+              description: definition.description,
+              command,
+              scope: source.scope,
+              sourcePath: skillPath,
+              pluginName: source.pluginName,
+              pluginId: source.pluginId,
+            } satisfies ProviderSkill;
+          } catch {
+            // A malformed or unreadable skill markdown file should not hide other valid skills.
+            return null;
+          }
+        });
+
+        return parsed.filter((skill): skill is ProviderSkill => skill !== null);
+      }),
+    );
+
+    return skillsPerSource.flat();
   }
 
   async addSkills(input: ProviderSkillCreateInput): Promise<ProviderSkill[]> {
