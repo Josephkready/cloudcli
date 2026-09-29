@@ -250,7 +250,7 @@ describe('BugReportDialog', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Session details attached/ }));
 
-    expect(scrollIntoViewSpy).toHaveBeenCalled();
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: 'nearest' });
     scrollIntoViewSpy.mockRestore();
   });
 
