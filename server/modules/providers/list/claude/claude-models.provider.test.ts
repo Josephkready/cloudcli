@@ -508,6 +508,111 @@ test('getCurrentActiveModel returns the default when the row has no jsonl_path (
   }
 });
 
+// ---------------------------------------------------------------------------
+// getCurrentActiveModel tail-read (perf: mirrors claude-token-usage.provider.ts's
+// tail-read, so a large transcript doesn't get loaded whole just to find the
+// most recent model event).
+// ---------------------------------------------------------------------------
+
+test('getCurrentActiveModel resolves a model recorded at the very end of a large transcript', async () => {
+  const appId = 'tail-scan-session';
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'models-tail-'));
+  const jsonlPath = path.join(dir, 'session.jsonl');
+
+  // Pad well past the initial 256 KiB tail window with noise turns using a
+  // different (placeholder) model, then land the real answer as the very
+  // last line -- this is the fast path, found on the very first tail read.
+  const noiseLine = assistantTurn('<synthetic>', 'x'.repeat(500), appId);
+  const paddingLineCount = Math.ceil((512 * 1024) / (noiseLine.length + 1));
+  const lines = new Array(paddingLineCount).fill(noiseLine);
+  lines.push(assistantTurn('opus', 'final answer', appId));
+  await fsp.writeFile(jsonlPath, transcript(...lines));
+
+  const stub = mock.method(sessionsDb, 'getSessionById', () => ({
+    jsonl_path: jsonlPath,
+    provider_session_id: appId,
+  }) as unknown as ReturnType<typeof sessionsDb.getSessionById>);
+
+  try {
+    const active = await new ClaudeProviderModels().getCurrentActiveModel(appId);
+    assert.deepEqual(active, { model: 'opus' });
+  } finally {
+    stub.mock.restore();
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('getCurrentActiveModel grows the tail window when the model event sits past the first 256 KiB', async () => {
+  // The real answer sits ~384 KiB from the end of the file, past the initial
+  // 256 KiB tail (so the first readFileTail call misses it entirely), but
+  // within the widened 1 MiB window the growth loop tries next. This is the
+  // one branch a "answer is the very last line" fixture can never exercise:
+  // `claude-models.provider.ts`'s `while (!model && windowBytes < size ...)`
+  // loop only runs when the first tail comes back empty.
+  const appId = 'tail-grow-session';
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'models-tail-grow-'));
+  const jsonlPath = path.join(dir, 'session.jsonl');
+
+  const noiseLine = assistantTurn('<synthetic>', 'x'.repeat(500), appId);
+  const trailingPaddingLines = Math.ceil((384 * 1024) / (noiseLine.length + 1));
+  const lines = [
+    assistantTurn('opus', 'the real answer', appId),
+    ...new Array(trailingPaddingLines).fill(noiseLine),
+  ];
+  await fsp.writeFile(jsonlPath, transcript(...lines));
+
+  const { size } = await fsp.stat(jsonlPath);
+  // Guard the fixture itself: the real line must be outside the first tail
+  // window so this test can't silently degrade into the fast-path test above.
+  assert.ok(size > 256 * 1024, 'fixture must exceed the initial tail window');
+
+  const stub = mock.method(sessionsDb, 'getSessionById', () => ({
+    jsonl_path: jsonlPath,
+    provider_session_id: appId,
+  }) as unknown as ReturnType<typeof sessionsDb.getSessionById>);
+
+  try {
+    const active = await new ClaudeProviderModels().getCurrentActiveModel(appId);
+    assert.deepEqual(active, { model: 'opus' });
+  } finally {
+    stub.mock.restore();
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('getCurrentActiveModel falls back to a full read when no model event is found within the max tail window', async () => {
+  // The real answer sits beyond ACTIVE_MODEL_MAX_TAIL_BYTES (4 MiB) from the
+  // end, so every widened tail attempt comes back empty and the function
+  // must fall back to a full `readFile` to find it.
+  const appId = 'tail-full-fallback-session';
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'models-tail-fallback-'));
+  const jsonlPath = path.join(dir, 'session.jsonl');
+
+  const noiseLine = assistantTurn('<synthetic>', 'x'.repeat(500), appId);
+  const trailingPaddingLines = Math.ceil((4.5 * 1024 * 1024) / (noiseLine.length + 1));
+  const lines = [
+    assistantTurn('sonnet', 'the real answer', appId),
+    ...new Array(trailingPaddingLines).fill(noiseLine),
+  ];
+  await fsp.writeFile(jsonlPath, transcript(...lines));
+
+  const { size } = await fsp.stat(jsonlPath);
+  assert.ok(size > 4 * 1024 * 1024, 'fixture must exceed the max tail window');
+
+  const stub = mock.method(sessionsDb, 'getSessionById', () => ({
+    jsonl_path: jsonlPath,
+    provider_session_id: appId,
+  }) as unknown as ReturnType<typeof sessionsDb.getSessionById>);
+
+  try {
+    const active = await new ClaudeProviderModels().getCurrentActiveModel(appId);
+    assert.deepEqual(active, { model: 'sonnet' });
+  } finally {
+    stub.mock.restore();
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('no transcript can ever resolve to an angle-bracketed value', () => {
   // Belt-and-braces: the property that actually matters downstream.
   const jsonl = transcript(

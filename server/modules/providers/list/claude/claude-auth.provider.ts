@@ -1,8 +1,8 @@
+import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-
-import spawn from 'cross-spawn';
+import { promisify } from 'node:util';
 
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
@@ -16,6 +16,8 @@ type ClaudeCredentialsStatus = {
   error?: string;
 };
 
+const execFileAsync = promisify(execFile);
+
 const hasErrorCode = (error: unknown, code: string): boolean => (
   error instanceof Error && 'code' in error && error.code === code
 );
@@ -24,15 +26,15 @@ export class ClaudeProviderAuth implements IProviderAuth {
   /**
    * Checks whether the Claude Code CLI is available on this host.
    */
-  private checkInstalled(): boolean {
+  private async checkInstalled(): Promise<boolean> {
     const cliPath = resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH);
     try {
-      // spawnSync (which cross-spawn's `.sync` wraps) does NOT throw for a
-      // missing executable -- it resolves normally with `result.error` set to
-      // the ENOENT error. Checking only for a thrown exception here always
-      // reported "installed" even when the CLI binary does not exist.
-      const result = spawn.sync(cliPath, ['--version'], { stdio: 'ignore', timeout: 5000 });
-      return !result.error;
+      // execFile (async) does NOT block the event loop while the child runs,
+      // unlike spawnSync. It rejects for a missing executable (ENOENT), so a
+      // caught rejection here means "not installed", mirroring the previous
+      // `!result.error` check from the sync spawn implementation.
+      await execFileAsync(cliPath, ['--version'], { timeout: 5000 });
+      return true;
     } catch {
       return false;
     }
@@ -42,7 +44,7 @@ export class ClaudeProviderAuth implements IProviderAuth {
    * Returns Claude installation and credential status using Claude Code's auth priority.
    */
   async getStatus(): Promise<ProviderAuthStatus> {
-    const installed = this.checkInstalled();
+    const installed = await this.checkInstalled();
 
     if (!installed) {
       return {
