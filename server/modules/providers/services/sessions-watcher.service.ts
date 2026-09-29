@@ -17,6 +17,16 @@ import { requestBackgroundSessionSynchronization } from '@/modules/providers/ser
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { LLMProvider } from '@/shared/types.js';
 import { generateDisplayName } from '@/modules/projects/index.js';
+import { mapWithConcurrency } from '@/shared/utils.js';
+
+/**
+ * Upper bound on concurrent `session_upserted` event builds within one
+ * debounced watcher flush. Each build does a DB lookup, a project lookup, and
+ * a bounded tail read for live status, so a burst touching several sessions
+ * overlaps that I/O instead of building the batch strictly one session at a
+ * time.
+ */
+const SESSION_EVENT_BUILD_CONCURRENCY = 8;
 
 const PROVIDER_WATCH_PATHS: Array<{ provider: LLMProvider; rootPath: string }> = [
   {
@@ -158,18 +168,23 @@ export async function buildResilientSessionEvents(
   buildEvent: (sessionId: string) => Promise<string | null>,
   onError: (sessionId: string, error: unknown) => void = defaultSessionEventBuildErrorLogger
 ): Promise<string[]> {
-  const events: string[] = [];
-  for (const sessionId of sessionIds) {
+  const ids = Array.from(sessionIds);
+
+  // Bounded concurrency instead of one-at-a-time: `mapWithConcurrency`
+  // preserves input order in its output array, so the emitted event order
+  // still matches `ids` even though the builds themselves overlap. Each
+  // build keeps its own try/catch, so one session failing still can't drop
+  // the rest of the batch.
+  const results = await mapWithConcurrency(ids, SESSION_EVENT_BUILD_CONCURRENCY, async (sessionId) => {
     try {
-      const event = await buildEvent(sessionId);
-      if (event) {
-        events.push(event);
-      }
+      return await buildEvent(sessionId);
     } catch (error) {
       onError(sessionId, error);
+      return null;
     }
-  }
-  return events;
+  });
+
+  return results.filter((event): event is string => event !== null);
 }
 
 function defaultSessionEventBuildErrorLogger(sessionId: string, error: unknown): void {

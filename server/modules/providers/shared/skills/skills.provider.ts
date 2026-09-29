@@ -12,11 +12,19 @@ import type {
 } from '@/shared/types.js';
 import {
   findProviderSkillMarkdownFiles,
+  mapWithConcurrency,
   readOptionalString,
   readProviderSkillMarkdownDefinitionFromContent,
   readProviderSkillMarkdownDefinition,
   AppError,
 } from '@/shared/utils.js';
+
+/**
+ * Upper bound on concurrent `SKILL.md` reads while listing one skill source,
+ * mirroring the session synchronizers' `mapWithConcurrency` bound in the same
+ * module tree.
+ */
+const SKILLS_READ_CONCURRENCY = 12;
 
 const resolveWorkspacePath = (workspacePath?: string): string =>
   path.resolve(workspacePath ?? process.cwd());
@@ -95,38 +103,54 @@ export abstract class SkillsProvider implements IProviderSkills {
   async listSkills(options?: ProviderSkillListOptions): Promise<ProviderSkill[]> {
     const workspacePath = resolveWorkspacePath(options?.workspacePath);
     const sources = await this.getSkillSources(workspacePath);
-    const skills: ProviderSkill[] = [];
 
-    for (const source of sources) {
-      const skillFiles = await findProviderSkillMarkdownFiles(source.rootDir, {
-        recursive: source.recursive,
-      });
-      for (const skillPath of skillFiles) {
-        try {
-          const definition = await readProviderSkillMarkdownDefinition(skillPath);
-          const command = source.commandForSkill
-            ? source.commandForSkill(definition.name)
-            : `${source.commandPrefix ?? '/'}${definition.name}`;
+    // Sources are scanned in order (their arrays are concatenated below in
+    // source order), but the possibly-tens-to-hundreds of `SKILL.md` reads
+    // within one source overlap with bounded concurrency instead of reading
+    // strictly serially.
+    const skillsPerSource = await Promise.all(
+      sources.map(async (source) => {
+        const skillFiles = await findProviderSkillMarkdownFiles(source.rootDir, {
+          recursive: source.recursive,
+        });
 
-          skills.push({
-            provider: this.provider,
-            name: definition.name,
-            description: definition.description,
-            command,
-            scope: source.scope,
-            sourcePath: skillPath,
-            pluginName: source.pluginName,
-            pluginId: source.pluginId,
-          });
-        } catch {
-          // A malformed or unreadable skill markdown file should not hide other valid skills.
-        }
-      }
-    }
+        const parsed = await mapWithConcurrency(skillFiles, SKILLS_READ_CONCURRENCY, async (skillPath): Promise<ProviderSkill | null> => {
+          try {
+            const definition = await readProviderSkillMarkdownDefinition(skillPath);
+            const command = source.commandForSkill
+              ? source.commandForSkill(definition.name)
+              : `${source.commandPrefix ?? '/'}${definition.name}`;
 
-    return skills;
+            return {
+              provider: this.provider,
+              name: definition.name,
+              description: definition.description,
+              command,
+              scope: source.scope,
+              sourcePath: skillPath,
+              pluginName: source.pluginName,
+              pluginId: source.pluginId,
+            } satisfies ProviderSkill;
+          } catch {
+            // A malformed or unreadable skill markdown file should not hide other valid skills.
+            return null;
+          }
+        });
+
+        return parsed.filter((skill): skill is ProviderSkill => skill !== null);
+      }),
+    );
+
+    return skillsPerSource.flat();
   }
 
+  // CAVEAT for whoever wires this up to a route: `services/skills.service.ts`
+  // caches `listSkills` results for `SKILLS_CACHE_TTL_MS` per
+  // (provider, workspacePath). Nothing here invalidates that cache, so a
+  // write immediately followed by a `GET /:provider/skills` within the TTL
+  // window can serve the stale pre-write list. No current route calls
+  // `addSkills`/`removeSkill`, so this is latent rather than live — but the
+  // caller that does wire one up must clear (or wait out) that cache first.
   async addSkills(input: ProviderSkillCreateInput): Promise<ProviderSkill[]> {
     const globalSkillSource = await this.getGlobalSkillSource();
     if (!globalSkillSource) {
@@ -237,6 +261,8 @@ export abstract class SkillsProvider implements IProviderSkills {
     return pendingInstalls.map((install) => install.skill);
   }
 
+  // Same skills-cache caveat as `addSkills` above: this mutates disk directly
+  // and does not invalidate `services/skills.service.ts`'s listing cache.
   async removeSkill(
     input: ProviderSkillRemoveInput,
   ): Promise<{ removed: boolean; provider: LLMProvider; directoryName: string }> {

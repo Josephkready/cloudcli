@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 
-import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
+import { providerSkillsService, SKILLS_CACHE_TTL_MS } from '@/modules/providers/services/skills.service.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
   const original = os.homedir;
@@ -371,6 +371,94 @@ test('providerSkillsService lists codex repository, user, and system skills', { 
     assert.equal(byName.get('codex-user')?.scope, 'user');
     assert.equal(byName.get('codex-system')?.scope, 'system');
     assert.equal(byName.get('codex-root')?.command, '$codex-root');
+  } finally {
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+// Regression coverage for the short-TTL cache added to collapse repeated
+// `GET /:provider/skills` calls (perf finding #4): a second call for the same
+// (provider, workspacePath) within the TTL must be served from memory rather
+// than re-walking the filesystem, so a skill file added after the first call
+// is not yet visible.
+test('providerSkillsService caches a listing for the same provider+workspace within the TTL', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-cache-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await fs.mkdir(workspacePath, { recursive: true });
+
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  try {
+    const userSkillsRoot = path.join(tempRoot, '.claude', 'skills');
+    await writeSkill(userSkillsRoot, 'cached-skill-dir', 'cached-skill', 'Seen on the first call');
+
+    const first = await providerSkillsService.listProviderSkills('claude', { workspacePath });
+    assert.ok(first.some((skill) => skill.name === 'cached-skill'));
+
+    // Added after the first call — a fresh scan would pick it up, a cache hit won't.
+    await writeSkill(userSkillsRoot, 'late-skill-dir', 'late-skill', 'Added after the cached call');
+
+    const second = await providerSkillsService.listProviderSkills('claude', { workspacePath });
+    assert.deepEqual(second, first, 'a same-key call within the TTL should be served from cache');
+    assert.ok(!second.some((skill) => skill.name === 'late-skill'));
+  } finally {
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('providerSkillsService re-scans once a cached listing outlives the TTL', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-cache-ttl-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await fs.mkdir(workspacePath, { recursive: true });
+
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  try {
+    const userSkillsRoot = path.join(tempRoot, '.claude', 'skills');
+    await writeSkill(userSkillsRoot, 'seen-first-dir', 'seen-first', 'Seen on the first call');
+
+    const first = await providerSkillsService.listProviderSkills('claude', { workspacePath });
+    assert.ok(first.some((skill) => skill.name === 'seen-first'));
+
+    await writeSkill(userSkillsRoot, 'seen-after-ttl-dir', 'seen-after-ttl', 'Added after the TTL expired');
+
+    // Still inside the TTL: the stale (pre-write) list is served from cache.
+    mock.timers.tick(SKILLS_CACHE_TTL_MS - 1);
+    const stillCached = await providerSkillsService.listProviderSkills('claude', { workspacePath });
+    assert.deepEqual(stillCached, first);
+
+    // Past the TTL: the entry must be evicted and the filesystem re-scanned,
+    // so the skill added while the first entry was live becomes visible.
+    mock.timers.tick(2);
+    const afterExpiry = await providerSkillsService.listProviderSkills('claude', { workspacePath });
+    assert.ok(afterExpiry.some((skill) => skill.name === 'seen-after-ttl'));
+  } finally {
+    mock.timers.reset();
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('providerSkillsService does not share a cache entry across different workspacePaths', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-cache-keys-'));
+  const workspaceA = path.join(tempRoot, 'workspace-a');
+  const workspaceB = path.join(tempRoot, 'workspace-b');
+  await fs.mkdir(workspaceA, { recursive: true });
+  await fs.mkdir(workspaceB, { recursive: true });
+
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  try {
+    await writeSkill(path.join(workspaceA, '.claude', 'skills'), 'a-only-dir', 'a-only', 'Only in workspace A');
+    await writeSkill(path.join(workspaceB, '.claude', 'skills'), 'b-only-dir', 'b-only', 'Only in workspace B');
+
+    const skillsA = await providerSkillsService.listProviderSkills('claude', { workspacePath: workspaceA });
+    const skillsB = await providerSkillsService.listProviderSkills('claude', { workspacePath: workspaceB });
+
+    assert.ok(skillsA.some((skill) => skill.name === 'a-only'));
+    assert.ok(!skillsA.some((skill) => skill.name === 'b-only'));
+    assert.ok(skillsB.some((skill) => skill.name === 'b-only'));
+    assert.ok(!skillsB.some((skill) => skill.name === 'a-only'));
   } finally {
     restoreHomeDir();
     await fs.rm(tempRoot, { recursive: true, force: true });
