@@ -4,8 +4,10 @@ import path from 'node:path';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import { getClaudeSessionTokenUsage } from '@/modules/providers/list/claude/claude-token-usage.provider.js';
+import { iterateJsonlLines, streamJsonlEntries } from '@/shared/jsonl.js';
 import { isReservedDotOnlyId } from '@/shared/session-id-guards.js';
 import type { LLMProvider } from '@/shared/types.js';
+import { readFileTail } from '@/shared/utils.js';
 
 /**
  * Token-usage payload returned from `getSessionTokenUsage`.
@@ -81,14 +83,45 @@ async function findCodexSessionFile(rootDir: string, sessionId: string): Promise
 }
 
 /**
+ * How much of the end of a Codex transcript to search before falling back to
+ * a full scan. Mirrors `claude-token-usage.provider.ts`'s
+ * `USAGE_SCAN_TAIL_BYTES`: Codex appends a `token_count` event per turn, so
+ * the record this function wants is almost always the last few lines.
+ */
+const USAGE_SCAN_TAIL_BYTES = 256 * 1024;
+
+type CodexTokenCountInfo = {
+  totalTokens: number | null;
+  contextWindow: number | null;
+};
+
+/** Returns the last Codex `token_count` event in a chunk of JSONL, if any. */
+function findLatestCodexTokenCount(lines: string[]): CodexTokenCountInfo | null {
+  for (const entry of iterateJsonlLines<any>(lines, { fromEnd: true })) {
+    if (entry?.type === 'event_msg' && entry.payload?.type === 'token_count' && entry.payload?.info) {
+      const info = entry.payload.info;
+      return {
+        totalTokens: info.total_token_usage ? Number(info.total_token_usage.total_tokens) || 0 : null,
+        contextWindow: info.model_context_window ? Number(info.model_context_window) || null : null,
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * Reads the latest Codex token-count event from a Codex session JSONL file
  * (events are appended in chronological order, so the last `token_count`
  * event reflects the current cumulative usage).
+ *
+ * Reads the tail first — the same O(file) vs O(tail) tradeoff documented on
+ * `claude-token-usage.provider.ts`'s `readLatestAssistantUsage` — and falls
+ * back to a full scan only when the tail holds no `token_count` event.
  */
 async function readCodexTokenUsage(filePath: string): Promise<SessionTokenUsageResponse> {
-  let fileContent: string;
+  let size: number;
   try {
-    fileContent = await fsp.readFile(filePath, 'utf8');
+    ({ size } = await fsp.stat(filePath));
   } catch {
     return {
       used: 0,
@@ -96,25 +129,38 @@ async function readCodexTokenUsage(filePath: string): Promise<SessionTokenUsageR
     };
   }
 
+  const readWholeFile = size <= USAGE_SCAN_TAIL_BYTES;
+  const tail = await readFileTail(filePath, USAGE_SCAN_TAIL_BYTES);
+  const tailLines = tail.split('\n');
+  // A partial read starts mid-line; drop that fragment unless the tail
+  // covered the whole file.
+  const usableTailLines = readWholeFile ? tailLines : tailLines.slice(1);
+
+  const fromTail = findLatestCodexTokenCount(usableTailLines);
+  if (fromTail) {
+    return {
+      used: fromTail.totalTokens ?? 0,
+      total: fromTail.contextWindow ?? CODEX_DEFAULT_CONTEXT_WINDOW,
+    };
+  }
+
+  if (!readWholeFile) {
+    console.warn(
+      `[TokenUsage] no token_count event in the last ${USAGE_SCAN_TAIL_BYTES} bytes of ${filePath}; scanning the whole transcript.`,
+    );
+  }
+
   let totalTokens = 0;
   let contextWindow = CODEX_DEFAULT_CONTEXT_WINDOW;
-
-  const lines = fileContent.trim().split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const entry = JSON.parse(lines[i]);
-      if (entry?.type === 'event_msg' && entry.payload?.type === 'token_count' && entry.payload?.info) {
-        const info = entry.payload.info;
-        if (info.total_token_usage) {
-          totalTokens = Number(info.total_token_usage.total_tokens) || 0;
-        }
-        if (info.model_context_window) {
-          contextWindow = Number(info.model_context_window) || contextWindow;
-        }
-        break;
+  for await (const entry of streamJsonlEntries<any>(filePath)) {
+    if (entry?.type === 'event_msg' && entry.payload?.type === 'token_count' && entry.payload?.info) {
+      const info = entry.payload.info;
+      if (info.total_token_usage) {
+        totalTokens = Number(info.total_token_usage.total_tokens) || 0;
       }
-    } catch {
-      continue;
+      if (info.model_context_window) {
+        contextWindow = Number(info.model_context_window) || contextWindow;
+      }
     }
   }
 
@@ -123,7 +169,7 @@ async function readCodexTokenUsage(filePath: string): Promise<SessionTokenUsageR
 
 type GetSessionTokenUsageDependencies = {
   /** Returns the indexed session row (or null) for a given sessionId. */
-  getSessionById: (sessionId: string) => { provider: string } | null;
+  getSessionById: (sessionId: string) => { provider: string; jsonl_path?: string | null } | null;
   /** Builds the Claude token-usage response for a session id. */
   getClaudeUsage: typeof getClaudeSessionTokenUsage;
   /** Resolves the absolute path to ~/.codex/sessions. */
@@ -136,11 +182,21 @@ const defaultDependencies: GetSessionTokenUsageDependencies = {
     if (!row) {
       return null;
     }
-    return { provider: row.provider };
+    return { provider: row.provider, jsonl_path: row.jsonl_path ?? null };
   },
   getClaudeUsage: getClaudeSessionTokenUsage,
   resolveCodexSessionsDir: () => path.join(os.homedir(), '.codex', 'sessions'),
 };
+
+/** True if `filePath` exists and can be read. */
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fsp.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Resolves the per-session token-usage view for the caller-supplied session.
@@ -162,8 +218,15 @@ export async function getSessionTokenUsage(
   const provider = (sessionRow?.provider ?? 'claude') as LLMProvider;
 
   if (provider === 'codex') {
-    const codexDir = dependencies.resolveCodexSessionsDir();
-    const sessionFilePath = await findCodexSessionFile(codexDir, sessionId);
+    // The indexed `jsonl_path` is already known for almost every session, so
+    // use it directly instead of re-discovering the file with a recursive
+    // directory walk + substring match. The walk stays as a fallback for
+    // legacy rows with a stale or missing `jsonl_path`.
+    let sessionFilePath = sessionRow?.jsonl_path ?? null;
+    if (!sessionFilePath || !(await fileExists(sessionFilePath))) {
+      const codexDir = dependencies.resolveCodexSessionsDir();
+      sessionFilePath = await findCodexSessionFile(codexDir, sessionId);
+    }
     if (!sessionFilePath) {
       return { used: 0, total: CODEX_DEFAULT_CONTEXT_WINDOW };
     }

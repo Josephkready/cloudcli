@@ -157,6 +157,106 @@ test('getSessionTokenUsage walks the Codex sessions dir to find the JSONL file a
   }
 });
 
+test('getSessionTokenUsage uses the DB-indexed jsonl_path directly, without walking the sessions dir', async () => {
+  const sessionId = 'codex-session-indexed';
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'codex-token-usage-test-'));
+  try {
+    const filePath = path.join(root, `rollout-${sessionId}.jsonl`);
+    await fsp.writeFile(filePath, [
+      JSON.stringify({
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: { total_token_usage: { total_tokens: 321 }, model_context_window: 128000 },
+        },
+      }),
+    ].join('\n') + '\n');
+
+    const result = await getSessionTokenUsage(sessionId, {
+      getSessionById: () => ({ provider: 'codex', jsonl_path: filePath }),
+      getClaudeUsage: async () => {
+        throw new Error('claude path should not be reached for codex sessions');
+      },
+      // The directory walk must never be reached when jsonl_path already
+      // points at a real file -- resolving it would throw.
+      resolveCodexSessionsDir: () => {
+        throw new Error('resolveCodexSessionsDir should not be called when jsonl_path is already valid');
+      },
+    });
+
+    assert.equal(result.used, 321);
+    assert.equal(result.total, 128000);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('getSessionTokenUsage falls back to the directory walk when jsonl_path is stale', async () => {
+  const sessionId = 'codex-session-stale-path';
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'codex-token-usage-test-'));
+  try {
+    const filePath = path.join(root, `rollout-${sessionId}.jsonl`);
+    await fsp.writeFile(filePath, [
+      JSON.stringify({
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: { total_token_usage: { total_tokens: 555 }, model_context_window: 128000 },
+        },
+      }),
+    ].join('\n') + '\n');
+
+    const result = await getSessionTokenUsage(sessionId, {
+      getSessionById: () => ({ provider: 'codex', jsonl_path: path.join(root, 'no-longer-there.jsonl') }),
+      getClaudeUsage: async () => {
+        throw new Error('claude path should not be reached for codex sessions');
+      },
+      resolveCodexSessionsDir: () => root,
+    });
+
+    assert.equal(result.used, 555);
+    assert.equal(result.total, 128000);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('getSessionTokenUsage reads a large Codex transcript from the tail, without loading it whole', async () => {
+  const sessionId = 'codex-session-tail-scan';
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'codex-token-usage-test-'));
+  try {
+    const filePath = path.join(root, `rollout-${sessionId}.jsonl`);
+    // Pad the file well past the 256 KiB tail window with lines that don't
+    // parse as token_count events, then put the real event at the very end.
+    const filler = `${JSON.stringify({ type: 'event_msg', payload: { type: 'noise', text: 'x'.repeat(500) } })}\n`;
+    const paddingLines = Math.ceil((512 * 1024) / filler.length);
+    const parts = new Array(paddingLines).fill(filler);
+    parts.push(`${JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { total_token_usage: { total_tokens: 9001 }, model_context_window: 128000 },
+      },
+    })}\n`);
+    await fsp.writeFile(filePath, parts.join(''));
+
+    const result = await getSessionTokenUsage(sessionId, {
+      getSessionById: () => ({ provider: 'codex', jsonl_path: filePath }),
+      getClaudeUsage: async () => {
+        throw new Error('claude path should not be reached for codex sessions');
+      },
+      resolveCodexSessionsDir: () => {
+        throw new Error('resolveCodexSessionsDir should not be called');
+      },
+    });
+
+    assert.equal(result.used, 9001);
+    assert.equal(result.total, 128000);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('getSessionTokenUsage returns the Codex default context window when the JSONL file is missing', async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'codex-token-usage-test-'));
   try {

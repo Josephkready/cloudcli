@@ -7,9 +7,9 @@ import test from 'node:test';
 import { ClaudeProviderAuth } from './claude-auth.provider.js';
 
 // checkInstalled() shells out to `${CLAUDE_CLI_PATH} --version` via
-// cross-spawn's sync API; resolveClaudeCodeExecutablePath returns
-// CLAUDE_CLI_PATH verbatim on non-Windows (see claude-cli-path.ts), so
-// pointing it at a real executable / a nonexistent path deterministically
+// node:child_process's async execFile; resolveClaudeCodeExecutablePath
+// returns CLAUDE_CLI_PATH verbatim on non-Windows (see claude-cli-path.ts),
+// so pointing it at a real executable / a nonexistent path deterministically
 // controls the "installed" branch without touching the real Claude CLI.
 const REAL_EXECUTABLE = '/bin/echo';
 const MISSING_EXECUTABLE = '/definitely/does/not/exist/claude-cli';

@@ -508,6 +508,40 @@ test('getCurrentActiveModel returns the default when the row has no jsonl_path (
   }
 });
 
+// ---------------------------------------------------------------------------
+// getCurrentActiveModel tail-read (perf: mirrors claude-token-usage.provider.ts's
+// tail-read, so a large transcript doesn't get loaded whole just to find the
+// most recent model event).
+// ---------------------------------------------------------------------------
+
+test('getCurrentActiveModel resolves a model recorded at the very end of a large transcript', async () => {
+  const appId = 'tail-scan-session';
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'models-tail-'));
+  const jsonlPath = path.join(dir, 'session.jsonl');
+
+  // Pad well past the initial 256 KiB tail window with noise turns using a
+  // different (placeholder) model, then land the real answer as the very
+  // last line -- the tail-read growing window must still find it.
+  const noiseLine = assistantTurn('<synthetic>', 'x'.repeat(500), appId);
+  const paddingLineCount = Math.ceil((512 * 1024) / (noiseLine.length + 1));
+  const lines = new Array(paddingLineCount).fill(noiseLine);
+  lines.push(assistantTurn('opus', 'final answer', appId));
+  await fsp.writeFile(jsonlPath, transcript(...lines));
+
+  const stub = mock.method(sessionsDb, 'getSessionById', () => ({
+    jsonl_path: jsonlPath,
+    provider_session_id: appId,
+  }) as unknown as ReturnType<typeof sessionsDb.getSessionById>);
+
+  try {
+    const active = await new ClaudeProviderModels().getCurrentActiveModel(appId);
+    assert.deepEqual(active, { model: 'opus' });
+  } finally {
+    stub.mock.restore();
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('no transcript can ever resolve to an angle-bracketed value', () => {
   // Belt-and-braces: the property that actually matters downstream.
   const jsonl = transcript(

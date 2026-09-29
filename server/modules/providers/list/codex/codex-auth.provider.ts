@@ -1,12 +1,14 @@
+import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-
-import spawn from 'cross-spawn';
+import { promisify } from 'node:util';
 
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
 import { readObjectRecord, readOptionalString, resolveProviderCliExecutable } from '@/shared/utils.js';
+
+const execFileAsync = promisify(execFile);
 
 type CodexCredentialsStatus = {
   authenticated: boolean;
@@ -19,15 +21,15 @@ export class CodexProviderAuth implements IProviderAuth {
   /**
    * Checks whether Codex is available to the server runtime.
    */
-  private checkInstalled(): boolean {
+  private async checkInstalled(): Promise<boolean> {
     const executable = resolveProviderCliExecutable('CODEX_CLI_PATH', 'codex');
     try {
-      // spawnSync (which cross-spawn's `.sync` wraps) does NOT throw for a
-      // missing executable -- it resolves normally with `result.error` set to
-      // the ENOENT error. Checking only for a thrown exception here always
-      // reported "installed" even when the CLI binary does not exist.
-      const result = spawn.sync(executable, ['--version'], { stdio: 'ignore', timeout: 5000 });
-      return !result.error;
+      // execFile (async) does NOT block the event loop while the child runs,
+      // unlike spawnSync. It rejects for a missing executable (ENOENT), so a
+      // caught rejection here means "not installed", mirroring the previous
+      // `!result.error` check from the sync spawn implementation.
+      await execFileAsync(executable, ['--version'], { timeout: 5000 });
+      return true;
     } catch {
       return false;
     }
@@ -37,7 +39,7 @@ export class CodexProviderAuth implements IProviderAuth {
    * Returns Codex SDK availability and credential status.
    */
   async getStatus(): Promise<ProviderAuthStatus> {
-    const installed = this.checkInstalled();
+    const installed = await this.checkInstalled();
     const credentials = await this.checkCredentials();
 
     return {
