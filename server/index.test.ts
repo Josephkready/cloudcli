@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -218,6 +218,45 @@ test('GET / and /index.html serve the built SPA with the router-basename injecte
         const html = await response.text();
         assert.match(html, /window\.__ROUTER_BASENAME__/, requestPath);
       }
+    });
+  } finally {
+    await rm(DIST_DIR, { recursive: true, force: true });
+    if (backupDir) {
+      await rename(backupDir, DIST_DIR);
+    }
+  }
+});
+
+test('GET / re-reads dist/index.html when its mtime changes, instead of serving a stale in-memory cache', async () => {
+  // sendIndexHtmlWithBasename caches the transformed HTML in memory keyed by
+  // mtime (see server/index.js) so it doesn't do a sync read+transform on
+  // every request. This proves the cache is invalidated on rebuild rather
+  // than loaded once and stuck for the process's lifetime.
+  const backupDir = existsSync(DIST_DIR) ? `${DIST_DIR}.bak-${Date.now()}` : null;
+  if (backupDir) {
+    await rename(DIST_DIR, backupDir);
+  }
+  await mkdir(DIST_DIR, { recursive: true });
+
+  try {
+    await withRunningServer(async (baseUrl) => {
+      await writeFile(DIST_INDEX_PATH, '<!doctype html><html><body>build-one</body></html>');
+      // Force a distinct mtime even if both writes land in the same
+      // millisecond on a coarse filesystem clock.
+      const past = new Date(Date.now() - 60_000);
+      await utimes(DIST_INDEX_PATH, past, past);
+
+      const first = await fetch(`${baseUrl}/`);
+      assert.match(await first.text(), /build-one/);
+
+      await writeFile(DIST_INDEX_PATH, '<!doctype html><html><body>build-two</body></html>');
+      const now = new Date();
+      await utimes(DIST_INDEX_PATH, now, now);
+
+      const second = await fetch(`${baseUrl}/`);
+      const secondHtml = await second.text();
+      assert.match(secondHtml, /build-two/);
+      assert.doesNotMatch(secondHtml, /build-one/);
     });
   } finally {
     await rm(DIST_DIR, { recursive: true, force: true });

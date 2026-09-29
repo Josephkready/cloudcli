@@ -73,8 +73,9 @@ router.get('/images/:filename', async (req, res) => {
     return res.status(400).json({ error: 'Invalid asset filename' });
   }
 
+  let stat;
   try {
-    await fs.access(resolved);
+    stat = await fs.stat(resolved);
   } catch {
     return res.status(404).json({ error: 'Asset not found' });
   }
@@ -90,6 +91,22 @@ router.get('/images/:filename', async (req, res) => {
   if (contentType === 'image/svg+xml') {
     res.setHeader('Content-Disposition', 'attachment');
   }
+
+  // Uploaded filenames are content-addressed — assigned a Date.now()+random
+  // suffix once at upload time (see `storage.filename` above) and never
+  // overwritten — so it's always safe to cache a given filename forever.
+  // Without this, every re-render of a transcript with images (switching
+  // tabs, reopening a session) re-fetches the full image bytes from disk.
+  // ETag stays keyed off size+mtime so any future manual replacement of a
+  // file on disk still invalidates client caches instead of serving stale
+  // bytes.
+  const etag = `"${stat.size.toString(16)}-${stat.mtimeMs.toString(16)}"`;
+  res.setHeader('ETag', etag);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  if (req.headers['if-none-match'] === etag) {
+    return res.status(304).end();
+  }
+
   const fileStream = fsSync.createReadStream(resolved);
   fileStream.pipe(res);
   fileStream.on('error', (error) => {
