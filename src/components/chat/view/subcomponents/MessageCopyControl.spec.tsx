@@ -99,6 +99,23 @@ describe('MessageCopyControl interactions', () => {
     expect(screen.queryByText('Copy as markdown')).toBeNull();
   });
 
+  it('floors the format-select chevron at a 24px-wide tap target', () => {
+    // Regression for the vdebug real-device finding on iphone-13-pro /
+    // ipad-pro-11 (template sync PR #575): the chevron painted 20x16 and
+    // `touch:hit-h-44` only floored its *height*, leaving an effective
+    // width of 20px — under the 24px minimum. `min-w-6` (24px) widens the
+    // painted box itself so the hit area grows with it.
+    render(<MessageCopyControl content="# heading" messageType="assistant" />);
+    const chevron = screen.getByRole('button', { name: /select copy format/i });
+    expect(chevron.className).toContain('min-w-6');
+    expect(chevron.className).toContain('touch:hit-h-44');
+    // `min-w-6` only grows the box; without these the icon would sit flush
+    // left instead of centred in the wider button.
+    expect(chevron.className).toContain('inline-flex');
+    expect(chevron.className).toContain('items-center');
+    expect(chevron.className).toContain('justify-center');
+  });
+
   it('resets to the default format when messageType changes', () => {
     // Assistant messages default to 'markdown' (tag "MD"); non-assistant
     // messages default to 'text' (tag "TXT"). Without the reset-on-
