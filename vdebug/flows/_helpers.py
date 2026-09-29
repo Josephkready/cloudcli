@@ -45,3 +45,56 @@ def open_large_conversation(page, vd):
     open_sidebar(page, vd)
     visible(page.get_by_role("link", name=LARGE_CONVERSATION)).click()
     page.locator(".chat-message").first.wait_for()
+
+
+# ------------------------------------------------------------------ gestures
+# Ported from the video-debugger skill's flows/_helpers.py template. No current cloudcli flow
+# drives a drag/pinch gesture, but the sidebar's resize handle (WP5) is a drag target, so keep
+# these here for the flow that eventually covers it — `pinch` needs a touch context, which the
+# iphone-13-pro / ipad-pro-11 presets have (mobile=True).
+
+def _centre(locator):
+    box = locator.bounding_box()
+    if box is None:
+        raise ValueError("element is not visible")
+    return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+
+def drag(page, locator, dx: float, dy: float, *, steps: int = 12) -> None:
+    """Press in the middle of `locator`, move by (dx, dy) in `steps` moves, release."""
+    x, y = _centre(locator)
+    page.mouse.move(x, y)
+    page.mouse.down()
+    for i in range(1, steps + 1):
+        page.mouse.move(x + dx * i / steps, y + dy * i / steps)
+    page.mouse.up()
+
+
+def wheel_zoom(page, locator, delta_y: float, *, at: tuple[float, float] = (0.5, 0.5)) -> None:
+    """Scroll-wheel over a point of `locator` (fractions of its box; default the centre)."""
+    box = locator.bounding_box()
+    if box is None:
+        raise ValueError("element is not visible")
+    page.mouse.move(box["x"] + box["width"] * at[0], box["y"] + box["height"] * at[1])
+    page.mouse.wheel(0, delta_y)
+
+
+def pinch(page, locator, scale: float, *, steps: int = 10, spread: float = 40) -> None:
+    """Two-finger pinch around the middle of `locator`: scale > 1 zooms in, < 1 zooms out."""
+    cdp = page.context.new_cdp_session(page)
+    x, y = _centre(locator)
+
+    def points(d):
+        return [{"x": x - d, "y": y, "id": 0}, {"x": x + d, "y": y, "id": 1}]
+
+    try:
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": points(spread)})
+        for i in range(1, steps + 1):
+            d = spread * (1 + (scale - 1) * i / steps)
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": points(d)})
+            page.wait_for_timeout(16)
+    finally:
+        try:  # always end the touch sequence, or the next gesture on this page starts mid-touch
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        finally:
+            cdp.detach()

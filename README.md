@@ -101,8 +101,9 @@ a verdict. Give it a long window (90+ days — rare is not dead), and rule out
 ## Visual QA (video-debugger)
 
 `vdebug/` records the app's core journeys as video + checkpoint frames across a
-mobile/tablet/desktop/ultrawide matrix, runs DOM layout checks at every
-checkpoint, and (with `--judge`) has a vision model on OpenRouter review the
+matrix of real screens (iPhone 13 Pro, iPad Pro 11", 2K, 4K, and half-2K / third-4K
+windows; `mobile`/`tablet`/`desktop`/`ultrawide` still work as aliases), runs DOM
+layout checks at every checkpoint, and (with `--judge`) has a vision model on OpenRouter review the
 deduped video frames, animations included. Run it against the throwaway fixture
 server — synthetic transcripts, mock chat provider, never your real sessions:
 
@@ -112,7 +113,11 @@ python3 vdebug/vdebug.py list
 python3 vdebug/vdebug.py record --base-url $VDEBUG_BASE_URL --viewports all --judge
 ```
 
-Read `vdebug-runs/latest/report.md` (gitignored). `--judge` needs
+Pass `--viewports iphone-13-pro,2k` (or `all,kiosk=2560x1600`) to narrow or extend the
+matrix, and `--reset-cmd CMD` to restore app state before every recording. The judge is
+also sent `vdebug/judge_notes.md`, the app's intentional designs (the jump-to-bottom
+button, horizontally scrolling code blocks, the 44px `::after` touch overlays, …) — add
+to it when the judge flags something that is by design. Read `vdebug-runs/latest/report.md` (gitignored). `--judge` needs
 `OPENROUTER_API_KEY` and `ffmpeg`; Python needs `playwright`. Flows live in
 `vdebug/flows/` (role/label/testid locators only). **After changing front-end
 code, re-record the flows that touch those screens before opening a PR.** Full

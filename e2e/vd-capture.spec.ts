@@ -76,4 +76,62 @@ test('captures intent events without prompt text, masked names or titles', async
   const target = JSON.parse(sessionClick.target!);
   expect(target.tag).toBe('a');
   expect(target.name).toBeUndefined(); // masked: no accessible name recorded
+
+  // A click position inside a mask can reveal the choice (a row, a picker), so masked
+  // clicks carry no x/y; unmasked ones keep it.
+  const pos = (r: Row) => JSON.parse(r.data ?? 'null') as { x?: number; y?: number } | null;
+  const clickRows = rows.filter((r) => r.type === 'click');
+  expect(pos(clickRows[0])?.x, 'masked Send click has no position').toBeUndefined();
+  expect(pos(sessionClick)?.x, 'masked session-row click has no position').toBeUndefined();
+  expect(typeof pos(refresh!)?.x, 'unmasked click keeps its position').toBe('number');
+});
+
+test('data-vd-unmask re-exposes a control inside a mask, and a submit flushes at once', async ({ page, server }) => {
+  // A flush interval far past the assertion timeout: only the submit's own flush can land it.
+  await page.addInitScript(() => {
+    (window as unknown as { VD_CAPTURE: object }).VD_CAPTURE = { captureAutomation: true, flushMs: 600_000 };
+    // Another script owning the key with a different shape: reusing it would send an id the
+    // server rejects (and lose the whole session), so the recorder must mint a fresh one.
+    if (!sessionStorage.getItem('vd_seeded')) {
+      sessionStorage.setItem('vd_seeded', '1');
+      sessionStorage.setItem('vd_session', JSON.stringify({ id: 'not-ours!', start: 'x' }));
+    }
+  });
+  await page.goto('/');
+  await expect(page.locator('[data-slot="prompt-input-textarea"]')).toBeVisible();
+  await page.evaluate(() => {
+    const host = document.createElement('div');
+    host.innerHTML =
+      '<div data-vd-mask><button type="button" data-vd-unmask>Harmless action</button>' +
+      '<button type="button">zebra-masked-label</button></div>' +
+      '<form action="javascript:void 0"><button type="submit">Vd submit</button></form>' +
+      // A labelled, non-interactive region: its label is content and must never be climbed to.
+      '<div role="region" aria-label="zebra-region-label"><span id="vd-plain">plain text</span></div>';
+    host.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#fff';
+    document.body.appendChild(host);
+  });
+  await page.getByRole('button', { name: 'Harmless action' }).click();
+  await page.getByRole('button', { name: 'zebra-masked-label' }).click();
+  await page.locator('#vd-plain').click();
+  await page.getByRole('button', { name: 'Vd submit' }).click();
+
+  const dbPath = path.join(server.home, 'flows.db');
+  let rows: Row[] = [];
+  await expect(async () => {
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      rows = db.prepare('SELECT type, target, data, path FROM events ORDER BY seq').all() as Row[];
+    } finally {
+      db.close();
+    }
+    expect(rows.some((r) => r.type === 'submit')).toBe(true);
+  }).toPass({ timeout: 10_000 });
+
+  const clicks = rows.filter((r) => r.type === 'click').map((r) => ({ t: JSON.parse(r.target!), d: JSON.parse(r.data ?? 'null') }));
+  const unmasked = clicks.find((c) => c.t.name === 'Harmless action');
+  expect(unmasked, 'data-vd-unmask keeps the name').toBeTruthy();
+  expect(typeof unmasked!.d?.x).toBe('number');
+  expect(JSON.stringify(rows)).not.toContain('zebra');
+  const plain = clicks.find((c) => c.t.id === 'vd-plain');
+  expect(plain?.t.tag, 'a click outside any control stays on the element, not a region').toBe('span');
 });

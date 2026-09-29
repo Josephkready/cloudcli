@@ -58,6 +58,11 @@ test('rejects malformed batches with BatchError', () => {
       { session_id: 'has-dash-not-alnum', events: [{ seq: 0, t: 0, type: 'click' }] },
       { session_id: 'a'.repeat(65), events: [{ seq: 0, t: 0, type: 'click' }] },
       { session_id: 12345678, events: [{ seq: 0, t: 0, type: 'click' }] },
+      // ASCII-only: Arabic-Indic digits and fullwidth latin are "alphanumeric" to some
+      // string.isalnum()-style checks but must be rejected here (session_id ends up in a
+      // file path / db key and must never carry non-ASCII bytes).
+      { session_id: '١٢٣٤٥٦٧٨', events: [{ seq: 0, t: 0, type: 'click' }] },
+      { session_id: 'ａｂｃ１２３４５', events: [{ seq: 0, t: 0, type: 'click' }] },
       batch([]),
       batch('nope' as unknown as unknown[]),
       batch(Array.from({ length: MAX_EVENTS_PER_BATCH + 1 }, (_, i) => ({ seq: i, t: i, type: 'click' }))),
