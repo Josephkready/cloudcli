@@ -440,26 +440,22 @@ router.post("/list", async (req, res) => {
     const { projectPath } = req.body;
     const allCommands = [...builtInCommands];
 
-    // Scan project-level commands (.claude/commands/)
-    if (projectPath) {
-      const projectCommandsDir = path.join(projectPath, ".claude", "commands");
-      const projectCommands = await scanCommandsDirectory(
-        projectCommandsDir,
-        projectCommandsDir,
-        "project",
-      );
-      allCommands.push(...projectCommands);
-    }
-
-    // Scan user-level commands (~/.claude/commands/)
+    // Project-level (.claude/commands/) and user-level (~/.claude/commands/)
+    // scans walk independent directory trees, so run them concurrently
+    // instead of one after the other.
     const homeDir = os.homedir();
     const userCommandsDir = path.join(homeDir, ".claude", "commands");
-    const userCommands = await scanCommandsDirectory(
-      userCommandsDir,
-      userCommandsDir,
-      "user",
-    );
-    allCommands.push(...userCommands);
+    const projectCommandsDir = projectPath
+      ? path.join(projectPath, ".claude", "commands")
+      : null;
+
+    const [projectCommands, userCommands] = await Promise.all([
+      projectCommandsDir
+        ? scanCommandsDirectory(projectCommandsDir, projectCommandsDir, "project")
+        : Promise.resolve([]),
+      scanCommandsDirectory(userCommandsDir, userCommandsDir, "user"),
+    ]);
+    allCommands.push(...projectCommands, ...userCommands);
 
     // Separate built-in and custom commands
     const customCommands = allCommands.filter(

@@ -76,9 +76,30 @@ const CollapsibleTrigger = React.forwardRef<HTMLButtonElement, React.ButtonHTMLA
 );
 CollapsibleTrigger.displayName = 'CollapsibleTrigger';
 
-const CollapsibleContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, children, ...props }, ref) => {
+interface CollapsibleContentProps extends React.HTMLAttributes<HTMLDivElement> {
+  /**
+   * Defer mounting `children` until the section is opened for the first
+   * time, instead of always mounting them behind the CSS collapse (the
+   * default). Once opened, children stay mounted for the rest of the
+   * component's lifetime (matching the "keep mounted after first open"
+   * pattern used elsewhere, e.g. `ToolGroupContainer`), so re-collapsing
+   * does not tear down state or re-pay the mount cost on re-expand.
+   *
+   * Opt-in only — existing callers that rely on collapsed content being in
+   * the DOM (e.g. for text search, or to keep the CSS max-height transition
+   * animating from real content) are unaffected.
+   */
+  lazyMount?: boolean;
+}
+
+const CollapsibleContent = React.forwardRef<HTMLDivElement, CollapsibleContentProps>(
+  ({ className, children, lazyMount = false, ...props }, ref) => {
     const { open } = useCollapsible();
+    const hasOpenedRef = React.useRef(open);
+    if (open) {
+      hasOpenedRef.current = true;
+    }
+    const shouldRenderChildren = !lazyMount || hasOpenedRef.current;
 
     return (
       <div
@@ -92,7 +113,7 @@ const CollapsibleContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes
         {...props}
       >
         <div className="overflow-hidden">
-          {children}
+          {shouldRenderChildren ? children : null}
         </div>
       </div>
     );

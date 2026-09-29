@@ -12,6 +12,7 @@ import type {
 import {
   entryLeadsToDirectory,
   findProviderSkillMarkdownFiles,
+  mapWithConcurrency,
   readJsonConfig,
   readObjectRecord,
   readOptionalString,
@@ -19,6 +20,13 @@ import {
 } from '@/shared/utils.js';
 
 const getClaudeHomePath = (): string => path.join(os.homedir(), '.claude');
+
+/**
+ * Upper bound on concurrent filesystem reads (plugin folder listings, plugin
+ * config files, command/skill markdown files) while walking installed
+ * plugins, mirroring `SKILLS_READ_CONCURRENCY` in the shared skills provider.
+ */
+const SKILLS_READ_CONCURRENCY = 12;
 
 const getClaudePluginName = (pluginId: string): string | null => {
   const normalizedPluginId = pluginId.trim();
@@ -131,63 +139,83 @@ export class ClaudeSkillsProvider extends SkillsProvider {
       return [];
     }
 
-    const skills: ProviderSkill[] = [];
-    const visitedPluginFolders = new Set<string>();
     const pluginEntries = Object.entries(enabledPlugins)
       .sort(([left], [right]) => left.localeCompare(right));
-    for (const [pluginId, enabled] of pluginEntries) {
-      if (enabled !== true) {
-        continue;
-      }
 
-      const installs = installedPlugins[pluginId];
-      if (!Array.isArray(installs)) {
-        continue;
-      }
+    // Discover every (pluginId, pluginFolder) target first. `mapWithConcurrency`
+    // preserves input order in its output array, so folder listings and plugin
+    // config reads overlap across plugins/installs without disturbing the
+    // deterministic dedup pass below.
+    const targetsPerEntry = await mapWithConcurrency(
+      pluginEntries,
+      SKILLS_READ_CONCURRENCY,
+      async ([pluginId, enabled]) => {
+        if (enabled !== true) {
+          return [];
+        }
 
-      for (const install of installs) {
-        const installRecord = readObjectRecord(install);
-        const installPath = readOptionalString(installRecord?.installPath);
-        if (!installPath) {
+        const installs = installedPlugins[pluginId];
+        if (!Array.isArray(installs)) {
+          return [];
+        }
+
+        const foldersPerInstall = await mapWithConcurrency(
+          installs,
+          SKILLS_READ_CONCURRENCY,
+          async (install) => {
+            const installRecord = readObjectRecord(install);
+            const installPath = readOptionalString(installRecord?.installPath);
+            if (!installPath) {
+              return [];
+            }
+
+            // Claude's installed path points at one version folder; the usable
+            // plugin payloads live in the direct child folders beside it.
+            return listChildDirectories(path.dirname(installPath));
+          },
+        );
+
+        return foldersPerInstall.flat().map((pluginFolder) => ({ pluginId, pluginFolder }));
+      },
+    );
+
+    const visitedPluginFolders = new Set<string>();
+    const targets: Array<{ pluginId: string; pluginFolder: string }> = [];
+    for (const group of targetsPerEntry) {
+      for (const target of group) {
+        const pluginFolderKey = `${target.pluginId}:${path.resolve(target.pluginFolder)}`;
+        if (visitedPluginFolders.has(pluginFolderKey)) {
           continue;
         }
-
-        // Claude's installed path points at one version folder; the usable
-        // plugin payloads live in the direct child folders beside it.
-        const pluginFolders = await listChildDirectories(path.dirname(installPath));
-        for (const pluginFolder of pluginFolders) {
-          const pluginFolderKey = `${pluginId}:${path.resolve(pluginFolder)}`;
-          if (visitedPluginFolders.has(pluginFolderKey)) {
-            continue;
-          }
-          visitedPluginFolders.add(pluginFolderKey);
-
-          const pluginName = await readClaudePluginName(pluginFolder, pluginId);
-          if (!pluginName) {
-            continue;
-          }
-
-          const commandsPath = path.join(pluginFolder, 'commands');
-          if (await pathExistsAsDirectory(commandsPath)) {
-            skills.push(
-              ...(await this.listPluginCommandSkills(commandsPath, pluginId, pluginName)),
-            );
-            continue;
-          }
-
-          const skillsPath = path.join(pluginFolder, 'skills');
-          if (!(await pathExistsAsDirectory(skillsPath))) {
-            continue;
-          }
-
-          skills.push(
-            ...(await this.listPluginSkillMarkdowns(pluginFolder, pluginId, pluginName)),
-          );
-        }
+        visitedPluginFolders.add(pluginFolderKey);
+        targets.push(target);
       }
     }
 
-    return skills;
+    const skillsPerTarget = await mapWithConcurrency(
+      targets,
+      SKILLS_READ_CONCURRENCY,
+      async ({ pluginId, pluginFolder }) => {
+        const pluginName = await readClaudePluginName(pluginFolder, pluginId);
+        if (!pluginName) {
+          return [];
+        }
+
+        const commandsPath = path.join(pluginFolder, 'commands');
+        if (await pathExistsAsDirectory(commandsPath)) {
+          return this.listPluginCommandSkills(commandsPath, pluginId, pluginName);
+        }
+
+        const skillsPath = path.join(pluginFolder, 'skills');
+        if (!(await pathExistsAsDirectory(skillsPath))) {
+          return [];
+        }
+
+        return this.listPluginSkillMarkdowns(pluginFolder, pluginId, pluginName);
+      },
+    );
+
+    return skillsPerTarget.flat();
   }
 
   private async listPluginCommandSkills(
@@ -195,19 +223,17 @@ export class ClaudeSkillsProvider extends SkillsProvider {
     pluginId: string,
     pluginName: string,
   ): Promise<ProviderSkill[]> {
-    const skills: ProviderSkill[] = [];
-
     try {
       const entries = await readdir(commandsPath, { withFileTypes: true });
       const commandFiles = entries
         .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
         .sort((left, right) => left.name.localeCompare(right.name));
 
-      for (const commandFile of commandFiles) {
+      const skills = await mapWithConcurrency(commandFiles, SKILLS_READ_CONCURRENCY, async (commandFile): Promise<ProviderSkill | null> => {
         const sourcePath = path.join(commandsPath, commandFile.name);
         try {
           const definition = await this.readPluginCommandDefinition(sourcePath);
-          skills.push({
+          return {
             provider: this.provider,
             name: definition.name,
             description: definition.description,
@@ -216,16 +242,18 @@ export class ClaudeSkillsProvider extends SkillsProvider {
             sourcePath,
             pluginName,
             pluginId,
-          });
+          } satisfies ProviderSkill;
         } catch {
           // Malformed command markdown should not block sibling plugin commands.
+          return null;
         }
-      }
+      });
+
+      return skills.filter((skill): skill is ProviderSkill => skill !== null);
     } catch {
       // Missing or unreadable command folders are treated as empty plugin command sets.
+      return [];
     }
-
-    return skills;
   }
 
   private async readPluginCommandDefinition(
@@ -249,12 +277,11 @@ export class ClaudeSkillsProvider extends SkillsProvider {
     const skillFiles = await findProviderSkillMarkdownFiles(path.join(installPath, 'skills'), {
       recursive: true,
     });
-    const skills: ProviderSkill[] = [];
 
-    for (const skillPath of skillFiles) {
+    const skills = await mapWithConcurrency(skillFiles, SKILLS_READ_CONCURRENCY, async (skillPath): Promise<ProviderSkill | null> => {
       try {
         const definition = await readProviderSkillMarkdownDefinition(skillPath);
-        skills.push({
+        return {
           provider: this.provider,
           name: definition.name,
           description: definition.description,
@@ -263,12 +290,13 @@ export class ClaudeSkillsProvider extends SkillsProvider {
           sourcePath: skillPath,
           pluginName,
           pluginId,
-        });
+        } satisfies ProviderSkill;
       } catch {
         // A bad plugin skill file should not block other installed plugin skills.
+        return null;
       }
-    }
+    });
 
-    return skills;
+    return skills.filter((skill): skill is ProviderSkill => skill !== null);
   }
 }

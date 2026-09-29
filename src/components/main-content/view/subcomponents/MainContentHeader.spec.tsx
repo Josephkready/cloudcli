@@ -12,9 +12,9 @@ import type { Project, ProjectSession } from '@/types/app';
  * that session's id to the shared archive handler with no confirmation step.
  */
 
-// This spec exercises the header's archive action, not the stale-tab version check. The
-// header always mounts BugReportDialog (closed), which reads the shared version state; mock
-// it so these tests neither need a VersionCheckProvider nor hit the network.
+// This spec exercises the header's archive action, not the stale-tab version check. Opening
+// the (now demand-loaded, WP7) BugReportDialog reads the shared version state; mock it so
+// these tests neither need a VersionCheckProvider nor hit the network.
 vi.mock('@/hooks/useVersionCheck', () => ({
   useVersionCheck: () => ({
     currentVersion: '1.36.3',
@@ -133,7 +133,8 @@ describe('MainContentHeader — bug reporter', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Report a bug' }));
 
-    const dialog = screen.getByRole('dialog');
+    // Demand-loaded (WP7): the dialog chunk resolves a tick after the click.
+    const dialog = await screen.findByRole('dialog');
     expect(dialog).toBeInTheDocument();
     expect(screen.getByLabelText('What happened?')).toBeInTheDocument();
   });
@@ -184,7 +185,7 @@ describe('MainContentHeader — bug reporter', () => {
     button.addEventListener('mousedown', () => publishKeyboardHeight('0px'));
 
     await userEvent.click(button);
-    await userEvent.click(screen.getByRole('button', { name: /Session details attached/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /Session details attached/ }));
 
     // The listener republishes during the very same press, so a row reading
     // `0px` here would mean the snapshot was taken too late.
@@ -197,7 +198,7 @@ describe('MainContentHeader — bug reporter', () => {
     // First open is a real tap, taken while a keyboard height is published.
     publishKeyboardHeight(`${KEYBOARD}px`);
     await userEvent.click(screen.getByRole('button', { name: 'Report a bug' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Close bug report' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Close bug report' }));
     publishKeyboardHeight('0px');
 
     // Second open is a bare `click` with no preceding `pointerdown` — what
@@ -205,7 +206,7 @@ describe('MainContentHeader — bug reporter', () => {
     // there is no fresh snapshot, and without the reset this would reuse the
     // stale one above and report a keyboard that is not there.
     fireEvent.click(screen.getByRole('button', { name: 'Report a bug' }));
-    await userEvent.click(screen.getByRole('button', { name: /Session details attached/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /Session details attached/ }));
 
     expect(screen.getByText('0px')).toBeInTheDocument();
     expect(screen.queryByText(`${KEYBOARD}px`)).toBeNull();

@@ -237,7 +237,10 @@ function baseComposerState(overrides: Record<string, unknown> = {}) {
     handleGrantToolPermission: vi.fn(() => ({ success: true })),
     handleInputFocusChange: vi.fn(),
     isInputFocused: false,
-    commandModalPayload: null,
+    // Non-null by default: the modal is now gated on this payload (WP7 —
+    // demand-loaded like every other rarely-used surface), so most tests here
+    // exercise the "open" branch. The gate itself is covered separately below.
+    commandModalPayload: { kind: 'help', data: {} } as unknown as Record<string, unknown>,
     closeCommandModal: vi.fn(),
     showCostModal: vi.fn(),
     ...overrides,
@@ -317,11 +320,19 @@ describe('ChatInterface — no project selected', () => {
 });
 
 describe('ChatInterface — full UI', () => {
-  it('renders the messages pane, composer, and command modal', () => {
+  it('renders the messages pane, composer, and command modal', async () => {
     render(<ChatInterface {...baseProps} />);
     expect(screen.getByTestId('messages-pane')).toBeTruthy();
     expect(screen.getByTestId('composer')).toBeTruthy();
-    expect(screen.getByTestId('command-modal')).toBeTruthy();
+    // Demand-loaded (WP7): resolves after the dynamic import's chunk lands,
+    // even mocked, so this is the one assertion in the suite that awaits.
+    expect(await screen.findByTestId('command-modal')).toBeTruthy();
+  });
+
+  it('does not mount the command modal chunk when there is no command payload', () => {
+    mocks.useChatComposerStateReturn = baseComposerState({ commandModalPayload: null });
+    render(<ChatInterface {...baseProps} />);
+    expect(screen.queryByTestId('command-modal')).toBeNull();
   });
 
   it('computes hasActivityIndicator true when there is activity and no pending permission requests', () => {
@@ -362,17 +373,17 @@ describe('ChatInterface — full UI', () => {
     expect(screen.getByTestId('composer').getAttribute('data-conversation-started')).toBe('true');
   });
 
-  it('passes currentSessionId through to the messages pane and command modal', () => {
+  it('passes currentSessionId through to the messages pane and command modal', async () => {
     mocks.useChatSessionStateReturn = baseSessionState({ currentSessionId: 'sess-99' });
     render(<ChatInterface {...baseProps} />);
     expect(screen.getByTestId('messages-pane').getAttribute('data-current-session-id')).toBe('sess-99');
-    expect(screen.getByTestId('command-modal').getAttribute('data-current-session-id')).toBe('sess-99');
+    expect((await screen.findByTestId('command-modal')).getAttribute('data-current-session-id')).toBe('sess-99');
   });
 
-  it('falls back to the selected session id for the command modal when no current session id is set', () => {
+  it('falls back to the selected session id for the command modal when no current session id is set', async () => {
     mocks.useChatSessionStateReturn = baseSessionState({ currentSessionId: null });
     render(<ChatInterface {...baseProps} selectedSession={{ id: 'fallback-sess' } as never} />);
-    expect(screen.getByTestId('command-modal').getAttribute('data-current-session-id')).toBe('fallback-sess');
+    expect((await screen.findByTestId('command-modal')).getAttribute('data-current-session-id')).toBe('fallback-sess');
   });
 
   it('does not show the scroll-to-bottom button when the user has not scrolled up', () => {

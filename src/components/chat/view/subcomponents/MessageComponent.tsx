@@ -62,6 +62,24 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
     () => formatUsageLimitText(String(message.content || '')),
     [message.content]
   );
+  // Detect + pretty-print pure-JSON assistant/user text content once per
+  // content change instead of re-parsing + re-stringifying on every render
+  // (this branch previously ran inline in JSX, unmemoized).
+  const jsonFormattedContent = useMemo(() => {
+    const trimmedContent = formattedMessageContent.trim();
+    if (
+      (trimmedContent.startsWith('{') || trimmedContent.startsWith('['))
+      && (trimmedContent.endsWith('}') || trimmedContent.endsWith(']'))
+    ) {
+      try {
+        return JSON.stringify(JSON.parse(trimmedContent), null, 2);
+      } catch {
+        // Not valid JSON, fall through to normal rendering.
+        return null;
+      }
+    }
+    return null;
+  }, [formattedMessageContent]);
   const assistantCopyContent = message.isToolUse
     ? String(message.displayText || message.content || '')
     : formattedMessageContent;
@@ -340,34 +358,27 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 {(() => {
                   const content = formattedMessageContent;
 
-                  // Detect if content is pure JSON (starts with { or [)
-                  const trimmedContent = content.trim();
-                  if ((trimmedContent.startsWith('{') || trimmedContent.startsWith('[')) &&
-                    (trimmedContent.endsWith('}') || trimmedContent.endsWith(']'))) {
-                    try {
-                      const parsed = JSON.parse(trimmedContent);
-                      const formatted = JSON.stringify(parsed, null, 2);
-
-                      return (
-                        <div className="my-2">
-                          <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
-                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                            </svg>
-                            <span className="font-medium">{t('json.response')}</span>
-                          </div>
-                          <div className="overflow-hidden rounded-lg border border-border bg-muted">
-                            <pre className="overflow-x-auto p-4">
-                              <code className="block whitespace-pre font-mono text-sm text-foreground">
-                                {formatted}
-                              </code>
-                            </pre>
-                          </div>
+                  // JSON detection + pretty-printing already ran in the
+                  // `jsonFormattedContent` useMemo, keyed on content — no
+                  // JSON.parse/JSON.stringify here on every render.
+                  if (jsonFormattedContent !== null) {
+                    return (
+                      <div className="my-2">
+                        <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                          </svg>
+                          <span className="font-medium">{t('json.response')}</span>
                         </div>
-                      );
-                    } catch {
-                      // Not valid JSON, fall through to normal rendering
-                    }
+                        <div className="overflow-hidden rounded-lg border border-border bg-muted">
+                          <pre className="overflow-x-auto p-4">
+                            <code className="block whitespace-pre font-mono text-sm text-foreground">
+                              {jsonFormattedContent}
+                            </code>
+                          </pre>
+                        </div>
+                      </div>
+                    );
                   }
 
                   // Normal rendering for non-JSON content

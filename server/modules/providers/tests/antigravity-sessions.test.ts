@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -298,6 +298,93 @@ test('Antigravity synchronizer takes the newest history row for a conversation',
       assert.equal(session?.project_path, currentPath);
     });
   } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+// Regression test for the bounded-concurrency perf fix: `synchronize()` now
+// defers every discovered session's DB write to one batched call at the end
+// of the scan, instead of writing each file's row immediately as the old
+// sequential loop did. That changed what a per-file read failure costs: the
+// old code rethrew from `processTranscriptFile`, which only aborted files
+// scanned *after* the failing one (everything before it was already
+// committed); with the write deferred to the end, the same rethrow would
+// discard every already-parsed session in the batch, healthy or not. The fix
+// makes `processTranscriptFile` swallow a read failure and return `null`
+// instead of rethrowing — verified here directly (accessing the method via a
+// loose cast, since chmod-based failure injection is not reliable when the
+// test runner has root, which bypasses permission bits).
+test('processTranscriptFile swallows a read failure instead of throwing', async () => {
+  const missingTranscriptPath = path.join(
+    '/nonexistent-antigravity-fixture', '.gemini', 'antigravity-cli', 'brain', 'agy-missing-1',
+    '.system_generated', 'logs', 'transcript.jsonl',
+  );
+
+  const synchronizer = new AntigravitySessionSynchronizer() as unknown as {
+    processTranscriptFile(
+      filePath: string,
+      lookupHistoryMetadata: (sessionId: string) => undefined,
+    ): Promise<unknown>;
+  };
+
+  // The transcript path doesn't exist, so the inner `readFile` throws ENOENT.
+  // A regression back to rethrowing would make this call reject instead of
+  // resolving to `null`.
+  const result = await synchronizer.processTranscriptFile(missingTranscriptPath, () => undefined);
+  assert.equal(result, null);
+});
+
+test('a transcript that fails to read does not drop other sessions in the same scan', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'antigravity-session-sync-partial-failure-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  let unreadablePath: string | null = null;
+
+  try {
+    await mkdir(workspacePath, { recursive: true });
+    await writeTranscript(tempRoot, 'agy-healthy-1');
+    unreadablePath = await writeTranscript(tempRoot, 'agy-unreadable-1');
+
+    // The transcript body alone carries no project path (no LIST_DIRECTORY /
+    // VIEW_FILE step); history.jsonl supplies it, same as the other tests in
+    // this file that expect a session to actually get indexed.
+    const historyPath = path.join(tempRoot, '.gemini', 'antigravity-cli', 'history.jsonl');
+    await writeFile(historyPath, `${JSON.stringify({
+      display: 'Healthy session',
+      workspace: workspacePath,
+      conversationId: 'agy-healthy-1',
+    })}\n`, 'utf8');
+
+    // Best-effort permission-based failure injection: skipped (not failed) when
+    // the test runner has root, since root bypasses permission bits and this
+    // assertion would otherwise be unreliable across environments. The
+    // privilege-independent regression coverage lives in the test above.
+    await chmod(unreadablePath, 0o000);
+    let readIsBlocked = true;
+    try {
+      await readFile(unreadablePath);
+      readIsBlocked = false;
+    } catch {
+      // Expected when not running as root.
+    }
+
+    if (!readIsBlocked) {
+      return;
+    }
+
+    await withIsolatedDatabase(async () => {
+      const processed = await new AntigravitySessionSynchronizer().synchronize();
+
+      // The healthy session survives even though its sibling failed to read.
+      assert.ok(sessionsDb.getSessionById('agy-healthy-1'), 'healthy session should still be indexed');
+      assert.equal(sessionsDb.getSessionById('agy-unreadable-1'), null);
+      assert.equal(processed, 1);
+    });
+  } finally {
+    if (unreadablePath) {
+      await chmod(unreadablePath, 0o644).catch(() => {});
+    }
     restoreHomeDir();
     await rm(tempRoot, { recursive: true, force: true });
   }
