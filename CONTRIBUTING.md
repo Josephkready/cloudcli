@@ -237,11 +237,20 @@ initial read). Keep it in the `.pure.ts` file, but cover that part in a
 
 ## Demand-loaded surfaces
 
-Only the sidebar and the chat view are on the boot path. Everything else — the
-code editor, settings, onboarding and the project wizard — is behind
-`React.lazy` and ships in its own chunk (issue #267). Before that split,
-xterm (~400 KB) and CodeMirror (~690 KB) were parsed on every cold load even in
-a session that only read chat.
+Only the sidebar and the chat view's own wiring are on the boot path. Everything
+else — the code editor, settings, onboarding, the project wizard, the markdown
+renderer, bug reporting, the `/model`/`/cost`/`/status`/`/help` command modal,
+and the `AskUserQuestion` permission panel — is behind `React.lazy` and ships in
+its own chunk (issue #267; the last four added by perf-audit package WP7).
+Before the original split, xterm (~400 KB) and CodeMirror (~690 KB) were parsed
+on every cold load even in a session that only read chat; the markdown renderer
+(react-markdown + remark-gfm + micromark/mdast/unified, ~450 KB pre-minify) was
+the single biggest remaining offender once those two were gone, since `app_boot`
+never renders a message body but almost every session opens a conversation
+within seconds — see `src/components/chat/view/subcomponents/Markdown.tsx`,
+loaded through `React.lazy` with a plain-text fallback and idle-warmed via
+`WARMABLE_SURFACES` in `surfaceLoaders.ts` rather than left cold like the rarer
+surfaces below it.
 
 When you add or move one of these surfaces:
 

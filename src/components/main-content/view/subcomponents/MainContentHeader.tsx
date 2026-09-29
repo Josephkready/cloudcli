@@ -17,7 +17,7 @@ import MainContentTabSwitcher from './MainContentTabSwitcher';
 import MainContentTitle from './MainContentTitle';
 import MainContentSessionTabs from './MainContentSessionTabs';
 
-// Rarely used relative to chat itself (issue: entry-chunk audit E, WP7) — kept
+// Rarely used relative to chat itself (perf-audit package WP7) — kept
 // out of the entry chunk like every other header-reachable surface. Gated on
 // `bugReportOpen` below rather than rendered unconditionally, mirroring the
 // `editingFile &&` pattern in MainContent.tsx: mounting a lazy component is

@@ -30,6 +30,13 @@
 //   5. Positive controls, so the gate cannot pass vacuously if the marker
 //      format or the file layout changes: a registered grammar IS present in
 //      the entry chunk, and KaTeX and mermaid ARE still shipped on demand.
+//   6. (perf-audit WP7) No react-markdown/remark-gfm/micromark/mdast/unified
+//      code — the ~450 KB markdown-rendering stack — appears in the entry JS
+//      chunk, with a positive control that it still ships on demand.
+//   7. (perf-audit WP7) BugReportDialog, CommandResultModal and
+//      AskUserQuestionPanel — surfaces reachable far less often than chat
+//      itself — do not appear in the entry JS chunk, each with a positive
+//      control that it still ships on demand.
 //
 // USAGE
 //   npm run build:client && npm run check:bundle
