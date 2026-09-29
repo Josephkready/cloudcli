@@ -49,7 +49,13 @@ fi
 
 # Only STAGE is disposable on every exit path. BACKUP is deliberately NOT removed here:
 # if we die mid-swap it holds the last good build, and swap_in restores from it.
-trap 'rm -rf "$STAGE"' EXIT
+#
+# Also kills the two parallel build subshells (CLIENT_PID/SERVER_PID, set below) if this
+# script is itself signaled (e.g. a systemd timeout) while `wait`ing on them: without this
+# they would keep running as orphans and could go on writing into $STAGE after it is
+# removed. The `${VAR:-}` guard + `2>/dev/null || true` makes this a no-op before the PIDs
+# are assigned and on the normal-success path where both jobs are already dead.
+trap 'kill "${CLIENT_PID:-}" "${SERVER_PID:-}" 2>/dev/null || true; rm -rf "$STAGE"' EXIT
 
 # A non-empty BACKUP means a previous run died mid-swap without completing its rollback
 # (see the CRITICAL path in swap_in) or was hard-killed. Its contents may be the only
@@ -109,6 +115,10 @@ log "building client + server -> staging in parallel (VITE_AUTH_DISABLED=${VITE_
 
 (
   # client chain: vite build -> build identity -> precompress, all into $STAGE/dist.
+  # Each step gets its own log() line (prefixed so it's identifiable while interleaved
+  # with the server chain's output) so a failure's preceding log line still identifies
+  # the step, same as the old serial version did.
+  log "client: building -> staging (VITE_AUTH_DISABLED=${VITE_AUTH_DISABLED})"
   npx vite build --outDir "$STAGE/dist" --emptyOutDir
 
   # The same SHA the client bundle inlined via Vite `define`. The server reads this at
@@ -116,6 +126,7 @@ log "building client + server -> staging in parallel (VITE_AUTH_DISABLED=${VITE_
   # (#458). Written after vite so --emptyOutDir cannot delete it. The values are JSON-encoded
   # by the helper (not interpolated into a heredoc) so a quote/backslash can never produce
   # malformed JSON or inject content into the file the server serves.
+  log "client: writing build identity (sha=${VITE_BUILD_SHA}) -> staging"
   "$ROOT/scripts/write-build-info.sh" "$VITE_BUILD_SHA" "$VITE_BUILT_AT" "$STAGE/dist/build-info.json"
 
   # `npm run build:client` chains vite -> build:precompress, but the vite step above is
@@ -125,6 +136,7 @@ log "building client + server -> staging in parallel (VITE_AUTH_DISABLED=${VITE_
   # removed. Same entry point and arguments as the npm script, except the target is the
   # staged dist rather than the live one; `public` stays repo-relative because that tree is
   # served from the live checkout, not from the build output.
+  log "client: precompressing assets -> staging"
   npx tsx --tsconfig server/tsconfig.json server/shared/precompress-assets.ts "$STAGE/dist" public
 ) &
 CLIENT_PID=$!
@@ -136,6 +148,7 @@ CLIENT_PID=$!
   # what staging exists to avoid. tsc and tsc-alias both accept an absolute --outDir
   # (tsc-alias documents it as tsconfig-relative, but absolute works and is verified by
   # the alias check below).
+  log "server: building -> staging"
   npx tsc -p server/tsconfig.json --outDir "$STAGE/dist-server"
   npx tsc-alias -p server/tsconfig.json --outDir "$STAGE/dist-server"
 ) &
