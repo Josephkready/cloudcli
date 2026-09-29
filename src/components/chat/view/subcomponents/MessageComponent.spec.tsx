@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ChatMessage } from '../../types/types';
@@ -351,9 +351,40 @@ describe('MessageComponent — plain content rendering', () => {
     expect(screen.getByText('{not valid json')).toBeInTheDocument();
   });
 
-  it('renders assistant content through Markdown', () => {
+  it('does not re-parse JSON content on a re-render where message.content is unchanged', () => {
+    // WP6 fix: JSON detection/pretty-printing is memoized on formattedMessageContent,
+    // so a re-render triggered by an unrelated prop must not re-run JSON.parse.
+    const parseSpy = vi.spyOn(JSON, 'parse');
+    const message = { type: 'assistant', content: '{"a":1,"b":2}' } as ChatMessage;
+    const { rerender } = render(
+      <MessageComponent message={message} prevMessage={null} createDiff={() => []} provider="claude" />,
+    );
+    expect(screen.getByText('JSON Response')).toBeInTheDocument();
+    const callsAfterFirstRender = parseSpy.mock.calls.length;
+    expect(callsAfterFirstRender).toBeGreaterThan(0);
+
+    // Re-render with the same message object but a changed unrelated prop.
+    rerender(
+      <MessageComponent
+        message={message}
+        prevMessage={null}
+        createDiff={() => []}
+        provider="claude"
+        showRawParameters
+      />,
+    );
+    expect(parseSpy.mock.calls.length).toBe(callsAfterFirstRender);
+    parseSpy.mockRestore();
+  });
+
+  it('renders assistant content through Markdown', async () => {
     renderMessage({ type: 'assistant', content: '**bold text**' });
-    expect(screen.getByText('bold text').tagName).toBe('STRONG');
+    // `Markdown` is demand-loaded (perf-audit package WP7): the raw text shows
+    // through a plain-text fallback first, then real markdown once the
+    // renderer chunk resolves.
+    await waitFor(() => {
+      expect(screen.getByText('bold text').tagName).toBe('STRONG');
+    });
   });
 
   it('renders non-assistant plain content as preformatted text, not Markdown', () => {

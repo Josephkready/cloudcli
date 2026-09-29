@@ -453,6 +453,135 @@ describe('computeMerged', () => {
       'u0', 'a0', 'u1', 'rt_tool', 'rt_res', 'rt_a',
     ]);
   });
+
+  describe('append-only fast path parity', () => {
+    /**
+     * The pre-optimization implementation: always the full
+     * `[...server, ...extra].sort(...)` path, dedupe-id filtering identical
+     * to the current `computeMerged`. Kept local to this test so it pins the
+     * *behaviour* being preserved, not the fast-path implementation.
+     */
+    const referenceMerge = (
+      server: NormalizedMessage[],
+      realtime: NormalizedMessage[],
+    ): NormalizedMessage[] => {
+      if (realtime.length === 0) return dedupeAdjacentAssistantEchoes(server);
+      if (server.length === 0) return dedupeAdjacentAssistantEchoes(realtime);
+
+      const serverIds = new Set(server.map((m) => m.id).filter(Boolean));
+      const extra = realtime.filter((m) => {
+        if (m.id && serverIds.has(m.id)) return false;
+        if (m.id?.startsWith('local_') && hasServerEchoForLocalUser(m, server)) return false;
+        return true;
+      });
+      if (extra.length === 0) return dedupeAdjacentAssistantEchoes(server);
+
+      return dedupeAdjacentAssistantEchoes(
+        [...server, ...extra].sort((a, b) => {
+          const ta = Date.parse(a.timestamp);
+          const tb = Date.parse(b.timestamp);
+          const na = Number.isFinite(ta) ? ta : 0;
+          const nb = Number.isFinite(tb) ? tb : 0;
+          return na - nb;
+        }),
+      );
+    };
+
+    // Deterministic PRNG (mulberry32) so a failure is reproducible without
+    // pulling in a fuzzing dependency.
+    const mulberry32 = (seed: number) => {
+      let a = seed;
+      return () => {
+        a |= 0;
+        a = (a + 0x6d2b79f5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    };
+
+    const randomKind = (rand: () => number): NormalizedMessage['kind'] => {
+      const kinds: NormalizedMessage['kind'][] = ['text', 'tool_use', 'tool_result', 'status'];
+      return kinds[Math.floor(rand() * kinds.length)];
+    };
+
+    const randomTranscript = (
+      rand: () => number,
+      count: number,
+      prefix: string,
+      // Whether timestamps must increase monotonically (models an
+      // already-sorted server array) or may be scattered (models
+      // out-of-order realtime rows).
+      sorted: boolean,
+    ): NormalizedMessage[] => {
+      let minutes = 0;
+      const rows: NormalizedMessage[] = [];
+      for (let i = 0; i < count; i++) {
+        minutes += sorted ? Math.floor(rand() * 3) : Math.floor(rand() * 7) - 3;
+        const kind = randomKind(rand);
+        rows.push(
+          message({
+            id: `${prefix}${i}`,
+            kind,
+            role: kind === 'text' ? (rand() < 0.5 ? 'user' : 'assistant') : undefined,
+            content: kind === 'text' ? `content-${prefix}${i}` : undefined,
+            toolId: kind === 'tool_use' ? `tool-${prefix}${i}` : undefined,
+            timestamp: at(minutes),
+          }),
+        );
+      }
+      return rows;
+    };
+
+    it('fast path matches the full-sort reference on randomized append-only inputs', () => {
+      for (let seed = 0; seed < 200; seed++) {
+        const rand = mulberry32(seed + 1);
+        const server = randomTranscript(rand, Math.floor(rand() * 15), 's', true);
+        // Extra rows timestamped at/after the server tail, i.e. the streaming
+        // append case the fast path targets.
+        const lastServerMinute = server.length > 0
+          ? (Date.parse(server[server.length - 1].timestamp) - Date.parse(at(0))) / 60_000
+          : 0;
+        const extraCount = 1 + Math.floor(rand() * 4);
+        const extra: NormalizedMessage[] = [];
+        let minutes = lastServerMinute;
+        for (let i = 0; i < extraCount; i++) {
+          minutes += Math.floor(rand() * 3);
+          const kind = randomKind(rand);
+          extra.push(
+            message({
+              id: `e${seed}_${i}`,
+              kind,
+              role: kind === 'text' ? (rand() < 0.5 ? 'user' : 'assistant') : undefined,
+              content: kind === 'text' ? `content-e${seed}_${i}` : undefined,
+              toolId: kind === 'tool_use' ? `tool-e${seed}_${i}` : undefined,
+              timestamp: at(minutes),
+            }),
+          );
+        }
+
+        assert.deepEqual(
+          ids(computeMerged(server, extra)),
+          ids(referenceMerge(server, extra)),
+          `mismatch at seed ${seed}`,
+        );
+      }
+    });
+
+    it('falls back to sorted-equivalent output on randomized out-of-order inputs', () => {
+      for (let seed = 0; seed < 200; seed++) {
+        const rand = mulberry32(seed + 1000);
+        const server = randomTranscript(rand, Math.floor(rand() * 15), 's', true);
+        const extra = randomTranscript(rand, 1 + Math.floor(rand() * 5), `e${seed}_`, false);
+
+        assert.deepEqual(
+          ids(computeMerged(server, extra)),
+          ids(referenceMerge(server, extra)),
+          `mismatch at seed ${seed}`,
+        );
+      }
+    });
+  });
 });
 
 describe('recomputeMergedIfNeeded', () => {

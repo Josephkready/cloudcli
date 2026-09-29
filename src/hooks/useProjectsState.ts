@@ -11,6 +11,7 @@ import type {
   ProjectSession,
 } from '../types/app';
 
+import { consumeProjectsBootPrefetch } from './projectsBootPrefetch';
 import type { SessionActivityMap } from './useSessionProtection';
 import {
   DEFAULT_PROVIDER,
@@ -253,7 +254,14 @@ export function useProjectsState({
       if (showLoadingState) {
         setIsLoadingProjects(true);
       }
-      const projectData = await fetchProjectsSnapshot(requestProjects);
+      // On the very first call (nothing loaded yet), a prefetch may already
+      // be in flight — it was started as early as possible during the auth
+      // boot sequence (see AuthContext), in parallel with the auth round
+      // trips, instead of only after this hook mounts post-auth. It's
+      // equivalent to fetchProjectsSnapshot([]) here: no prior projects means
+      // no already-expanded session pages to reconcile.
+      const bootPrefetch = requestProjects.length === 0 ? consumeProjectsBootPrefetch() : null;
+      const projectData = bootPrefetch ? await bootPrefetch : await fetchProjectsSnapshot(requestProjects);
 
       setProjects((prevProjects) => {
         const mergedProjects = mergeExpandedSessionPages(prevProjects, projectData, requestProjects);

@@ -115,6 +115,24 @@ export function getConnection(): Database.Database {
 
   instance = new Database(dbPath);
 
+  // WAL mode lets readers and the writer proceed concurrently and only
+  // fsyncs the (small) WAL file instead of rewriting/fsyncing a full
+  // rollback journal on every commit — every single-row write in the app
+  // (active_runs inserts/deletes, api_keys.last_used touches, session
+  // renames, etc.) currently pays one rollback-journal fsync each.
+  // `synchronous = NORMAL` is the documented-safe pairing with WAL (a hard
+  // power-loss can lose the last commit but never corrupts the DB).
+  // `busy_timeout` avoids SQLITE_BUSY if a second process (e.g. the
+  // `cloudcli usage` CLI) touches the DB concurrently.
+  //
+  // Skipped for ':memory:' databases (used by some tests) — WAL is a no-op
+  // there and better-sqlite3 warns/no-ops on the pragma anyway.
+  if (dbPath !== ':memory:') {
+    instance.pragma('journal_mode = WAL');
+    instance.pragma('synchronous = NORMAL');
+    instance.pragma('busy_timeout = 5000');
+  }
+
   // app_config must exist immediately — the auth middleware reads
   // the JWT secret at module-load time, before initializeDatabase() runs.
   instance.exec(APP_CONFIG_TABLE_SCHEMA_SQL);
@@ -136,6 +154,20 @@ export function getDatabasePath(): string {
  */
 export function closeConnection(): void {
   if (instance) {
+    try {
+      // In WAL mode, committed writes can live in the -wal sidecar file
+      // rather than the main db file until a checkpoint happens. A
+      // TRUNCATE checkpoint flushes everything back into the main file (and
+      // empties/removes the -wal file) so that a raw file copy of the main
+      // db taken right after a graceful shutdown reflects the latest state
+      // without also needing the -wal/-shm files. This does NOT make
+      // concurrent (mid-uptime) raw-file backups of a WAL-mode db safe —
+      // see the note in connection.test.ts and the PR description for why
+      // a live backup still needs `.backup()`/VACUUM INTO instead.
+      instance.pragma('wal_checkpoint(TRUNCATE)');
+    } catch (err: any) {
+      console.error('Could not checkpoint WAL before closing database', { error: err.message });
+    }
     instance.close();
     instance = null;
     console.log('Database connection closed');

@@ -18,6 +18,7 @@ import { useVersionCheck, VersionCheckProvider } from '../../hooks/useVersionChe
 import { hasUnsentComposerDraft, isAppIdle } from '../../hooks/buildVersion';
 import { api } from '../../utils/api';
 import { useLaunchIntent } from '../../pwa/useLaunchIntent';
+import type { SessionEstablishedContext, SessionNavigationOptions } from '../chat/types/types';
 
 import { installKeyboardViewportSync, keyboardAwareBottomStyle } from './keyboardViewport';
 import NewVersionBanner from './NewVersionBanner';
@@ -181,6 +182,25 @@ function AppContentInner() {
   // tested against a fake viewport.
   useEffect(() => installKeyboardViewportSync(window, document), []);
 
+  // Passed straight through to `MainContent`, which is `React.memo`'d --
+  // recreating these on every `AppContentInner` render (mobile sidebar
+  // toggling, websocket state, any projects-state field changing) defeated
+  // that memo unconditionally, since a new function identity always fails
+  // React's shallow prop comparison (#WP4-2).
+  const handleMenuClick = useCallback(() => setSidebarOpen(true), [setSidebarOpen]);
+
+  const handleNavigateToSession = useCallback(
+    (targetSessionId: string, options?: SessionNavigationOptions) =>
+      navigate(`/session/${targetSessionId}`, { replace: Boolean(options?.replace) }),
+    [navigate],
+  );
+
+  const handleSessionEstablished = useCallback(
+    (targetSessionId: string, context: SessionEstablishedContext) =>
+      registerOptimisticSession({ sessionId: targetSessionId, ...context }),
+    [registerOptimisticSession],
+  );
+
   return (
     <div className="fixed inset-0 flex bg-background" style={keyboardAwareBottomStyle()}>
       {/* Stale-tab reload affordance (#458): never blocks the UI, auto-reloads only on a
@@ -243,18 +263,14 @@ function AppContentInner() {
           ws={ws}
           sendMessage={sendMessage}
           isMobile={isMobile}
-          onMenuClick={() => setSidebarOpen(true)}
+          onMenuClick={handleMenuClick}
           isLoading={isLoadingProjects}
           onInputFocusChange={setIsInputFocused}
           onSessionProcessing={markSessionProcessing}
           onSessionIdle={markSessionIdle}
           processingSessions={processingSessions}
-          onNavigateToSession={(targetSessionId: string, options) =>
-            navigate(`/session/${targetSessionId}`, { replace: Boolean(options?.replace) })
-          }
-          onSessionEstablished={(targetSessionId, context) =>
-            registerOptimisticSession({ sessionId: targetSessionId, ...context })
-          }
+          onNavigateToSession={handleNavigateToSession}
+          onSessionEstablished={handleSessionEstablished}
           onShowSettings={openSettings}
           externalMessageUpdate={externalMessageUpdate}
           newSessionTrigger={newSessionTrigger}

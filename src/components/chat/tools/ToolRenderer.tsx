@@ -324,6 +324,11 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
         // Interactive question/answer prompts (AskUserQuestion) should render
         // in full; everything else is height-capped so it can't dominate the chat.
         capHeight={displayConfig.contentType !== 'question-answer'}
+        // Diff content runs an O(n·m) LCS computation on mount (ToolDiffViewer's
+        // useMemo); most Edit/Write/ApplyPatch calls default closed and are
+        // never expanded while scrolling a large transcript, so don't pay for
+        // the diff until the user actually opens it.
+        lazyMount={displayConfig.contentType === 'diff'}
       >
         {contentComponent}
       </CollapsibleDisplay>

@@ -18,6 +18,16 @@ export interface MentionableFile {
   relativePath?: string;
 }
 
+interface LowercasedMentionableFile {
+  file: MentionableFile;
+  nameLower: string;
+  pathLower: string;
+}
+
+// Matches useSlashCommands's COMMAND_QUERY_DEBOUNCE_MS — the equivalent
+// debounce for the near-identical @-mention query UI.
+const FILE_MENTION_DEBOUNCE_MS = 150;
+
 interface UseFileMentionsOptions {
   selectedProject: Project | null;
   input: string;
@@ -93,6 +103,18 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
     };
   }, [selectedProject?.projectId]);
 
+  // Precompute each file's lowercased name/path once per file-list fetch
+  // instead of re-lowercasing every file on every keystroke of the query.
+  const lowercasedFileList = useMemo<LowercasedMentionableFile[]>(
+    () =>
+      fileList.map((file) => ({
+        file,
+        nameLower: file.name.toLowerCase(),
+        pathLower: file.path.toLowerCase(),
+      })),
+    [fileList],
+  );
+
   useEffect(() => {
     const textBeforeCursor = input.slice(0, cursorPosition);
     const lastAtIndex = textBeforeCursor.lastIndexOf('@');
@@ -114,16 +136,26 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
     setShowFileDropdown(true);
     setSelectedFileIndex(-1);
 
-    const matchingFiles = fileList
-      .filter(
-        (file) =>
-          file.name.toLowerCase().includes(textAfterAt.toLowerCase()) ||
-          file.path.toLowerCase().includes(textAfterAt.toLowerCase()),
-      )
-      .slice(0, 10);
+    // Debounce the actual filter pass (like useSlashCommands's command
+    // query) so a large project's file list isn't re-scanned on every
+    // keystroke while composing a mention — only once typing pauses. A plain
+    // local timer id is enough: React always runs this effect's own cleanup
+    // before the next run (deps change) or unmount, so a stale timer can
+    // never outlive the render it was scheduled from.
+    const timerId = window.setTimeout(() => {
+      const query = textAfterAt.toLowerCase();
+      const matchingFiles = lowercasedFileList
+        .filter(({ nameLower, pathLower }) => nameLower.includes(query) || pathLower.includes(query))
+        .slice(0, 10)
+        .map(({ file }) => file);
 
-    setFilteredFiles(matchingFiles);
-  }, [input, cursorPosition, fileList]);
+      setFilteredFiles(matchingFiles);
+    }, FILE_MENTION_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [input, cursorPosition, lowercasedFileList]);
 
   const activeFileMentions = useMemo(() => {
     if (!input || fileMentions.length === 0) {
