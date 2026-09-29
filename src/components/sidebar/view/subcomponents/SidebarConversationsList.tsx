@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { Activity, AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Edit2, Loader2, MessageSquare, Terminal, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -13,6 +13,7 @@ import { buildConversationList, STATUS_ORDER, type ConversationListItem, type Co
 import { formatCompactAge } from '../../../../utils/dateUtils';
 import { buildSessionContextMenuActions } from '../../utils/sessionContextMenu';
 import { filterCliOriginConversations, getSessionName, writeHideCliOriginChats } from '../../utils/utils';
+import { useMinuteClock } from '../../hooks/useMinuteClock';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 
 import SidebarNewConversationButton from './SidebarNewConversationButton';
@@ -35,7 +36,11 @@ type SidebarConversationsListProps = SessionRowActions & {
   projects: Project[];
   activeSessions: SessionActivityMap;
   selectedSession: ProjectSession | null;
-  currentTime: Date;
+  // Optional: production no longer threads a ticked `currentTime` through
+  // every conversation row (see the sidebar perf audit's finding 4) — rows
+  // read the shared `useMinuteClock` tick themselves. Left in place only so
+  // tests can pin a deterministic instant.
+  currentTime?: Date;
   onSelect: (session: SessionWithProvider, project: Project) => void;
   // Launches a new conversation in the chosen project (wired to handleNewSession).
   onNewConversation: (project: Project) => void;
@@ -64,7 +69,7 @@ const SECTION_META: Record<ConversationStatus, SectionMeta> = {
 function ConversationRow({
   item,
   isSelected,
-  currentTime,
+  currentTime: currentTimeProp,
   onSelect,
   editingSession,
   editingSessionName,
@@ -78,10 +83,12 @@ function ConversationRow({
 }: SessionRowActions & {
   item: ConversationListItem;
   isSelected: boolean;
-  currentTime: Date;
+  currentTime?: Date;
   onSelect: (session: SessionWithProvider, project: Project) => void;
   t: TFunction;
 }) {
+  const clockTime = useMinuteClock();
+  const currentTime = currentTimeProp ?? clockTime;
   const { project, session, status } = item;
   const title = getSessionName(session, t);
   const projectName = project.displayName || project.projectId;
@@ -358,6 +365,13 @@ function ConversationRow({
   );
 }
 
+// Memoized: see the note on SidebarProjectItem's export — this is the
+// Conversations-view twin of SidebarSessionItem, with the same memo +
+// stable-callback + shared-minute-clock treatment. The raw function is also
+// exported by name so a render-count spec can wrap it in its own
+// instrumented `memo()`.
+const MemoizedConversationRow = memo(ConversationRow);
+
 // Subtle affordance shown when the "hide CLI-origin chats" preference (#216) is
 // filtering one or more sessions out of this list. Without it, a user whose
 // conversations are mostly terminal-started sees only the "No conversations yet"
@@ -493,7 +507,7 @@ export default function SidebarConversationsList({
             </div>
             <div className="space-y-1">
               {sectionItems.map((item) => (
-                <ConversationRow
+                <MemoizedConversationRow
                   key={`${item.project.projectId}-${item.session.id}`}
                   item={item}
                   isSelected={selectedSession?.id === item.session.id}
@@ -520,3 +534,7 @@ export default function SidebarConversationsList({
     </div>
   );
 }
+
+// Named export of the un-memoized row for render-count testing — see the
+// matching note on SidebarProjectItem.
+export { ConversationRow };

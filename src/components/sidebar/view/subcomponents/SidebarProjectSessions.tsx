@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Plus } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -18,7 +19,6 @@ type SidebarProjectSessionsProps = {
   hasMoreSessions: boolean;
   isLoadingMoreSessions: boolean;
   activeSessions: SessionActivityMap;
-  currentTime: Date;
   editingSession: string | null;
   editingSessionName: string;
   onEditingSessionNameChange: (value: string) => void;
@@ -57,7 +57,7 @@ function SessionListSkeleton() {
   );
 }
 
-export default function SidebarProjectSessions({
+function SidebarProjectSessions({
   project,
   isExpanded,
   sessions,
@@ -66,7 +66,6 @@ export default function SidebarProjectSessions({
   hasMoreSessions,
   isLoadingMoreSessions,
   activeSessions,
-  currentTime,
   editingSession,
   editingSessionName,
   onEditingSessionNameChange,
@@ -135,7 +134,6 @@ export default function SidebarProjectSessions({
               selectedSession={selectedSession}
               isProcessing={activeSessions.has(session.id)}
               needsAttention={status === 'plan' || status === 'blocked' || status === 'done'}
-              currentTime={currentTime}
               editingSession={editingSession}
               editingSessionName={editingSessionName}
               onEditingSessionNameChange={onEditingSessionNameChange}
@@ -167,3 +165,10 @@ export default function SidebarProjectSessions({
     </div>
   );
 }
+
+// Named export of the un-memoized component for render-count testing — see
+// the matching note on SidebarProjectItem.
+export { SidebarProjectSessions };
+
+// Memoized: see the note on SidebarProjectItem's export.
+export default memo(SidebarProjectSessions);

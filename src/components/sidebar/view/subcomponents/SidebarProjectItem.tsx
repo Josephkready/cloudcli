@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Check, ChevronDown, ChevronRight, Edit3, Star, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -22,7 +23,6 @@ type SidebarProjectItemProps = {
   sessions: SessionWithProvider[];
   initialSessionsLoaded: boolean;
   isLoadingMoreSessions: boolean;
-  currentTime: Date;
   editingSession: string | null;
   editingSessionName: string;
   onEditingNameChange: (name: string) => void;
@@ -56,7 +56,7 @@ const getSessionCountDisplay = (project: Project, sessions: SessionWithProvider[
   return String(total);
 };
 
-export default function SidebarProjectItem({
+function SidebarProjectItem({
   project,
   selectedProject,
   selectedSession,
@@ -68,7 +68,6 @@ export default function SidebarProjectItem({
   sessions,
   initialSessionsLoaded,
   isLoadingMoreSessions,
-  currentTime,
   editingSession,
   editingSessionName,
   onEditingNameChange,
@@ -395,7 +394,6 @@ export default function SidebarProjectItem({
         hasMoreSessions={Boolean(project.sessionMeta?.hasMore)}
         isLoadingMoreSessions={isLoadingMoreSessions}
         activeSessions={activeSessions}
-        currentTime={currentTime}
         editingSession={editingSession}
         editingSessionName={editingSessionName}
         onEditingSessionNameChange={onEditingSessionNameChange}
@@ -413,3 +411,18 @@ export default function SidebarProjectItem({
     </div>
   );
 }
+
+// Named export of the un-memoized component, purely so a render-count spec
+// (SidebarProjectItem.render-count.spec.tsx) can wrap it in its own
+// instrumented `memo()` and directly count how many times the function body
+// runs — importing the (already memoized) default export can't observe that
+// from outside since React only calls it when memo decides to update.
+export { SidebarProjectItem };
+
+// Memoized: without this, every unrelated Sidebar re-render (typing in
+// search, a 60s clock tick, a websocket project refresh) walked the whole
+// project + session tree even though at most one row's content changed. Only
+// holds because Sidebar.tsx stabilizes the callback props with useCallback
+// (see the sidebar perf audit's finding 1) — an inline arrow prop would
+// still bust this memo every render.
+export default memo(SidebarProjectItem);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
+
 import type { Project } from '../../../types/app';
 import type { CodeEditorDiffInfo, CodeEditorFile } from '../types/types';
 
@@ -58,9 +59,20 @@ export const useEditorSidebar = ({
     [isMobile],
   );
 
+  // The last mousemove event seen since the previous animation frame applied
+  // one. `mousemove` fires far faster than React (and the layout it forces
+  // via `getBoundingClientRect`) can keep up with — 60-120 events/sec at
+  // typical drag speeds — so only the latest event per frame is applied,
+  // matching the rAF-gating pattern `useShellTerminal.ts` already uses for
+  // its own layout-reading work.
+  const latestMoveEventRef = useRef<globalThis.MouseEvent | null>(null);
+  const pendingFrameRef = useRef<number | null>(null);
+
   useEffect(() => {
-    const handleMouseMove = (event: globalThis.MouseEvent) => {
-      if (!isResizing) {
+    const applyLatestMove = () => {
+      pendingFrameRef.current = null;
+      const event = latestMoveEventRef.current;
+      if (!event) {
         return;
       }
 
@@ -83,6 +95,17 @@ export const useEditorSidebar = ({
       }
     };
 
+    const handleMouseMove = (event: globalThis.MouseEvent) => {
+      if (!isResizing) {
+        return;
+      }
+
+      latestMoveEventRef.current = event;
+      if (pendingFrameRef.current === null) {
+        pendingFrameRef.current = requestAnimationFrame(applyLatestMove);
+      }
+    };
+
     const handleMouseUp = () => {
       setIsResizing(false);
     };
@@ -99,6 +122,11 @@ export const useEditorSidebar = ({
       document.removeEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      if (pendingFrameRef.current !== null) {
+        cancelAnimationFrame(pendingFrameRef.current);
+        pendingFrameRef.current = null;
+      }
+      latestMoveEventRef.current = null;
     };
   }, [isResizing]);
 

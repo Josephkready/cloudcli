@@ -39,7 +39,6 @@ function renderItem(project: Project) {
       sessions={[] as SessionWithProvider[]}
       initialSessionsLoaded
       isLoadingMoreSessions={false}
-      currentTime={new Date('2026-07-24T12:00:00Z')}
       editingSession={null}
       editingSessionName=""
       onEditingNameChange={vi.fn()}

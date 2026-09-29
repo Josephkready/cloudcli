@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import { Check, Edit2, Loader2, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -10,6 +10,7 @@ import type { Project, ProjectSession, LLMProvider } from '../../../../types/app
 import type { SessionWithProvider } from '../../types/types';
 import { createSessionViewModel } from '../../utils/utils';
 import { buildSessionContextMenuActions } from '../../utils/sessionContextMenu';
+import { useMinuteClock } from '../../hooks/useMinuteClock';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 
 type SidebarSessionItemProps = {
@@ -18,7 +19,13 @@ type SidebarSessionItemProps = {
   selectedSession: ProjectSession | null;
   isProcessing: boolean;
   needsAttention: boolean;
-  currentTime: Date;
+  // Optional: production callers no longer thread a ticked `currentTime`
+  // through the row tree (that re-rendered every project/session row once a
+  // minute — see #4 in the sidebar perf audit). Left in place only so tests
+  // can pin a deterministic instant; when omitted the row reads the shared
+  // `useMinuteClock` tick itself, so only rows that render an age label
+  // re-render on tick instead of the whole sidebar.
+  currentTime?: Date;
   editingSession: string | null;
   editingSessionName: string;
   onEditingSessionNameChange: (value: string) => void;
@@ -37,13 +44,13 @@ type SidebarSessionItemProps = {
   t: TFunction;
 };
 
-export default function SidebarSessionItem({
+function SidebarSessionItem({
   project,
   session,
   selectedSession,
   isProcessing,
   needsAttention,
-  currentTime,
+  currentTime: currentTimeProp,
   editingSession,
   editingSessionName,
   onEditingSessionNameChange,
@@ -56,6 +63,8 @@ export default function SidebarSessionItem({
   onArchiveSession,
   t,
 }: SidebarSessionItemProps) {
+  const clockTime = useMinuteClock();
+  const currentTime = currentTimeProp ?? clockTime;
   const sessionView = createSessionViewModel(session, currentTime, t);
   const isSelected = selectedSession?.id === session.id;
   const isEditing = editingSession === session.id;
@@ -379,3 +388,14 @@ export default function SidebarSessionItem({
     </div>
   );
 }
+
+// Named export of the un-memoized component for render-count testing — see
+// the matching note on SidebarProjectItem.
+export { SidebarSessionItem };
+
+// Memoized: see the note on SidebarProjectItem's export — every 60s clock
+// tick no longer busts this via a `currentTime` prop either (it's optional
+// now and unused in production; the row reads the shared minute clock via
+// `useMinuteClock` itself, so a tick only re-renders this row, not its
+// project/list ancestors).
+export default memo(SidebarSessionItem);
