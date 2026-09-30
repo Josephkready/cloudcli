@@ -17,7 +17,7 @@ def run(page, vd):
     boot(page, vd)
     open_sidebar(page, vd)
     visible(page.get_by_role("button", name="New conversation")).click()
-    visible(page.locator("[cmdk-item]").filter(has_text="bench-primary")).click()
+    visible(page.get_by_role("option", name=re.compile("bench-primary"))).click()
     card = visible(page.get_by_role("button", name=re.compile("Click to change model")))
     card.wait_for()
     vd.mark("provider card")

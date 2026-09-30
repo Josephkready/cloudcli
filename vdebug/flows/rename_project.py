@@ -19,6 +19,7 @@ def run(page, vd):
     field = visible(page.get_by_placeholder("Project name"))
     field.wait_for()
     vd.mark("rename field")
+    field.click()        # the field sits inside the row's <button>: a click must not toggle the row
     field.select_text()
     field.press_sequentially("Payments service (renamed)", delay=15)
     vd.mark("new name typed")

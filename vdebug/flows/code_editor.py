@@ -15,6 +15,8 @@ def run(page, vd):
     boot(page, vd)
     open_large_conversation(page, vd)
     visible(page.get_by_role("button", name="index.ts").last).click()
+    # CodeMirror's editable surface has no label or testid; its own class tells it apart from the
+    # other textboxes on the page (the composer, the sidebar search).
     code = visible(page.get_by_role("textbox").and_(page.locator(".cm-content")))
     code.wait_for()
     visible(page.get_by_text("export function main")).wait_for()

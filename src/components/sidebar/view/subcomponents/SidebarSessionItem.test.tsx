@@ -32,7 +32,7 @@ const session = {
   __provider: 'claude',
 } as unknown as SessionWithProvider;
 
-function render(isProcessing: boolean): string {
+function render(isProcessing: boolean, editingSession: string | null = null): string {
   return renderToStaticMarkup(
     React.createElement(SidebarSessionItem, {
       project,
@@ -41,7 +41,7 @@ function render(isProcessing: boolean): string {
       isProcessing,
       needsAttention: false,
       currentTime: new Date('2026-07-17T00:00:00Z'),
-      editingSession: null,
+      editingSession,
       editingSessionName: '',
       onEditingSessionNameChange: noop,
       onStartEditingSession: noop,
@@ -77,4 +77,9 @@ test('hides the archive/delete affordance while a run is processing', () => {
 
 test('keeps the context menu closed by default (opens only on right-click)', () => {
   assert.ok(!render(false).includes('role="menu"'), 'no menu should be rendered until right-click');
+});
+
+test('labels the inline rename field (its only accessible name; vdebug rename-session targets it)', () => {
+  const html = render(false, 's1');
+  assert.match(html, /<input[^>]*aria-label="tooltips\.editSessionName"/);
 });
