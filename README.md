@@ -117,7 +117,12 @@ Pass `--viewports iphone-13-pro,2k` (or `all,kiosk=2560x1600`) to narrow or exte
 matrix, and `--reset-cmd CMD` to restore app state before every recording. The judge is
 also sent `vdebug/judge_notes.md`, the app's intentional designs (the jump-to-bottom
 button, horizontally scrolling code blocks, the 44px `::after` touch overlays, …) — add
-to it when the judge flags something that is by design. Read `vdebug-runs/latest/report.md` (gitignored). `--judge` needs
+to it when the judge flags something that is by design. On `iphone-13-pro` and
+`ipad-pro-11`, focusing a text field opens a simulated on-screen keyboard (the
+visual viewport shrinks, as on iOS), and the `keyboard-covers-*` / `ios-input-zoom`
+checks report what it hides. The text-entry flows (`composer-keyboard`,
+`new-chat-turn`, `search-chats`, `home-sidebar`, `bug-report`) mark while it is up;
+a flow can opt out with `KEYBOARD = False`. Read `vdebug-runs/latest/report.md` (gitignored). `--judge` needs
 `OPENROUTER_API_KEY` and `ffmpeg`; Python needs `playwright`. Flows live in
 `vdebug/flows/` (role/label/testid locators only). **After changing front-end
 code, re-record the flows that touch those screens before opening a PR.** Full

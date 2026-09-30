@@ -3,8 +3,10 @@
 from _helpers import boot, open_sidebar, visible
 
 NAME = "new-chat-turn"
-DESCRIPTION = ("'New conversation' -> folder picker -> choose a project -> empty composer; "
-               "type a prompt, send it, and watch the (mock) assistant reply stream in")
+DESCRIPTION = ("'New conversation' -> folder picker -> type in 'Search folders…' to filter it "
+               "(on iPhone/iPad the on-screen keyboard opens; the filtered list must stay above it) "
+               "-> choose the project -> empty composer; type a prompt (keyboard up), send it "
+               "(composer keeps focus, keyboard stays up), and watch the (mock) assistant reply stream in")
 SOURCE = "standard"
 START = None
 
@@ -17,7 +19,13 @@ def run(page, vd):
     visible(page.get_by_role("button", name="New conversation")).click()
     page.locator("[cmdk-item]").first.wait_for()
     vd.mark("folder picker")
-    page.locator("[cmdk-item]").first.click()
+    # Filter by typing (#346: the picker lives in the fixed sidebar overlay, which must follow the
+    # keyboard too). No autofocus by design (#366), so tap the search box first.
+    search = visible(page.get_by_placeholder("Search folders…"))
+    search.click()
+    search.press_sequentially("primary", delay=20)
+    vd.mark("folder search typed")
+    visible(page.locator("[cmdk-item]")).click()
     composer = visible(page.locator(COMPOSER))
     composer.wait_for()
     vd.mark("empty composer")

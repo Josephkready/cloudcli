@@ -8,9 +8,11 @@ here; see the port report for what covers that instead. The `live` marker itself
 registered (conftest.py) for any future test that wants to drive a real Chromium.
 """
 
+import http.server
 import json
 import pathlib
 import sys
+import threading
 
 import pytest
 
@@ -185,10 +187,163 @@ def test_tap_target_reads_the_after_overlay_on_touch_viewports(vp_name):
     # bare 20x16 and the height-only overlay (20x44 — still under 24 wide) are real gaps;
     # the both-axes overlay (44x44) and a 32px-wide height-only overlay (32x44) are not.
     assert flagged == {"bare", "h-only"}, hits
-    assert hits["#h-only"] == "hit area 20x44px (painted 20x16px) < 24x24"
+    assert hits["#h-only"] == "20x44px effective hit area (20x16px painted + ::before/::after) < 24x24"
     assert hits["#bare"] == "20x16px < 24x24"
 
 
 @pytest.mark.live  # real Chromium
 def test_tap_target_check_skips_mouse_desktop():
     assert _tap_hits("half-2k") == {}
+
+
+# ------------------------------------------------------------------ flow selection / loading (synced)
+def test_flow_selection_accepts_comma_lists(tmp_path):
+    for n in ("alpha", "beta", "gamma"):
+        _write_flow(tmp_path, n)
+    flows = vdebug.load_flows(tmp_path)
+    assert [f.name for f in vdebug.select_flows(flows, ["alpha,gam*"])] == ["alpha", "gamma"]
+    assert [f.name for f in vdebug.select_flows(flows, ["beta", "gamma"])] == ["beta", "gamma"]
+
+
+def test_second_load_moves_its_flows_dir_to_the_front(tmp_path):
+    """If dir B was already on sys.path BEHIND dir A, loading B must still put B first."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    for d in (a, b):
+        d.mkdir()
+        (d / "_helpers.py").write_text(f'WHO = "{d.name}"\n')
+        (d / "f.py").write_text(f'NAME = "f-{d.name}"\nfrom _helpers import WHO\ndef run(page, vd): pass\n')
+    vdebug.load_flows(b)
+    vdebug.load_flows(a)
+    [flow] = vdebug.load_flows(b)
+    assert flow.run.__globals__["WHO"] == "b"
+    assert sys.path[0] == str(b.resolve())
+    vdebug.load_flows(HERE / "flows")  # leave the real flows dir in front for later tests
+
+
+# ------------------------------------------------------------------ on-screen keyboard (synced)
+# The template's keyboard tests, against testdata/keyboard.html served by a tiny static server
+# (cloudcli has no Python flowstore app fixture — its capture is the Node module).
+@pytest.fixture(scope="module")
+def app():
+    keyboard_html = (HERE / "testdata" / "keyboard.html").read_bytes()
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(keyboard_html)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}", None
+    srv.shutdown()
+
+
+def _run_kb(app, tmp_path, name, body, viewports="iphone-13-pro", extra=""):
+    pytest.importorskip("playwright.sync_api")
+    base, _ = app
+    d = tmp_path / name
+    d.mkdir()
+    (d / f"{name.replace('-', '_')}.py").write_text(f'NAME = "{name}"\nSTART = "/keyboard"\n{extra}\n{body}')
+    [flow] = vdebug.load_flows(d)
+    run_dir = vdebug.record([flow], vdebug.parse_viewports(viewports), base, tmp_path / f"runs-{name}",
+                            log=lambda m: None)
+    return {e["viewport"]: e for e in json.loads((run_dir / "report.json").read_text())["runs"]}
+
+
+def _checks(entry, label=None):
+    return {(c["check"], c["selector"]) for c in entry["checks"] if label is None or label in c["frames"]}
+
+
+def test_touch_presets_have_keyboards_and_desktops_do_not():
+    vps = {v.name: v for v in vdebug.parse_viewports("all,phone=320x568,wide=1920x1080")}
+    assert vps["iphone-13-pro"].keyboard == 336 and vps["ipad-pro-11"].keyboard == 360
+    assert vps["phone"].keyboard == round(568 * 0.4) and vps["2k"].keyboard == 0 and vps["wide"].keyboard == 0
+
+
+def test_cloudcli_text_entry_flows_keep_the_keyboard_on():
+    """The composer/search/bug-report flows exist to exercise the keyboard; none may opt out."""
+    flows = {f.name: f for f in vdebug.load_flows(HERE / "flows")}
+    for name in ("new-chat-turn", "search-chats", "bug-report", "composer-keyboard"):
+        assert flows[name].keyboard is True, name
+
+
+@pytest.mark.live  # real Chromium
+def test_keyboard_hides_a_fixed_bottom_bar_that_ignores_it(app, tmp_path):
+    body = ("def run(page, vd):\n"
+            "    page.evaluate(\"window.__vvResizes = 0; visualViewport.addEventListener('resize', () => window.__vvResizes++)\")\n"
+            "    page.locator('#msg').click()\n"
+            "    vd.mark('typing')\n"
+            "    assert page.evaluate('window.visualViewport.height') == 844 - 336\n"
+            "    assert page.evaluate('window.__vvResizes') >= 1\n"
+            "    assert page.locator('#__vd_keyboard').count() == 1\n"
+            "    page.locator('#send').click(force=True)\n"
+            "    vd.mark('sent')\n"
+            "    assert page.locator('#__vd_keyboard').count() == 0\n"
+            "    assert page.evaluate('window.visualViewport.height') == 844\n")
+    e = _run_kb(app, tmp_path, "kb-bar", body)["iphone-13-pro"]
+    assert e["error"] is None, e["error"]
+    typing = _checks(e, "typing")
+    assert ("keyboard-covers-focus", "#msg") in typing and ("keyboard-covers-control", "#send") in typing
+    assert not {c for c in _checks(e, "sent") if c[0].startswith("keyboard-")} - typing
+
+
+@pytest.mark.live  # real Chromium
+def test_keyboard_aware_bar_passes_and_far_field_is_scrolled_into_view(app, tmp_path):
+    body = ("def run(page, vd):\n"
+            "    vd.goto('/keyboard?aware=1')\n"
+            "    page.locator('#msg').click()\n"
+            "    vd.mark('aware typing')\n"
+            "    page.keyboard.press('Escape')\n"
+            "    page.locator('#late').focus()\n"
+            "    vd.mark('late field')\n")
+    e = _run_kb(app, tmp_path, "kb-aware", body)["iphone-13-pro"]
+    assert e["error"] is None, e["error"]
+    assert not any(c[0].startswith("keyboard-") for c in _checks(e, "aware typing"))
+    assert ("keyboard-covers-focus", "#late") not in _checks(e, "late field")
+
+
+@pytest.mark.live  # real Chromium
+def test_ios_input_zoom_flagged_on_touch_only_and_no_keyboard_on_desktop(app, tmp_path):
+    body = "def run(page, vd):\n    page.locator('#name').click()\n    vd.mark('focused')\n"
+    by = _run_kb(app, tmp_path, "kb-zoom", body, viewports="iphone-13-pro,2k")
+    phone, desk = by["iphone-13-pro"], by["2k"]
+    assert ("ios-input-zoom", "#note") in _checks(phone) and ("ios-input-zoom", "#name") not in _checks(phone)
+    assert not any(c[0] == "ios-input-zoom" for c in _checks(desk))
+    assert not any(c[0].startswith("keyboard-") for c in _checks(desk))
+
+
+@pytest.mark.live  # real Chromium
+def test_flow_can_opt_out_of_the_keyboard(app, tmp_path):
+    body = ("def run(page, vd):\n"
+            "    page.locator('#msg').click()\n"
+            "    assert page.locator('#__vd_keyboard').count() == 0\n"
+            "    vd.mark('typing')\n")
+    e = _run_kb(app, tmp_path, "kb-off", body, extra="KEYBOARD = False")["iphone-13-pro"]
+    assert e["error"] is None, e["error"]
+    assert e["keyboard"] is False
+    assert not any(c[0].startswith("keyboard-") for c in _checks(e))
+
+
+@pytest.mark.live  # real Chromium
+def test_checkbox_and_radio_do_not_open_the_keyboard(app, tmp_path):
+    body = ("def run(page, vd):\n"
+            "    for sel in ('#agree', '#plan-a'):\n"
+            "        page.locator(sel).click()\n"
+            "        assert page.locator(sel).evaluate('el => el === document.activeElement')\n"
+            "        assert page.locator('#__vd_keyboard').count() == 0, sel\n"
+            "        assert page.evaluate('window.visualViewport.height') == 844, sel\n"
+            "    vd.mark('ticked')\n")
+    e = _run_kb(app, tmp_path, "kb-box", body)["iphone-13-pro"]
+    assert e["error"] is None, e["error"]
+    assert e["keyboard"] is True
+    assert not any(c[0].startswith("keyboard-") for c in _checks(e))
+
+
+def test_judge_prompt_explains_the_simulated_keyboard():
+    import judge
+    assert "SIMULATED on-screen" in judge.SYSTEM_PROMPT and "keyboard" in judge.SYSTEM_PROMPT
