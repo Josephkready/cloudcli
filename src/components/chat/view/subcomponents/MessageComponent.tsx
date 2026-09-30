@@ -32,7 +32,6 @@ type MessageComponentProps = {
   message: ChatMessage;
   prevMessage: ChatMessage | null;
   createDiff: (oldStr: string, newStr: string) => DiffLine[];
-  onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
   onGrantToolPermission?: (suggestion: ClaudePermissionSuggestion) => PermissionGrantResult | null | undefined;
   showRawParameters?: boolean;
@@ -49,7 +48,7 @@ type InteractiveOption = {
 
 const COPY_HIDDEN_TOOL_NAMES = new Set(['Bash', 'Edit', 'Write', 'ApplyPatch']);
 
-const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
+const MessageComponent = memo(({ message, prevMessage, createDiff, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
   const isGrouped = prevMessage && prevMessage.type === message.type &&
     ((prevMessage.type === 'assistant') ||
@@ -211,7 +210,6 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                     toolResult={message.toolResult}
                     toolId={message.toolId}
                     mode="input"
-                    onFileOpen={onFileOpen}
                     createDiff={createDiff}
                     selectedProject={selectedProject}
                     showRawParameters={showRawParameters}
@@ -235,7 +233,6 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                         toolResult={message.toolResult}
                         toolId={message.toolId}
                         mode="result"
-                        onFileOpen={onFileOpen}
                         createDiff={createDiff}
                         selectedProject={selectedProject}
                       />

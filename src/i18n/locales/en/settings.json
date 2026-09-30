@@ -36,13 +36,7 @@
   },
   "appearance": {
     "title": "Appearance",
-    "theme": "Theme",
-    "codeEditor": "Code Editor",
-    "editorTheme": "Editor Theme",
-    "wordWrap": "Word Wrap",
-    "showMinimap": "Show Minimap",
-    "lineNumbers": "Line Numbers",
-    "fontSize": "Font Size"
+    "theme": "Theme"
   },
   "actions": {
     "saveChanges": "Save Changes",
@@ -162,29 +156,6 @@
     "hideCliOriginChats": {
       "label": "Hide Terminal-Started Chats",
       "description": "Leave out conversations started from a local CLI, which CloudCLI can't drive"
-    },
-    "codeEditor": {
-      "title": "Code Editor",
-      "theme": {
-        "label": "Editor Theme",
-        "description": "Default theme for the code editor"
-      },
-      "wordWrap": {
-        "label": "Word Wrap",
-        "description": "Enable word wrapping by default in the editor"
-      },
-      "showMinimap": {
-        "label": "Show Minimap",
-        "description": "Display a minimap for easier navigation in diff view"
-      },
-      "lineNumbers": {
-        "label": "Show Line Numbers",
-        "description": "Display line numbers in the editor"
-      },
-      "fontSize": {
-        "label": "Font Size",
-        "description": "Editor font size in pixels"
-      }
     }
   },
   "saveStatus": {

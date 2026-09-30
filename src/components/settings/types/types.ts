@@ -38,13 +38,6 @@ export type NotificationPreferencesState = {
   };
 };
 
-export type CodeEditorSettingsState = {
-  wordWrap: boolean;
-  showMinimap: boolean;
-  lineNumbers: boolean;
-  fontSize: string;
-};
-
 export type SettingsStoragePayload = {
   claude: ClaudePermissionsState & {
     projectSortOrder: ProjectSortOrder;

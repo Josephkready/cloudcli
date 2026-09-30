@@ -9,7 +9,6 @@ import {
 } from 'lucide-react';
 
 import type {
-  CodeEditorSettingsState,
   ProjectSortOrder,
   SettingsMainTab,
 } from '../types/types';
@@ -38,9 +37,3 @@ export const DEFAULT_PROJECT_SORT_ORDER: ProjectSortOrder = 'count';
 // `src/components/sidebar/utils/utils.ts` — the lists that read the preference
 // and this Appearance toggle must agree on the default (#216).
 export const DEFAULT_HIDE_CLI_ORIGIN_CHATS = true;
-export const DEFAULT_CODE_EDITOR_SETTINGS: CodeEditorSettingsState = {
-  wordWrap: false,
-  showMinimap: true,
-  lineNumbers: true,
-  fontSize: '14',
-};

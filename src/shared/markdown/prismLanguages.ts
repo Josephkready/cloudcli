@@ -10,9 +10,8 @@
  *   bundles only markup/css/clike/javascript, and leaves grammar registration to
  *   the caller.
  *
- *   Registration lives here, in a single module both call sites import, so the
- *   chat renderer and the code-editor preview can never drift onto different
- *   language sets.
+ *   Registration lives here, in its own module, so every highlighted code block
+ *   shares one language set.
  *
  * ADDING A LANGUAGE
  *   Add an import + an entry in `LANGUAGE_GRAMMARS`. Anything not registered
@@ -49,10 +48,9 @@ import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark';
 import oneLight from 'react-syntax-highlighter/dist/esm/styles/prism/one-light';
 
 /**
- * The registered grammar set. Seeded from the languages the CodeMirror side
- * already supports (`vite.config.js`: css, html, javascript, json, markdown,
- * python) so the two highlighters agree, plus the languages this project's
- * assistant output actually contains.
+ * The registered grammar set: css, html, javascript, json, markdown and python
+ * (originally matched to the since-removed code editor), plus the languages
+ * this project's assistant output actually contains.
  *
  * `markup` is Prism's name for the HTML/XML/SVG grammar; refractor registers
  * `html` (and `xml`, `svg`, …) as aliases of it automatically.

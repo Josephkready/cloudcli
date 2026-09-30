@@ -252,7 +252,6 @@ const baseProps: ChatInterfaceProps = {
   selectedSession: { id: 'sess-1' } as unknown as ChatInterfaceProps['selectedSession'],
   ws: null,
   sendMessage: vi.fn(() => true),
-  onFileOpen: vi.fn(),
   onInputFocusChange: vi.fn(),
   onSessionProcessing: vi.fn(),
   onSessionIdle: vi.fn(),

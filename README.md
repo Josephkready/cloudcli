@@ -121,8 +121,8 @@ accepted `zoom-disabled` hit in place of per-input `ios-input-zoom` hits (see
 `judge_notes.md`). Every text field the fixture can reach has a flow that types into it and
 marks while the keyboard is up: sidebar search (`home-sidebar`, `search-chats`), the composer
 and its `/` and `@` menus (`composer-keyboard`, `new-chat-turn`, `composer-commands`), the
-folder and model pickers (`new-chat-turn`, `model-picker`), inline renames (`rename-project`, `rename-session`), the code
-editor (`code-editor`), the bug reporter (`bug-report`) and Settings (`settings-api-tokens`,
+folder and model pickers (`new-chat-turn`, `model-picker`), inline renames (`rename-project`,
+`rename-session`), the bug reporter (`bug-report`) and Settings (`settings-api-tokens`,
 `settings-permissions`, `settings-voice`). Not covered, because the fixture never shows them:
 login/setup (auth is off), onboarding's git fields (onboarding is pre-completed), the
 provider-login terminal, and AskUserQuestion's free-text answer. A flow can opt out of the
@@ -189,4 +189,4 @@ If you modify this software and run it as a network service, you must make your 
 
 ## Acknowledgments
 
-Forked from **[siteboon/claudecodeui](https://github.com/siteboon/claudecodeui)** (AGPL-3.0). Built with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://developers.openai.com/codex), [React](https://react.dev/), [Vite](https://vitejs.dev/), [Tailwind CSS](https://tailwindcss.com/), and [CodeMirror](https://codemirror.net/).
+Forked from **[siteboon/claudecodeui](https://github.com/siteboon/claudecodeui)** (AGPL-3.0). Built with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://developers.openai.com/codex), [React](https://react.dev/), [Vite](https://vitejs.dev/), and [Tailwind CSS](https://tailwindcss.com/).

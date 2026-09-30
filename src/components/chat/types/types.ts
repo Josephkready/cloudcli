@@ -122,7 +122,6 @@ export interface ChatInterfaceProps {
   selectedSession: ProjectSession | null;
   ws: WebSocket | null;
   sendMessage: (message: unknown) => boolean;
-  onFileOpen?: (filePath: string, diffInfo?: any) => void;
   onInputFocusChange?: (focused: boolean) => void;
   onSessionProcessing?: MarkSessionProcessing;
   onSessionIdle?: MarkSessionIdle;

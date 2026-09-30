@@ -11,7 +11,7 @@ export interface ToolDisplayConfig {
     label?: string;
     getValue?: (input: any) => string;
     getSecondary?: (input: any) => string | undefined;
-    action?: 'copy' | 'open-file' | 'jump-to-results' | 'none';
+    action?: 'copy' | 'file-name' | 'jump-to-results' | 'none';
     style?: string;
     wrapText?: boolean;
     colorScheme?: {
@@ -78,7 +78,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
       type: 'one-line',
       label: 'Read',
       getValue: (input) => input.file_path || '',
-      action: 'open-file',
+      action: 'file-name',
       colorScheme: {
         primary: 'text-gray-700 dark:text-gray-300',
         background: '',

@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Project, ProjectSession } from '../../../types/app';
 import type { MainContentProps } from '../types/types';
@@ -11,10 +11,6 @@ vi.mock('../../chat/view/ChatInterface', () => ({
 
 vi.mock('./subcomponents/MainContentHeader', () => ({
   default: () => <div data-testid="main-content-header" />,
-}));
-
-vi.mock('../../code-editor/view/EditorSidebar', () => ({
-  default: () => <div data-testid="editor-sidebar" />,
 }));
 
 const { default: MainContent } = await import('./MainContent');

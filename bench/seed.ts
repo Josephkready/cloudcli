@@ -325,8 +325,8 @@ export function seedFixture(options: {
       path.join(projectPath, 'package.json'),
       `${JSON.stringify({ name: plan.name, version: '1.0.0', private: true }, null, 2)}\n`,
     );
-    // The file every transcript's Read tool call names, so opening it from a tool card
-    // loads real content in the code editor instead of a 404 stub.
+    // The file every transcript's Read tool call names, so the workspace on disk
+    // matches its transcripts (and @-mentions find it).
     writeFileSync(
       path.join(projectPath, 'src', 'index.ts'),
       `export function main(): string {\n  return '${plan.name}';\n}\n`,

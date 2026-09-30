@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { CollapsibleSection } from './CollapsibleSection';
@@ -43,24 +43,10 @@ describe('CollapsibleSection', () => {
     expect(screen.getByText('Run')).toBeTruthy();
   });
 
-  it('uses the clickable-title layout when onTitleClick is provided, and only the chevron toggles collapse', () => {
-    const onTitleClick = vi.fn();
-    render(
-      <CollapsibleSection title="file.ts" toolName="Edit" onTitleClick={onTitleClick}>
-        <div>diff body</div>
-      </CollapsibleSection>,
-    );
-
-    const titleButton = screen.getByRole('button', { name: 'file.ts' });
-    fireEvent.click(titleButton);
-    expect(onTitleClick).toHaveBeenCalledTimes(1);
-  });
-
-  it('renders a badge and action alongside a clickable title', () => {
+  it('renders a badge and action alongside the title', () => {
     render(
       <CollapsibleSection
         title="file.ts"
-        onTitleClick={() => {}}
         badge={<span>Edit badge</span>}
         action={<button>Undo</button>}
       >

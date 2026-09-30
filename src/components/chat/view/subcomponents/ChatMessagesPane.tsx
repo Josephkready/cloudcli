@@ -65,7 +65,6 @@ interface ChatMessagesPaneProps {
   visibleMessageCount: number;
   visibleMessages: ChatMessage[];
   createDiff: any;
-  onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
   onGrantToolPermission: (suggestion: { entry: string; toolName: string }) => { success: boolean };
   showRawParameters?: boolean;
@@ -101,7 +100,6 @@ function ChatMessagesPane({
   visibleMessages,
   allMessagesLoaded,
   createDiff,
-  onFileOpen,
   onShowSettings,
   onGrantToolPermission,
   showRawParameters,
@@ -193,7 +191,6 @@ function ChatMessagesPane({
             prevMessage={prevMessage}
             createDiff={createDiff}
             getMessageKey={getMessageKey}
-            onFileOpen={onFileOpen}
             onShowSettings={onShowSettings}
             onGrantToolPermission={onGrantToolPermission}
             showRawParameters={showRawParameters}
@@ -210,7 +207,6 @@ function ChatMessagesPane({
           message={item}
           prevMessage={prevMessage}
           createDiff={createDiff}
-          onFileOpen={onFileOpen}
           onShowSettings={onShowSettings}
           onGrantToolPermission={onGrantToolPermission}
           showRawParameters={showRawParameters}
@@ -225,7 +221,6 @@ function ChatMessagesPane({
       getRowKey,
       createDiff,
       getMessageKey,
-      onFileOpen,
       onShowSettings,
       onGrantToolPermission,
       showRawParameters,

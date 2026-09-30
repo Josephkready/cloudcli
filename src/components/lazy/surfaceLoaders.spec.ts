@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   loadBugReportDialog,
-  loadEditorSidebar,
   loadMarkdownRenderer,
   loadStandaloneShell,
   WARMABLE_SURFACES,
@@ -16,8 +15,8 @@ import {
  * component test. This pins the array's contents directly.
  */
 describe('WARMABLE_SURFACES', () => {
-  it('warms exactly the shell and the editor', () => {
-    expect(WARMABLE_SURFACES).toEqual([loadStandaloneShell, loadEditorSidebar]);
+  it('warms exactly the shell', () => {
+    expect(WARMABLE_SURFACES).toEqual([loadStandaloneShell]);
   });
 
   it('does not idle-warm markdown — Markdown.tsx loads it eagerly at module evaluation', () => {
@@ -33,7 +32,7 @@ describe('WARMABLE_SURFACES', () => {
       const mod = (await load()) as { default?: unknown };
       expect(mod.default).toBeDefined();
     }
-    // Evaluates the real xterm + CodeMirror module graphs, which can take well
+    // Evaluates the real xterm module graph, which can take well
     // over the default 5s when the full suite runs on a loaded machine.
   }, 30_000);
 });

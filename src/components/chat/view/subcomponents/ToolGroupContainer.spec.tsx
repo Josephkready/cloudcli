@@ -184,8 +184,7 @@ describe('ToolGroupContainer', () => {
     });
   });
 
-  it('forwards onFileOpen/onShowSettings/onGrantToolPermission/showRawParameters/showThinking/selectedProject to child messages', () => {
-    const onFileOpen = vi.fn();
+  it('renders every child message once expanded', () => {
     const group = makeGroup('Read', [
       toolMessage('Read', { toolInput: { file_path: '/src/a.ts' }, toolId: 'fwd-1' }),
       toolMessage('Read', { toolInput: { file_path: '/src/b.ts' }, toolId: 'fwd-2' }),
@@ -194,15 +193,14 @@ describe('ToolGroupContainer', () => {
       <ToolGroupContainer
         group={group}
         {...baseProps}
-        onFileOpen={onFileOpen}
         showRawParameters
         showThinking
         selectedProject={null}
       />,
     );
     fireEvent.click(screen.getByRole('button'));
-    fireEvent.click(screen.getByText('a.ts'));
-    expect(onFileOpen).toHaveBeenCalledWith('/src/a.ts');
+    expect(screen.getByText('a.ts')).toBeInTheDocument();
+    expect(screen.getByText('b.ts')).toBeInTheDocument();
   });
 
   it('sets the message-timestamp data attribute from the group timestamp', () => {

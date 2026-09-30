@@ -67,22 +67,19 @@ describe('OneLineDisplay', () => {
     });
   });
 
-  describe('open-file style', () => {
-    it('shows the basename of the value and calls onAction when clicked', () => {
-      const onAction = vi.fn();
+  describe('file-name style', () => {
+    it('shows the basename of the value as text, with the full path on hover', () => {
       render(
         <OneLineDisplay
           toolName="Read"
           label="Read"
           value="/a/b/c/file.ts"
-          action="open-file"
-          onAction={onAction}
+          action="file-name"
           status="completed"
         />,
       );
-      const button = screen.getByRole('button', { name: 'file.ts' });
-      fireEvent.click(button);
-      expect(onAction).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('file.ts')).toHaveAttribute('title', '/a/b/c/file.ts');
+      expect(screen.queryByRole('button', { name: 'file.ts' })).not.toBeInTheDocument();
     });
   });
 

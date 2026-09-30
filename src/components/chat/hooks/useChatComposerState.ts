@@ -76,7 +76,6 @@ interface UseChatComposerStateArgs {
    */
   onSessionEstablished?: (sessionId: string, context: SessionEstablishedContext) => void;
   onInputFocusChange?: (focused: boolean) => void;
-  onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
   scrollToBottom: () => void;
   addMessage: (msg: ChatMessage) => void;
@@ -114,7 +113,6 @@ export function useChatComposerState({
   onSessionProcessing,
   onSessionEstablished,
   onInputFocusChange,
-  onFileOpen,
   onShowSettings,
   scrollToBottom,
   addMessage,
@@ -183,7 +181,6 @@ export function useChatComposerState({
     inputValueRef,
     handleSubmitRef,
     addMessage,
-    onFileOpen,
     onShowSettings,
   });
 

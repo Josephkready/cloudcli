@@ -6,7 +6,7 @@ import SettingsRow from './SettingsRow';
 import SettingsSection from './SettingsSection';
 import SettingsToggle from './SettingsToggle';
 import PremiumFeatureCard from './PremiumFeatureCard';
-import { SETTINGS_MAIN_TABS, DEFAULT_PROJECT_SORT_ORDER, DEFAULT_HIDE_CLI_ORIGIN_CHATS, DEFAULT_CODE_EDITOR_SETTINGS } from '../constants/constants';
+import { SETTINGS_MAIN_TABS, DEFAULT_PROJECT_SORT_ORDER, DEFAULT_HIDE_CLI_ORIGIN_CHATS } from '../constants/constants';
 
 describe('SettingsCard', () => {
   it('renders children and applies divided/className', () => {
@@ -115,11 +115,5 @@ describe('settings constants', () => {
   it('exposes the shared defaults used across settings and sidebar', () => {
     expect(DEFAULT_PROJECT_SORT_ORDER).toBe('count');
     expect(DEFAULT_HIDE_CLI_ORIGIN_CHATS).toBe(true);
-    expect(DEFAULT_CODE_EDITOR_SETTINGS).toEqual({
-      wordWrap: false,
-      showMinimap: true,
-      lineNumbers: true,
-      fontSize: '14',
-    });
   });
 });

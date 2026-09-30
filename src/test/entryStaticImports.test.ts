@@ -26,9 +26,6 @@ const ENTRY = join(ROOT, 'src/main.jsx');
 /** Libraries that must only ever be reachable through a dynamic import. */
 const DEMAND_LOADED_PACKAGES = [
   { prefix: '@xterm/', reason: 'the terminal (~400 KB) belongs to the standalone shell surface' },
-  { prefix: '@codemirror/', reason: 'the editor (~690 KB) belongs to the code editor' },
-  { prefix: '@uiw/react-codemirror', reason: 'the editor (~690 KB) belongs to the code editor' },
-  { prefix: '@replit/codemirror-minimap', reason: 'the editor minimap belongs to the code editor' },
   // #287. Both were reachable from the chat composer, so they loaded on boot
   // for every session — including ones with no code block and no attachment.
   {
@@ -84,8 +81,6 @@ describe('entry chunk static import graph (#267)', () => {
     const mustBeLazy = [
       'src/components/shell/view/Shell.tsx',
       'src/components/standalone-shell/view/StandaloneShell.tsx',
-      'src/components/code-editor/view/CodeEditor.tsx',
-      'src/components/code-editor/view/EditorSidebar.tsx',
       'src/components/settings/view/Settings.tsx',
       'src/components/onboarding/view/Onboarding.tsx',
       // #287: the highlighted code block. Its unhighlighted stand-in
@@ -127,9 +122,9 @@ describe('built index.html (#267)', () => {
 
     assert.ok(preloaded.length > 0, 'expected at least the React vendor chunk to be preloaded');
     assert.deepEqual(
-      preloaded.filter((href) => /vendor-(codemirror|xterm)/.test(href)),
+      preloaded.filter((href) => /vendor-xterm/.test(href)),
       [],
-      'the editor / terminal bundles are being fetched on every cold load again',
+      'the terminal bundle is being fetched on every cold load again',
     );
   });
 });

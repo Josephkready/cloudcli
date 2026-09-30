@@ -38,7 +38,6 @@ function ChatInterface({
   selectedSession,
   ws,
   sendMessage,
-  onFileOpen,
   onInputFocusChange,
   onSessionProcessing,
   onSessionIdle,
@@ -207,7 +206,6 @@ function ChatInterface({
     onSessionProcessing,
     onSessionEstablished: handleSessionEstablished,
     onInputFocusChange,
-    onFileOpen,
     onShowSettings,
     scrollToBottom,
     addMessage,
@@ -387,7 +385,6 @@ function ChatInterface({
           visibleMessages={visibleMessages}
           allMessagesLoaded={allMessagesLoaded}
           createDiff={createDiff}
-          onFileOpen={onFileOpen}
           onShowSettings={onShowSettings}
           onGrantToolPermission={handleGrantToolPermission}
           showRawParameters={showRawParameters}
