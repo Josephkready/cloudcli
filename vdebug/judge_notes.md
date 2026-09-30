@@ -47,3 +47,10 @@
 - Inputs use 14px text on touch while `index.html`'s viewport meta has `maximum-scale=1.0`
   (commit fb1117a9, "Fixed mobile zoom on input"), so iOS does not zoom when a field is focused.
   Don't report a page zoom on focus.
+- **Pinch-zoom stays disabled, by decision (Joseph, 2026-09-30).** `index.html`'s viewport meta
+  sets `maximum-scale=1.0, user-scalable=no`; he does not pinch-zoom in cloudcli, so the 14px
+  touch inputs are not upgraded to 16px and zoom is not re-enabled. The deterministic
+  `zoom-disabled` DOM check (one page-level hit per touch mark since video-debugger #560) and
+  any `ios-input-zoom` question are therefore **accepted, intentional** — not bugs. The template
+  has no per-repo way to silence one DOM check, so that hit keeps appearing in every
+  iPhone/iPad run; ignore it. Don't report the disabled zoom or 14px inputs either.

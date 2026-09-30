@@ -119,8 +119,10 @@ also sent `vdebug/judge_notes.md`, the app's intentional designs (the jump-to-bo
 button, horizontally scrolling code blocks, the 44px `::after` touch overlays, …) — add
 to it when the judge flags something that is by design. On `iphone-13-pro` and
 `ipad-pro-11`, focusing a text field opens a simulated on-screen keyboard (the
-visual viewport shrinks, as on iOS), and the `keyboard-covers-*` / `ios-input-zoom`
-checks report what it hides. The text-entry flows (`composer-keyboard`,
+visual viewport shrinks, as on iOS), and the `keyboard-covers-*` checks report what it
+hides. Because `index.html` disables pinch-zoom on purpose, every touch mark carries one
+accepted `zoom-disabled` hit in place of per-input `ios-input-zoom` hits (see
+`judge_notes.md`). The text-entry flows (`composer-keyboard`,
 `new-chat-turn`, `search-chats`, `home-sidebar`, `bug-report`) mark while it is up;
 a flow can opt out with `KEYBOARD = False`. Read `vdebug-runs/latest/report.md` (gitignored). `--judge` needs
 `OPENROUTER_API_KEY` and `ffmpeg`; Python needs `playwright`. Flows live in

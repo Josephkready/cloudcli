@@ -2,10 +2,10 @@
 report rendering, CLI wiring). No browser, no capture backend.
 
 cloudcli's capture path is the Node/TS module under server/modules/vdebug-capture/ (with its
-own vitest suite), not the Python flowstore.py template — so the template's `@pytest.mark.live`
-tests that drive a real browser against a fixture app + flowstore round-trip are NOT ported
-here; see the port report for what covers that instead. The `live` marker itself is still
-registered (conftest.py) for any future test that wants to drive a real Chromium.
+own vitest suite), not the Python flowstore.py template — so the template's real-browser
+tests against the broken.html fixture app + flowstore round-trip are NOT ported here; see the
+port report for what covers that instead. The tap-target, on-screen keyboard and layout-check
+probes below DO drive a real Chromium; they are marked `browser` (registered in conftest.py).
 """
 
 import http.server
@@ -17,6 +17,7 @@ import threading
 import pytest
 
 HERE = pathlib.Path(__file__).resolve().parent
+CAPTURE_DIR = HERE / "capture"               # flowstore_test.py lives here
 sys.path.insert(0, str(HERE))
 import vdebug  # noqa: E402
 
@@ -179,7 +180,7 @@ def _tap_hits(vp_name: str) -> dict:
     return {h["selector"]: h["detail"] for h in hits if h["check"] == "small-tap-target"}
 
 
-@pytest.mark.live  # real Chromium
+@pytest.mark.browser  # real Chromium
 @pytest.mark.parametrize("vp_name", ["iphone-13-pro", "ipad-pro-11"])
 def test_tap_target_reads_the_after_overlay_on_touch_viewports(vp_name):
     hits = _tap_hits(vp_name)
@@ -191,7 +192,7 @@ def test_tap_target_reads_the_after_overlay_on_touch_viewports(vp_name):
     assert hits["#bare"] == "20x16px < 24x24"
 
 
-@pytest.mark.live  # real Chromium
+@pytest.mark.browser  # real Chromium
 def test_tap_target_check_skips_mouse_desktop():
     assert _tap_hits("half-2k") == {}
 
@@ -272,7 +273,7 @@ def test_cloudcli_text_entry_flows_keep_the_keyboard_on():
         assert flows[name].keyboard is True, name
 
 
-@pytest.mark.live  # real Chromium
+@pytest.mark.browser  # real Chromium
 def test_keyboard_hides_a_fixed_bottom_bar_that_ignores_it(app, tmp_path):
     body = ("def run(page, vd):\n"
             "    page.evaluate(\"window.__vvResizes = 0; visualViewport.addEventListener('resize', () => window.__vvResizes++)\")\n"
@@ -289,16 +290,16 @@ def test_keyboard_hides_a_fixed_bottom_bar_that_ignores_it(app, tmp_path):
     assert e["error"] is None, e["error"]
     typing = _checks(e, "typing")
     assert ("keyboard-covers-focus", "#msg") in typing and ("keyboard-covers-control", "#send") in typing
+    assert ("keyboard-covers-control", "#draft") in typing          # position:sticky pins it too
     assert not {c for c in _checks(e, "sent") if c[0].startswith("keyboard-")} - typing
 
 
-@pytest.mark.live  # real Chromium
+@pytest.mark.browser  # real Chromium
 def test_keyboard_aware_bar_passes_and_far_field_is_scrolled_into_view(app, tmp_path):
     body = ("def run(page, vd):\n"
             "    vd.goto('/keyboard?aware=1')\n"
             "    page.locator('#msg').click()\n"
             "    vd.mark('aware typing')\n"
-            "    page.keyboard.press('Escape')\n"
             "    page.locator('#late').focus()\n"
             "    vd.mark('late field')\n")
     e = _run_kb(app, tmp_path, "kb-aware", body)["iphone-13-pro"]
@@ -307,7 +308,7 @@ def test_keyboard_aware_bar_passes_and_far_field_is_scrolled_into_view(app, tmp_
     assert ("keyboard-covers-focus", "#late") not in _checks(e, "late field")
 
 
-@pytest.mark.live  # real Chromium
+@pytest.mark.browser  # real Chromium
 def test_ios_input_zoom_flagged_on_touch_only_and_no_keyboard_on_desktop(app, tmp_path):
     body = "def run(page, vd):\n    page.locator('#name').click()\n    vd.mark('focused')\n"
     by = _run_kb(app, tmp_path, "kb-zoom", body, viewports="iphone-13-pro,2k")
@@ -317,7 +318,7 @@ def test_ios_input_zoom_flagged_on_touch_only_and_no_keyboard_on_desktop(app, tm
     assert not any(c[0].startswith("keyboard-") for c in _checks(desk))
 
 
-@pytest.mark.live  # real Chromium
+@pytest.mark.browser  # real Chromium
 def test_flow_can_opt_out_of_the_keyboard(app, tmp_path):
     body = ("def run(page, vd):\n"
             "    page.locator('#msg').click()\n"
@@ -329,7 +330,7 @@ def test_flow_can_opt_out_of_the_keyboard(app, tmp_path):
     assert not any(c[0].startswith("keyboard-") for c in _checks(e))
 
 
-@pytest.mark.live  # real Chromium
+@pytest.mark.browser  # real Chromium
 def test_checkbox_and_radio_do_not_open_the_keyboard(app, tmp_path):
     body = ("def run(page, vd):\n"
             "    for sel in ('#agree', '#plan-a'):\n"
@@ -347,3 +348,168 @@ def test_checkbox_and_radio_do_not_open_the_keyboard(app, tmp_path):
 def test_judge_prompt_explains_the_simulated_keyboard():
     import judge
     assert "SIMULATED on-screen" in judge.SYSTEM_PROMPT and "keyboard" in judge.SYSTEM_PROMPT
+
+
+def test_every_marker_is_registered_by_the_copied_conftest():
+    """Only `browser` is registered (conftest.py). A stray `live` passes here, where dante-config
+    registers it, and then gets deselected or rejected in the repos the templates are copied to."""
+    import re
+    for f in (HERE / "vdebug_test.py", HERE / "judge_test.py", CAPTURE_DIR / "flowstore_test.py"):
+        used = set(re.findall(r"@pytest\.mark\.(\w+)", f.read_text()))
+        assert used <= {"browser", "parametrize"}, (f.name, used)
+
+
+class _FakePage:
+    """Just enough of a Playwright page for VD.mark(): `fail` names which evaluate() raises."""
+    url = "http://x/"
+
+    def __init__(self, fail):
+        self.fail = fail
+
+    def screenshot(self, path, full_page=False):
+        pathlib.Path(path).write_bytes(b"")
+
+    def evaluate(self, js):
+        which = "layout" if js is vdebug.LAYOUT_CHECKS_JS else "fit"
+        if which == self.fail:
+            raise RuntimeError("Execution context was destroyed, most likely because of a navigation")
+        return [] if which == "layout" else [3000, 844]
+
+
+@pytest.mark.parametrize("fail", ["layout", "fit"])
+def test_a_check_that_raises_is_reported_as_checks_failed(tmp_path, fail):
+    """A navigating page can't be evaluated. The mark must record checks-failed, not crash the
+    flow, and a failed layout evaluation must not also swallow the MUST_FIT guard (or vice versa)."""
+    vp = vdebug.VIEWPORTS["iphone-13-pro"]
+    vd = vdebug.VD(_FakePage(fail), "http://x", vp, tmp_path / "f" / vp.name, tmp_path, must_fit=True)
+    vd.mark("m", settle=False)
+    by = {c["check"]: c for c in vd.checks}
+    assert set(by) == {"checks-failed", "below-fold"} - ({"below-fold"} if fail == "fit" else set())
+    assert "Execution context was destroyed" in by["checks-failed"]["detail"]
+    assert by["checks-failed"]["detail"].startswith("MUST_FIT") == (fail == "fit")
+    assert by["checks-failed"]["frames"] == ["m"]
+
+
+def _phone_probe(app, query, before=None, after=None, keyboard=True):
+    """Open /keyboard<query> on an iPhone-sized touch page (with keyboard.js unless keyboard=False),
+    run before(page), take the layout checks, run after(page). -> (hits, before_val, after_val)."""
+    pytest.importorskip("playwright.sync_api")
+    from playwright.sync_api import sync_playwright
+
+    base, _ = app
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        ctx = b.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+        if keyboard:
+            ctx.add_init_script(vdebug.KEYBOARD_JS.replace("__VD_KB_HEIGHT__", "336"))
+        page = ctx.new_page()
+        page.goto(base + "/keyboard" + query)
+        got_before = before(page) if before else None
+        hits = {(h["check"], h["selector"]) for h in page.evaluate(vdebug.LAYOUT_CHECKS_JS)}
+        got_after = after(page) if after else None
+        b.close()
+    return hits, got_before, got_after
+
+
+def _focus(page, sel):
+    page.evaluate("s => document.querySelector(s).focus({preventScroll: true})", sel)
+    page.wait_for_timeout(150)  # keyboard.js scrolls in a requestAnimationFrame
+
+
+@pytest.mark.browser  # real Chromium
+@pytest.mark.parametrize("case,field,flagged,quiet", [
+    # body{position:fixed} scroll lock: page content is not "pinned"; the real fixed bar still is
+    ("lock", "#lock-field", {"#send"}, {"#lock-btn"}),
+    # a fixed drawer's own scroller clips #sheet-more above the keyboard: scroll it into view
+    ("sheet", "#sheet-field", {"#send"}, {"#sheet-more"}),
+    # a full-screen player covers the page's bar: the keyboard isn't what hides it
+    ("cover", "#player-search", {"#player-play"}, {"#send", "#draft"}),
+])
+def test_keyboard_covers_control_skips_what_is_reachable_or_already_covered(app, case, field, flagged, quiet):
+    hits, _, _ = _phone_probe(app, f"?case={case}", before=lambda page: _focus(page, field))
+    covered = {s for c, s in hits if c == "keyboard-covers-control"}
+    assert flagged <= covered and not (quiet & covered), covered
+
+
+@pytest.mark.browser  # real Chromium
+def test_keyboard_scrolls_the_fields_own_scroller_and_never_leaves_page_scroll(app):
+    state = "() => ({y: scrollY, drawer: document.getElementById('drawer')?.scrollTop})"
+    # A field deep in a full-screen fixed drawer: scroll the DRAWER, never the page.
+    hits, got, _ = _phone_probe(app, "?case=drawer", before=lambda page: (_focus(page, "#drawer-deep"),
+                                                                        page.evaluate(state))[1])
+    assert got["drawer"] > 0 and got["y"] == 0, got
+    assert ("keyboard-covers-focus", "#drawer-deep") not in hits
+
+    def fixed_then_page(page):
+        _focus(page, "#msg")                 # fixed bar, no scroller: page scrolling can't help
+        seen = [page.evaluate("scrollY")]
+        page.evaluate("document.activeElement.blur()")
+        page.wait_for_timeout(50)
+        seen.append(page.evaluate("scrollY"))
+        page.evaluate("window.scrollTo(0, document.getElementById('mid').getBoundingClientRect().top - 700)")
+        seen.append(page.evaluate("scrollY"))  # #mid now sits at y=700, under the keyboard
+        _focus(page, "#mid")
+        seen.append(page.evaluate("scrollY"))
+        page.evaluate("document.activeElement.blur()")
+        page.wait_for_timeout(50)
+        seen.append(page.evaluate("scrollY"))
+        return seen
+    _, (fixed_open, fixed_closed, start, opened, closed), _ = _phone_probe(app, "", before=fixed_then_page)
+    assert fixed_open == 0 and fixed_closed == 0
+    assert opened > start and closed == start   # the keyboard's own page scroll is undone on close
+
+
+@pytest.mark.browser  # real Chromium
+def test_keyboard_panel_sits_above_a_modal_dialog_and_stays_click_through(app):
+    def open_dialog_over_keyboard(page):
+        _focus(page, "#name")                                            # keyboard already up...
+        page.evaluate("document.getElementById('dlg').showModal()")      # ...then a modal opens
+        page.wait_for_timeout(150)
+        # Painted on top? A modal makes the rest of the page (the panel too) inert, so hit tests
+        # can't say. Compare pixels instead: with the panel above the dialog, removing the dimmed,
+        # blurred ::backdrop changes nothing inside the keyboard area.
+        spot = {"x": 150, "y": 830, "width": 40, "height": 10}
+        dimmed = page.screenshot(clip=spot)
+        page.add_style_tag(content="#dlg::backdrop { background: none !important; backdrop-filter: none !important }")
+        on_top = page.screenshot(clip=spot) == dimmed
+        return {**page.evaluate("""() => {
+          const p = document.getElementById('__vd_keyboard');
+          return {focus: document.activeElement.id, open: p.matches(':popover-open'), pe: getComputedStyle(p).pointerEvents};
+        }"""), "onTop": on_top}
+
+    def tap_save_under_keyboard(page):
+        box = page.locator("#dlg-ok").bounding_box()
+        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        return page.evaluate("window.__dlgOk === true")
+    hits, got, tapped = _phone_probe(app, "?case=modal", before=open_dialog_over_keyboard, after=tap_save_under_keyboard)
+    assert got == {"focus": "dlg-field", "open": True, "pe": "none", "onTop": True}, got
+    assert tapped                                        # pointer-events:none, even in the top layer
+    assert ("keyboard-covers-control", "#dlg-ok") in hits   # a sheet's button under the keyboard: real
+    # #under-dlg is page content right under the dialog's button: the dialog covering it is intended
+    assert not any(c == "overlapping-controls" and s in ("#under-dlg", "#dlg-ok") for c, s in hits), hits
+
+
+@pytest.mark.browser  # real Chromium
+def test_overlapping_controls_ignores_closed_details_and_drawer_covered_controls(app):
+    hits, _, _ = _phone_probe(app, "?case=overlap", keyboard=False)
+    overlaps = {s for c, s in hits if c == "overlapping-controls"}
+    assert "#cover-a" in overlaps                                   # #cover-b eats its taps: real
+    assert not overlaps & {"#page-btn", "#drawer-btn", "#det-a", "#det-b"}, overlaps
+
+
+@pytest.mark.browser  # real Chromium
+def test_tap_target_invisible_input_and_zoom_checks_skip_their_false_positives(app):
+    hits, _, _ = _phone_probe(app, "?case=targets", keyboard=False)
+    assert ("invisible-hit-target", "#bare-ghost") in hits
+    assert ("invisible-hit-target", "#pill-radio") not in hits      # custom radio pill: tap the label
+    assert {("small-tap-target", "#view-link"), ("small-tap-target", "#tiny-on")} <= hits
+    assert not {("small-tap-target", "#text-link"), ("small-tap-target", "#tiny-off")} & hits
+    assert ("ios-input-zoom", "#note") in hits
+    assert ("ios-input-zoom", "#side-search") not in hits           # collapsed sidebar, x=-264
+
+
+@pytest.mark.browser  # real Chromium
+def test_zoom_disabled_viewport_is_one_page_hit_instead_of_per_input_hits(app):
+    hits, _, _ = _phone_probe(app, "?case=nozoom", keyboard=False)
+    assert ("zoom-disabled", None) in hits
+    assert not any(c == "ios-input-zoom" for c, _ in hits), hits
