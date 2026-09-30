@@ -76,6 +76,25 @@ describe('Markdown', () => {
     expect(screen.getByRole('button', { name: 'Copy code' })).toBeInTheDocument();
   });
 
+  // Touch devices have no `:hover`, so a hover-only reveal (`opacity-0
+  // group-hover:opacity-100`) left this button invisible yet still the
+  // topmost, tappable element on iPad/phones — users could never see it, but
+  // could still blind-tap it (vdebug invisible-hit-target check, ipad-pro-11).
+  // `touch:opacity-100` is the repo's existing coarse/no-hover escape hatch
+  // (see `.touch\:opacity-100` in src/index.css, already used by the sidebar
+  // row actions) and must stay alongside the hover classes so desktop
+  // hover-reveal is unchanged.
+  it('keeps the copy button visible on touch/no-hover pointers, not just on hover', async () => {
+    const { container } = renderMarkdown(FENCED_CODE);
+    await waitForHighlighter(container);
+
+    expect(screen.getByRole('button', { name: 'Copy code' })).toHaveClass(
+      'touch:opacity-100',
+      'opacity-0',
+      'group-hover:opacity-100',
+    );
+  });
+
   // Issue #268: the highlighter now registers an explicit language set instead
   // of shipping all ~290 Prism grammars, so the languages this UI actually emits
   // have to keep tokenising, and anything else has to fall back safely.

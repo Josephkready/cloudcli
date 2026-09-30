@@ -124,4 +124,16 @@ describe('BashCommandDisplay', () => {
     // Still collapsed — the copy click must not have toggled the row open.
     expect(screen.queryByText('hi there')).toBeNull();
   });
+
+  // Touch devices have no `:hover`, so a hover-only reveal
+  // (`opacity-0 group-hover/cmd:opacity-100`) left this button invisible yet
+  // still tappable on iPad/phones. `touch:opacity-100` is the repo's existing
+  // coarse/no-hover escape hatch (src/index.css) and must stay alongside the
+  // hover classes so desktop hover-reveal is unchanged.
+  it('keeps the copy button visible on touch/no-hover pointers, not just on hover', () => {
+    render(<BashCommandDisplay command="echo hi" />);
+    const copyButton = screen.getByRole('button', { name: /copy command/i });
+
+    expect(copyButton).toHaveClass('touch:opacity-100', 'opacity-0', 'group-hover/cmd:opacity-100');
+  });
 });
