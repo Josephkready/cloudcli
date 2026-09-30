@@ -100,6 +100,20 @@ describe('BugReportDialog', () => {
     expect(submit).toBeEnabled();
   });
 
+  // On iOS, `dvh` tracks the layout viewport, which never shrinks when the
+  // keyboard opens, so a `dvh`-only cap let this centered dialog grow taller
+  // than the space actually visible above the keyboard: the title/close
+  // button clipped above the top of the screen and the footer's File/Cancel
+  // buttons landed behind the keyboard. The `calc(100%-1rem)` term caps the
+  // dialog to its lifted containing block (Dialog.tsx's wrapper, whose
+  // `bottom` tracks `--keyboard-height`) instead, so it always fits what is
+  // actually visible and its own scroll body absorbs the rest.
+  it('caps its height to the visible containing block, not just the layout viewport, so it still fits above an on-screen keyboard', () => {
+    renderDialog();
+
+    expect(screen.getByRole('dialog')).toHaveClass('max-h-[min(92dvh,44rem,calc(100%-1rem))]');
+  });
+
   it('sends the description with the collected session metadata', async () => {
     createBugReport.mockResolvedValue(
       jsonResponse(true, { success: true, data: { status: 'queued', id: 'job-1' } }),

@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+
 import { copyTextToClipboard } from '../../../../utils/clipboard';
+
 import { ToolStatusBadge } from './ToolStatusBadge';
 import type { ToolStatus } from './ToolStatusBadge';
 
@@ -70,7 +72,7 @@ export const OneLineDisplay: React.FC<OneLineDisplayProps> = ({
   const renderCopyButton = () => (
     <button
       onClick={handleAction}
-      className="ml-1 flex-shrink-0 text-muted-foreground/40 opacity-0 transition-[opacity,color] duration-fast hover:text-muted-foreground group-hover:opacity-100"
+      className="touch:opacity-100 ml-1 flex-shrink-0 text-muted-foreground/40 opacity-0 transition-[opacity,color] duration-fast hover:text-muted-foreground group-hover:opacity-100"
       title="Copy to clipboard"
       aria-label="Copy to clipboard"
     >

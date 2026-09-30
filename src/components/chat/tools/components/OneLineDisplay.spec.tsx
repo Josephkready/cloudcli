@@ -47,6 +47,18 @@ describe('OneLineDisplay', () => {
       });
     });
 
+    // Touch devices have no `:hover`, so a hover-only reveal
+    // (`opacity-0 group-hover:opacity-100`) left this button invisible yet
+    // still tappable on touch. `touch:opacity-100` is the repo's existing
+    // coarse/no-hover escape hatch (src/index.css) and must stay alongside
+    // the hover classes so desktop hover-reveal is unchanged.
+    it('keeps the copy button visible on touch/no-hover pointers, not just on hover', () => {
+      render(<OneLineDisplay toolName="Bash" value="echo hi" style="terminal" action="copy" />);
+      const copyButton = screen.getByRole('button', { name: /copy to clipboard/i });
+
+      expect(copyButton).toHaveClass('touch:opacity-100', 'opacity-0', 'group-hover:opacity-100');
+    });
+
     it('wraps text when wrapText is true', () => {
       const { container } = render(
         <OneLineDisplay toolName="Bash" value="a long command" style="terminal" wrapText />,

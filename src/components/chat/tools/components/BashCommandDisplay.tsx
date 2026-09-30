@@ -3,6 +3,7 @@ import { ChevronRight, Copy, Check } from 'lucide-react';
 
 import { cn } from '../../../../lib/utils';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
+
 import { ToolStatusBadge } from './ToolStatusBadge';
 import type { ToolStatus } from './ToolStatusBadge';
 
@@ -125,7 +126,7 @@ export const BashCommandDisplay: React.FC<BashCommandDisplayProps> = ({
         <button
           onClick={handleCopy}
           onKeyDown={(event) => event.stopPropagation()}
-          className="flex-shrink-0 rounded p-0.5 text-muted-foreground/60 opacity-0 transition-[opacity,color,background-color] duration-fast hover:bg-foreground/10 hover:text-foreground focus:opacity-100 group-hover/cmd:opacity-100"
+          className="touch:opacity-100 flex-shrink-0 rounded p-0.5 text-muted-foreground/60 opacity-0 transition-[opacity,color,background-color] duration-fast hover:bg-foreground/10 hover:text-foreground focus:opacity-100 group-hover/cmd:opacity-100"
           title="Copy command"
           aria-label="Copy command"
         >

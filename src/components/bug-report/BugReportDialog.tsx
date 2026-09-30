@@ -102,7 +102,7 @@ export default function BugReportDialog({
   // "Show" on Session details only relabels itself to "Hide" (cloudcli B5) —
   // the expanded list renders below whatever else is in the scroll area, and
   // on mobile/tablet that's below the fold of the dialog's own max-height
-  // (`min(92dvh,44rem)`, see DialogContent below) with nothing to carry the
+  // (`min(92dvh,44rem,calc(100%-1rem))`, see DialogContent below) with nothing to carry the
   // reader's eye there. Scrolled into view on expand so opening it doesn't
   // look like a no-op.
   const metadataPanelRef = useRef<HTMLDivElement>(null);
@@ -341,7 +341,18 @@ export default function BugReportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[min(92dvh,44rem)] w-[calc(100vw-1rem)] max-w-xl flex-col overflow-hidden rounded-3xl border-border/80 bg-popover/95 p-0 shadow-2xl">
+      {/*
+       * The `calc(100%-1rem)` term matters on mobile with the keyboard open:
+       * `dvh` tracks the layout viewport, which iOS never shrinks for the
+       * keyboard, so a `dvh`-only cap lets the dialog grow taller than the
+       * space actually visible above the keyboard and the footer buttons end
+       * up hidden behind it. `100%` here resolves against DialogContent's
+       * containing block (the wrapper in Dialog.tsx, whose `bottom` is
+       * `var(--keyboard-height)`), so it tracks the real visible height
+       * instead. The body below is already a scroll container, so capping
+       * the dialog just makes it scroll rather than overflow off-screen.
+       */}
+      <DialogContent className="flex max-h-[min(92dvh,44rem,calc(100%-1rem))] w-[calc(100vw-1rem)] max-w-xl flex-col overflow-hidden rounded-3xl border-border/80 bg-popover/95 p-0 shadow-2xl">
         <DialogTitle>{t('bugReport.title')}</DialogTitle>
 
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-popover px-4 py-4 sm:px-6">
