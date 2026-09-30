@@ -42,7 +42,7 @@ Renders as a single line with `border-l-2` accent. Supports multiple rendering m
 - **terminal** (`style: 'terminal'`) — Dark pill around command text, green `$` prompt
 - **open-file** — Shows filename only (truncated from full path), clickable to open
 - **jump-to-results** — Shows pattern with anchor link to result section
-- **copy** — Shows value with hover copy button
+- **copy** — Shows value with a copy button (visible on hover or touch)
 - **none** — Plain display
 
 ```tsx
