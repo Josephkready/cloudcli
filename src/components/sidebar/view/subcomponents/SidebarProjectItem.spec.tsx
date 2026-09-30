@@ -1,4 +1,5 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { SessionWithProvider } from '../../types/types';
@@ -25,7 +26,7 @@ function makeProject(total: number, overrides: Partial<Project> = {}): Project {
   } as Project;
 }
 
-function renderItem(project: Project) {
+function renderItem(project: Project, overrides: Partial<ComponentProps<typeof SidebarProjectItem>> = {}) {
   render(
     <SidebarProjectItem
       project={project}
@@ -60,6 +61,7 @@ function renderItem(project: Project) {
       onCancelEditingSession={vi.fn()}
       onSaveEditingSession={vi.fn()}
       t={i18n.getFixedT('en', ['sidebar', 'common'])}
+      {...overrides}
     />,
   );
 }
@@ -118,5 +120,61 @@ describe('SidebarProjectItem — favorite toggle touch target (#363)', () => {
       .getAllByTitle('Add to favorites')
       .find((el) => el.tagName === 'BUTTON');
     expect(starButton?.className).toContain('touch:hit-h-44');
+  });
+});
+
+/*
+ * The touch card's icon-only row actions carried no accessible name, so screen readers (and
+ * vdebug's role-based flows) saw four bare "button"s.
+ */
+describe('SidebarProjectItem — touch card action labels', () => {
+  it('names the rename and remove buttons', () => {
+    renderItem(makeProject(0));
+
+    const card = screen.getByTestId('sidebar-project-row-mobile');
+    expect(within(card).getByRole('button', { name: 'Rename Project' })).toBeTruthy();
+    expect(within(card).getByRole('button', { name: 'Remove Project' })).toBeTruthy();
+  });
+
+  it('names the save and cancel buttons while renaming', () => {
+    const project = makeProject(0);
+    renderItem(project, { editingProject: project.projectId, editingName: 'demo-app' });
+
+    const card = screen.getByTestId('sidebar-project-row-mobile');
+    expect(within(card).getByRole('button', { name: 'Save' })).toBeTruthy();
+    expect(within(card).getByRole('button', { name: 'Cancel' })).toBeTruthy();
+  });
+});
+
+/*
+ * The desktop rename field is nested in the row's <button>. On the iPad drawer, typing a space
+ * activated that button (select project -> new session, drawer closed) and dropped the rename
+ * mid-word; a click in the field did the same. Found by the vdebug rename-project flow, which is
+ * the real-browser regression check — jsdom has no button activation, so this pins the guards.
+ */
+describe('SidebarProjectItem — desktop rename field inside the row button', () => {
+  function renderRenaming() {
+    const project = makeProject(0);
+    const onProjectSelect = vi.fn();
+    const onToggleProject = vi.fn();
+    renderItem(project, { editingProject: project.projectId, editingName: 'demo app', onProjectSelect, onToggleProject });
+    const row = screen.getByTestId('sidebar-project-row');
+    return { field: within(row).getByPlaceholderText('Project name'), onProjectSelect, onToggleProject };
+  }
+
+  it('does not select or toggle the project when the field is clicked', () => {
+    const { field, onProjectSelect, onToggleProject } = renderRenaming();
+
+    fireEvent.click(field);
+
+    expect(onProjectSelect).not.toHaveBeenCalled();
+    expect(onToggleProject).not.toHaveBeenCalled();
+  });
+
+  it("cancels the space key's button activation on keyup", () => {
+    const { field } = renderRenaming();
+
+    expect(fireEvent.keyUp(field, { key: ' ' })).toBe(false);   // false = default prevented
+    expect(fireEvent.keyUp(field, { key: 'a' })).toBe(true);
   });
 });

@@ -250,3 +250,7 @@ test('renders a New conversation button in the empty state (no projects/sessions
   assert.ok(html.includes('No conversations yet'), 'the empty state should render');
   assert.ok(html.includes('New conversation'), 'the empty state should still offer the New conversation action');
 });
+
+test('labels the inline rename field (its only accessible name; vdebug rename-session targets it)', () => {
+  assert.match(renderEditing('s'), /<input[^>]*aria-label="tooltips\.editSessionName"/);
+});

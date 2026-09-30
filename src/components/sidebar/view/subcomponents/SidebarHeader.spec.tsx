@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import SidebarHeader from './SidebarHeader';
@@ -91,5 +91,20 @@ describe('SidebarHeader search autofocus (#366)', () => {
     expect((document.activeElement as HTMLElement | null)?.getAttribute('placeholder')).toBe(
       SEARCH_PLACEHOLDER,
     );
+  });
+});
+
+/*
+ * The mobile header's refresh and create-project buttons are icon-only. Without an
+ * aria-label they were anonymous "button"s to screen readers and to vdebug's create-project flow.
+ * jsdom applies no CSS, so the desktop header (named via title) and the mobile one both mount:
+ * every copy must be named.
+ */
+describe('SidebarHeader icon buttons', () => {
+  it('names every refresh and create-project button', () => {
+    renderHeader();
+
+    expect(screen.getAllByRole('button', { name: 'tooltips.refresh' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'tooltips.createProject' })).toHaveLength(2);
   });
 });

@@ -33,6 +33,8 @@ def visible(locator):
 def open_sidebar(page, vd, label="sidebar open"):
     """Open the mobile drawer when the layout has one; a no-op where the sidebar is docked."""
     menu = page.get_by_role("button", name="Open menu")
+    if page.get_by_role("button", name="Close sidebar").filter(visible=True).count():
+        return False  # already open (e.g. still up after the project wizard closes)
     if menu.count() and menu.first.is_visible():
         menu.first.click()
         visible(page.get_by_role("button", name="Close sidebar")).wait_for()
@@ -45,6 +47,38 @@ def open_large_conversation(page, vd):
     open_sidebar(page, vd)
     visible(page.get_by_role("link", name=LARGE_CONVERSATION)).click()
     page.locator(".chat-message").first.wait_for()
+
+
+def open_settings(page, vd, tab=None):
+    """Open the Settings modal from the sidebar footer, optionally on a given tab."""
+    open_sidebar(page, vd)
+    visible(page.get_by_role("button", name="Settings")).click()
+    dialog = visible(page.get_by_role("dialog"))
+    dialog.wait_for()
+    if tab:
+        visible(dialog.get_by_role("button", name=tab, exact=True)).click()
+    return dialog
+
+
+def expand_spaces(page):
+    """Expand the sidebar's Spaces (project list) section if it is collapsed."""
+    toggle = visible(page.get_by_role("button", name="Toggle spaces"))
+    if toggle.get_attribute("aria-expanded") == "false":
+        toggle.click()
+
+
+def project_action(page, name, action):
+    """Click a project row's 'Rename' or 'Remove' action.
+
+    Drawer (small screens): labelled 'Rename Project' / 'Remove Project' buttons, always shown.
+    Docked sidebar: icons revealed on hover, titled 'Rename project (F2)' / 'Remove project from
+    sidebar (Delete)'.
+    """
+    expand_spaces(page)
+    row = visible(page.get_by_test_id(re.compile(r"^sidebar-project-row(-mobile)?$")).filter(has_text=name))
+    row.hover()
+    visible(row.get_by_role("button", name=f"{action} Project", exact=True).or_(
+        row.get_by_title(re.compile(rf"^{action} project")))).click()
 
 
 # ------------------------------------------------------------------ gestures

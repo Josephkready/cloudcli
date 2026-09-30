@@ -122,6 +122,7 @@ function SidebarProjectItem({
       <div className="md:group group">
         <div className="md:hidden">
           <div
+            data-testid="sidebar-project-row-mobile"
             className={cn(
               'p-3 mx-3 my-1 rounded-lg bg-card border border-border/50 active:scale-[0.98] transition-[transform,background-color,border-color] duration-fast',
               isSelected && 'bg-primary/5 border-primary/20',
@@ -200,6 +201,7 @@ function SidebarProjectItem({
                   <>
                     <button
                       className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-500 shadow-sm transition-[transform,box-shadow] duration-instant active:scale-90 active:shadow-none dark:bg-green-600"
+                      aria-label={t('tooltips.save')}
                       onClick={(event) => {
                         event.stopPropagation();
                         saveProjectName();
@@ -209,6 +211,7 @@ function SidebarProjectItem({
                     </button>
                     <button
                       className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-500 shadow-sm transition-[transform,box-shadow] duration-instant active:scale-90 active:shadow-none dark:bg-gray-600"
+                      aria-label={t('tooltips.cancel')}
                       onClick={(event) => {
                         event.stopPropagation();
                         onCancelEditingProject();
@@ -221,6 +224,7 @@ function SidebarProjectItem({
                   <>
                     <button
                       className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-red-500/10 active:scale-90 dark:border-red-800 dark:bg-red-900/30"
+                      aria-label={t('projects.deleteProject')}
                       onClick={(event) => {
                         event.stopPropagation();
                         onDeleteProject(project);
@@ -231,6 +235,7 @@ function SidebarProjectItem({
 
                     <button
                       className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 active:scale-90 dark:border-primary/30 dark:bg-primary/20"
+                      aria-label={t('projects.renameProject')}
                       onClick={(event) => {
                         event.stopPropagation();
                         onStartEditingProject(project);
@@ -298,6 +303,15 @@ function SidebarProjectItem({
                     className="w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground focus:ring-2 focus:ring-primary/20"
                     placeholder={t('projects.projectNamePlaceholder')}
                     autoFocus
+                    // This input sits inside the row's <button>: a click in it, or the keyup of a
+                    // typed space (the button's activation key), would select/toggle the project
+                    // mid-rename — on the iPad drawer that navigates away and drops the edit.
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyUp={(event) => {
+                      if (event.key === ' ') {
+                        event.preventDefault();
+                      }
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
                         saveProjectName();

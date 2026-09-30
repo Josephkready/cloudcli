@@ -325,6 +325,12 @@ export function seedFixture(options: {
       path.join(projectPath, 'package.json'),
       `${JSON.stringify({ name: plan.name, version: '1.0.0', private: true }, null, 2)}\n`,
     );
+    // The file every transcript's Read tool call names, so opening it from a tool card
+    // loads real content in the code editor instead of a 404 stub.
+    writeFileSync(
+      path.join(projectPath, 'src', 'index.ts'),
+      `export function main(): string {\n  return '${plan.name}';\n}\n`,
+    );
     if (plan.isGitRepo) {
       // `isGitRepositoryRoot` only stats for `.git`; an empty directory is enough
       // to make the probe hit without paying to init a real repository.

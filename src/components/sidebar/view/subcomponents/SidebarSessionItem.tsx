@@ -315,6 +315,7 @@ function SidebarSessionItem({
               <>
                 <input
                   type="text"
+                  aria-label={t('tooltips.editSessionName')}
                   value={editingSessionName}
                   onChange={(event) => onEditingSessionNameChange(event.target.value)}
                   onKeyDown={(event) => {

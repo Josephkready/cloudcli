@@ -125,6 +125,7 @@ function ClaudePermissions({
           />
           <Button
             onClick={() => handleAddAllowedTool(newAllowedTool)}
+            aria-label={`${t('permissions.actions.add')}: ${t('permissions.allowedTools.title')}`}
             disabled={!newAllowedTool.trim()}
             size="sm"
             className="h-10 px-4"
@@ -198,6 +199,7 @@ function ClaudePermissions({
           />
           <Button
             onClick={() => handleAddDisallowedTool(newDisallowedTool)}
+            aria-label={`${t('permissions.actions.add')}: ${t('permissions.blockedTools.title')}`}
             disabled={!newDisallowedTool.trim()}
             size="sm"
             className="h-10 px-4"

@@ -294,3 +294,26 @@ describe('PermissionsContent - codex agent', () => {
     expect(screen.getByText(/default:/i)).toBeInTheDocument();
   });
 });
+
+/*
+ * On sm+ widths the Add buttons are icon-only (the "Add" text is sm:hidden), so the aria-label is
+ * their accessible name there. vdebug's settings-permissions flow targets the Blocked one by it.
+ */
+describe('PermissionsContent - Add button names', () => {
+  it('names each Add button after its list', () => {
+    render(
+      <PermissionsContent
+        agent="claude"
+        skipPermissions={false}
+        onSkipPermissionsChange={vi.fn()}
+        allowedTools={[]}
+        onAllowedToolsChange={vi.fn()}
+        disallowedTools={[]}
+        onDisallowedToolsChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /^Add: Allowed Tools$/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Add: Blocked Tools$/ })).toBeTruthy();
+  });
+});

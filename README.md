@@ -122,9 +122,16 @@ to it when the judge flags something that is by design. On `iphone-13-pro` and
 visual viewport shrinks, as on iOS), and the `keyboard-covers-*` checks report what it
 hides. Because `index.html` disables pinch-zoom on purpose, every touch mark carries one
 accepted `zoom-disabled` hit in place of per-input `ios-input-zoom` hits (see
-`judge_notes.md`). The text-entry flows (`composer-keyboard`,
-`new-chat-turn`, `search-chats`, `home-sidebar`, `bug-report`) mark while it is up;
-a flow can opt out with `KEYBOARD = False`. Read `vdebug-runs/latest/report.md` (gitignored). `--judge` needs
+`judge_notes.md`). Every text field the fixture can reach has a flow that types into it and
+marks while the keyboard is up: sidebar search (`home-sidebar`, `search-chats`), the composer
+and its `/` and `@` menus (`composer-keyboard`, `new-chat-turn`, `composer-commands`), the
+folder and model pickers (`new-chat-turn`, `model-picker`), the project wizard and folder
+browser (`create-project`), inline renames (`rename-project`, `rename-session`), the code
+editor (`code-editor`), the bug reporter (`bug-report`) and Settings (`settings-api-tokens`,
+`settings-permissions`, `settings-voice`). Not covered, because the fixture never shows them:
+login/setup (auth is off), onboarding's git fields (onboarding is pre-completed), the
+provider-login terminal, and AskUserQuestion's free-text answer. A flow can opt out of the
+keyboard with `KEYBOARD = False`. Read `vdebug-runs/latest/report.md` (gitignored). `--judge` needs
 `OPENROUTER_API_KEY` and `ffmpeg`; Python needs `playwright`. Flows live in
 `vdebug/flows/` (role/label/testid locators only). **After changing front-end
 code, re-record the flows that touch those screens before opening a PR.** Full
