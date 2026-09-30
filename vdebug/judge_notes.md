@@ -35,3 +35,15 @@
   `min-w-6` widens the painted box itself (with `inline-flex items-center justify-center` to
   keep the icon centred) rather than widening the overlay past the box, which would spill into
   the copy button 2px away in the same `gap-0.5` row.
+- On-screen keyboard (iPhone/iPad recordings): the app shell, dialogs and the mobile sidebar
+  overlay raise their bottom edge by `--keyboard-height` (`src/components/app/keyboardViewport.ts`),
+  so the composer sits directly above the keyboard and the transcript / sidebar lists end at the
+  keyboard's top edge. List rows and message controls scrolled past that edge are clipped by
+  their scroll container (reachable by scrolling), not hidden behind the keyboard.
+- **The keyboard stays open after Send, by design.** `ChatComposer`'s `handleSubmit` refocuses
+  the textarea inside the click so a phone user can type the next message without re-tapping the
+  box (the old behaviour closed the keyboard after every message). Don't report "keyboard
+  remains open after sending".
+- Inputs use 14px text on touch while `index.html`'s viewport meta has `maximum-scale=1.0`
+  (commit fb1117a9, "Fixed mobile zoom on input"), so iOS does not zoom when a field is focused.
+  Don't report a page zoom on focus.
