@@ -102,7 +102,22 @@ export function shouldMigrateLegacyDatabase(
 function migrateLegacyDatabase(targetPath: string): void {
   const legacyPath = resolveLegacyDatabasePath();
 
-  if (!shouldMigrateLegacyDatabase(targetPath, legacyPath)) return;
+  if (!shouldMigrateLegacyDatabase(targetPath, legacyPath)) {
+    // A fresh explicit DATABASE_PATH is not seeded from the checkout's database,
+    // but say so: an operator moving an old install to a custom path should copy
+    // it deliberately rather than silently start from an empty database.
+    if (
+      path.resolve(targetPath) !== path.resolve(legacyPath)
+      && !fs.existsSync(targetPath)
+      && fs.existsSync(legacyPath)
+    ) {
+      console.warn('Legacy database left in place: DATABASE_PATH is a new, non-default location', {
+        legacy: legacyPath,
+        databasePath: targetPath,
+      });
+    }
+    return;
+  }
 
   try {
     fs.copyFileSync(legacyPath, targetPath);
@@ -127,6 +142,7 @@ function migrateLegacyDatabase(targetPath: string): void {
 // ---------------------------------------------------------------------------
 
 let instance: Database.Database | null = null;
+let warnedInMemory = false;
 
 /**
  * Returns the shared database connection, creating it on first call.
@@ -147,6 +163,11 @@ export function getConnection(): Database.Database {
   if (dbPath !== IN_MEMORY_DATABASE_PATH) {
     ensureDatabaseDirectory(dbPath);
     migrateLegacyDatabase(dbPath);
+  } else if (!process.env.DATABASE_PATH && !warnedInMemory) {
+    // Expected in tests. Anywhere else it means an entry point skipped load-env.js
+    // and nothing it writes will survive the process, so say it once.
+    warnedInMemory = true;
+    console.warn('DATABASE_PATH is not set: using an in-memory database (nothing will persist)');
   }
 
   instance = new Database(dbPath);
