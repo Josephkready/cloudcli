@@ -135,9 +135,8 @@ needs:
   dependency, fastest feedback. This is still the default for pure logic.
 - **A DOM, events, hooks, or effects** → `*.spec.ts(x)` with vitest. Also the
   only option for anything that transitively imports
-  `src/shared/markdown/prismLanguages.ts` — which includes both markdown
-  renderers, `src/components/chat/view/subcomponents/Markdown.tsx` and
-  `src/components/code-editor/view/subcomponents/markdown/MarkdownPreview.tsx`.
+  `src/shared/markdown/prismLanguages.ts` — which includes the markdown
+  renderer, `src/components/chat/view/subcomponents/Markdown.tsx`.
   That module imports `react-syntax-highlighter`'s ESM build
   (`dist/esm/prism-light`, `dist/esm/languages/prism/*`, and the
   `dist/esm/styles/prism/one-{dark,light}` themes), whose CJS/ESM interop only
@@ -238,12 +237,12 @@ initial read). Keep it in the `.pure.ts` file, but cover that part in a
 ## Demand-loaded surfaces
 
 Only the sidebar and the chat view's own wiring are on the boot path. Everything
-else — the code editor, settings, onboarding, the markdown
+else — settings, onboarding, the markdown
 renderer, bug reporting, the `/model`/`/cost`/`/status`/`/help` command modal,
 and the `AskUserQuestion` permission panel — is behind `React.lazy` and ships in
 its own chunk (issue #267; the last four added by perf-audit package WP7).
-Before the original split, xterm (~400 KB) and CodeMirror (~690 KB) were parsed
-on every cold load even in a session that only read chat; the markdown renderer
+Before the original split, xterm (~400 KB) and CodeMirror (~690 KB, since removed
+with the code editor) were parsed on every cold load even in a session that only read chat; the markdown renderer
 (react-markdown + remark-gfm + micromark/mdast/unified, ~450 KB pre-minify) was
 the single biggest remaining offender once those two were gone, since `app_boot`
 never renders a message body but almost every session opens a conversation
@@ -263,7 +262,7 @@ When you add or move one of these surfaces:
   it is what triggers the import, so an unconditionally rendered lazy component
   that returns `null` defeats the whole thing.
 - Keep the surface out of the eager import graph. `src/test/entryStaticImports.test.ts`
-  walks the static imports from `src/main.jsx` and fails if xterm, CodeMirror,
+  walks the static imports from `src/main.jsx` and fails if xterm,
   JSZip or DOMPurify become reachable without a dynamic `import()`, or if one of
   the named surfaces creeps back in. A type-only import (`import type { … }`) is
   fine — it is erased before the bundler sees it.

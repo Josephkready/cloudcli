@@ -171,13 +171,6 @@ export const api = {
     authenticatedFetch(`/api/projects/${encodeURIComponent(projectId)}/toggle-star`, {
       method: 'POST',
     }),
-  readFile: (projectId, filePath) =>
-    authenticatedFetch(`/api/projects/${projectId}/file?filePath=${encodeURIComponent(filePath)}`),
-  saveFile: (projectId, filePath, content) =>
-    authenticatedFetch(`/api/projects/${projectId}/file`, {
-      method: 'PUT',
-      body: JSON.stringify({ filePath, content }),
-    }),
   getFiles: (projectId, options = {}) =>
     authenticatedFetch(`/api/projects/${projectId}/files`, options),
 

@@ -41,8 +41,8 @@ function AppContentInner() {
   const { ws, sendMessage, subscribe, isConnected } = useWebSocket();
   const { newBuildAvailable, checkNow } = useVersionCheck();
 
-  // Shell and the code editor moved out of the entry chunk (#267); pull them
-  // back in once the page is idle so the first click on either is still instant.
+  // The shell moved out of the entry chunk (#267); pull it back in once the page
+  // is idle so the first click on it is still instant.
   useWarmLazySurfaces(WARMABLE_SURFACES);
 
   const {

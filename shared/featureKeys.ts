@@ -37,11 +37,6 @@ export const FEATURE_KEYS = [
   'chat.effort_change',
   'chat.permission_mode_change',
 
-  // --- Files ----------------------------------------------------------------
-  // Recorded by the kept in-chat editor sidebar (useCodeEditorDocument), not
-  // by the removed Files tab.
-  'files.save',
-
   // --- Navigation -----------------------------------------------------------
   'sidebar.search',
   'sidebar.archived_view',

@@ -11,7 +11,6 @@ import { ALWAYS_COMPLETE, createMermaidFenceGate, isMermaidClassName } from '../
 import { useMathPlugins } from '../../../../shared/markdown/useMathPlugins';
 import { normalizeInlineCodeFences } from '../../utils/chatFormatting';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
-import { usePaletteOps } from '../../../../contexts/PaletteOpsContext';
 import { useTheme } from '../../../../contexts/ThemeContext';
 
 type MarkdownProps = {
@@ -223,7 +222,6 @@ export function MarkdownRenderer({ children, className }: MarkdownProps) {
   // found to contain math, so the common case never loads it (issue #269).
   const { remarkMathPlugins, rehypeMathPlugins } = useMathPlugins(content);
   const remarkPlugins = useMemo(() => [remarkGfm, ...remarkMathPlugins], [remarkMathPlugins]);
-  const { openFileInEditor } = usePaletteOps();
   // Scanned from the source, because the parsed `code` node cannot tell a closed
   // fence from one still arriving — CommonMark closes an unterminated fence at
   // end of document, so both look identical by the time react-markdown sees them.
@@ -233,24 +231,15 @@ export function MarkdownRenderer({ children, className }: MarkdownProps) {
     () => ({
       ...markdownComponents,
       a: ({ href, children: linkChildren }: { href?: string; children?: React.ReactNode }) => {
-        // Prefer the href when it is a real path; otherwise fall back to the
-        // link text, since models often emit `[src/foo.ts]()` with an empty href.
+        // A link to a project file has nowhere to go (a relative href would 404),
+        // so it renders as plain text with the path on hover. Prefer the href when
+        // it is a real path; otherwise fall back to the link text, since models
+        // often emit `[src/foo.ts]()` with an empty href.
         const linkText = childrenToText(linkChildren);
         const fileRef = looksLikeFilePath(href) ? href : looksLikeFilePath(linkText) ? linkText : undefined;
 
         if (fileRef && !isExternalHref(href)) {
-          return (
-            <a
-              href={href || fileRef}
-              className="cursor-pointer text-blue-600 hover:underline dark:text-blue-400"
-              onClick={(event) => {
-                event.preventDefault();
-                openFileInEditor(stripLineSuffix(fileRef));
-              }}
-            >
-              {linkChildren}
-            </a>
-          );
+          return <span title={fileRef}>{linkChildren}</span>;
         }
 
         return (
@@ -265,7 +254,7 @@ export function MarkdownRenderer({ children, className }: MarkdownProps) {
         );
       },
     }),
-    [openFileInEditor],
+    [],
   );
 
   return (

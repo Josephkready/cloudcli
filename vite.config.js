@@ -11,28 +11,23 @@ import { getConnectableHost, normalizeLoopbackHost } from './shared/networkHosts
  * not match the ids Rollup actually hands out, because Vite's CommonJS interop
  * appends query suffixes (`react/jsx-runtime.js?commonjs-es-import`). The
  * unmatched JSX runtime proxy was therefore assigned to whichever manual chunk
- * reached it first — `vendor-codemirror`, via @uiw/react-codemirror — so every
- * component in the entry chunk statically depended on the 690 KB editor bundle
- * and Vite kept `modulepreload`ing it on every cold load. Matching on the
+ * reached it first — at the time the (since removed) code editor's CodeMirror
+ * chunk — so every component in the entry chunk statically depended on a 690 KB
+ * editor bundle and Vite kept `modulepreload`ing it on every cold load. Matching on the
  * resolved id keeps that from happening again (issue #267).
  *
  * Order matters: the first pattern to match wins.
  */
 const VENDOR_CHUNK_PATTERNS = [
   // `@babel/runtime` rides along with React: its helpers are a couple of KB
-  // shared between the highlighter chunk (react-syntax-highlighter, demand-loaded
-  // since #287) and the editor bundle, and left unassigned Rollup folded them
-  // into `vendor-codemirror` — which is enough on its own to make the editor a
-  // static entry dependency.
+  // shared by demand-loaded chunks (e.g. react-syntax-highlighter, since #287),
+  // and left unassigned Rollup folds them into whichever vendor chunk reaches
+  // them first — enough on its own to make that chunk a static entry dependency.
   [
     'vendor-react',
     /[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler|@babel[\\/]runtime)[\\/]/,
   ],
   ['vendor-xterm', /[\\/]node_modules[\\/]@xterm[\\/]/],
-  [
-    'vendor-codemirror',
-    /[\\/]node_modules[\\/](@codemirror|@lezer|@uiw|@replit|@marijn|style-mod|w3c-keyname|crelt)[\\/]/,
-  ],
 ]
 
 function assignVendorChunk(id) {

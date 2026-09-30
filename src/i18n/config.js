@@ -22,7 +22,6 @@ import enSettings from './locales/en/settings.json';
 import enAuth from './locales/en/auth.json';
 import enSidebar from './locales/en/sidebar.json';
 import enChat from './locales/en/chat.json';
-import enCodeEditor from './locales/en/codeEditor.json';
 // Import supported languages configuration
 import { languages } from './languages.js';
 
@@ -53,7 +52,6 @@ i18n
         auth: enAuth,
         sidebar: enSidebar,
         chat: enChat,
-        codeEditor: enCodeEditor,
       },
     },
 
@@ -67,7 +65,7 @@ i18n
     debug: false,
 
     // Namespaces - load only what's needed
-    ns: ['common', 'settings', 'auth', 'sidebar', 'chat', 'codeEditor'],
+    ns: ['common', 'settings', 'auth', 'sidebar', 'chat'],
     defaultNS: 'common',
 
     // Key separator for nested keys (default: '.')

@@ -19,9 +19,9 @@ import MainContentSessionTabs from './MainContentSessionTabs';
 
 // Rarely used relative to chat itself (perf-audit package WP7) — kept
 // out of the entry chunk like every other header-reachable surface. Gated on
-// `bugReportOpen` below rather than rendered unconditionally, mirroring the
-// `editingFile &&` pattern in MainContent.tsx: mounting a lazy component is
-// what triggers its import, so the guard is what keeps it off the boot path.
+// `bugReportOpen` below rather than rendered unconditionally: mounting a lazy
+// component is what triggers its import, so the guard is what keeps it off the
+// boot path.
 const BugReportDialog = lazySurface(loadBugReportDialog);
 
 export default function MainContentHeader({

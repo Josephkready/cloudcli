@@ -5,7 +5,7 @@ import { copyTextToClipboard } from '../../../../utils/clipboard';
 import { ToolStatusBadge } from './ToolStatusBadge';
 import type { ToolStatus } from './ToolStatusBadge';
 
-type ActionType = 'copy' | 'open-file' | 'jump-to-results' | 'none';
+type ActionType = 'copy' | 'file-name' | 'jump-to-results' | 'none';
 
 interface OneLineDisplayProps {
   toolName: string;
@@ -14,7 +14,6 @@ interface OneLineDisplayProps {
   value: string;
   secondary?: string;
   action?: ActionType;
-  onAction?: () => void;
   style?: string;
   wrapText?: boolean;
   colorScheme?: {
@@ -41,7 +40,6 @@ export const OneLineDisplay: React.FC<OneLineDisplayProps> = ({
   value,
   secondary,
   action = 'none',
-  onAction,
   style,
   wrapText = false,
   colorScheme = {
@@ -58,20 +56,17 @@ export const OneLineDisplay: React.FC<OneLineDisplayProps> = ({
   const [copied, setCopied] = useState(false);
   const isTerminal = style === 'terminal';
 
-  const handleAction = async () => {
-    if (action === 'copy' && value) {
-      const didCopy = await copyTextToClipboard(value);
-      if (!didCopy) return;
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } else if (onAction) {
-      onAction();
-    }
+  const handleCopy = async () => {
+    if (!value) return;
+    const didCopy = await copyTextToClipboard(value);
+    if (!didCopy) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const renderCopyButton = () => (
     <button
-      onClick={handleAction}
+      onClick={handleCopy}
       className="touch:opacity-100 ml-1 flex-shrink-0 text-muted-foreground/40 opacity-0 transition-[opacity,color] duration-fast hover:text-muted-foreground group-hover:opacity-100"
       title="Copy to clipboard"
       aria-label="Copy to clipboard"
@@ -121,23 +116,16 @@ export const OneLineDisplay: React.FC<OneLineDisplayProps> = ({
     );
   }
 
-  // File open style
-  if (action === 'open-file') {
+  // File name style: the basename, with the full path on hover
+  if (action === 'file-name') {
     const displayName = value.split('/').pop() || value;
     return (
       <div className={`group flex items-center gap-1.5 border-l-2 ${colorScheme.border} my-0.5 py-0.5 pl-3`}>
         <span className="flex-shrink-0 text-xs text-muted-foreground">{label || toolName}</span>
         <span className="text-[10px] text-muted-foreground/40">/</span>
-        <button
-          onClick={handleAction}
-          // `touch:hit-h-44` (cloudcli B7): the file name itself stays a
-          // compact inline label; the tappable height is floored at 44px on
-          // touch devices via the overlay, not by growing this row.
-          className="touch:hit-h-44 truncate font-mono text-xs text-primary transition-colors hover:text-primary/80 hover:underline"
-          title={value}
-        >
+        <span className={`min-w-0 truncate font-mono text-xs ${colorScheme.primary}`} title={value}>
           {displayName}
-        </button>
+        </span>
         {status && <ToolStatusBadge status={status} className="ml-auto" />}
       </div>
     );

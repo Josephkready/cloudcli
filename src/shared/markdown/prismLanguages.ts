@@ -10,9 +10,8 @@
  *   bundles only markup/css/clike/javascript, and leaves grammar registration to
  *   the caller.
  *
- *   Registration lives here, in a single module both call sites import, so the
- *   chat renderer and the code-editor preview can never drift onto different
- *   language sets.
+ *   Registration lives here, in its own module, so every highlighted code block
+ *   shares one language set.
  *
  * ADDING A LANGUAGE
  *   Add an import + an entry in `LANGUAGE_GRAMMARS`. Anything not registered

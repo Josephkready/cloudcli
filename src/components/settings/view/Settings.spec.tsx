@@ -11,13 +11,6 @@ const controller = vi.hoisted(() => ({
   setProjectSortOrder: vi.fn(),
   hideCliOriginChats: true,
   setHideCliOriginChats: vi.fn(),
-  codeEditorSettings: {
-    wordWrap: true,
-    showMinimap: true,
-    lineNumbers: true,
-    fontSize: '14',
-  },
-  updateCodeEditorSetting: vi.fn(),
   claudePermissions: { allowedTools: [], disallowedTools: [], skipPermissions: false },
   setClaudePermissions: vi.fn(),
   notificationPreferences: {

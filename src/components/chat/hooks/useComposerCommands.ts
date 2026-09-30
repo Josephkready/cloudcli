@@ -99,7 +99,6 @@ interface UseComposerCommandsArgs {
     ((event: FormEvent<HTMLFormElement>) => Promise<boolean>) | null
   >;
   addMessage: (msg: ChatMessage) => void;
-  onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
 }
 
@@ -122,7 +121,6 @@ export function useComposerCommands({
   inputValueRef,
   handleSubmitRef,
   addMessage,
-  onFileOpen,
   onShowSettings,
 }: UseComposerCommandsArgs) {
   const [commandModalPayload, setCommandModalPayload] = useState<CommandModalPayload | null>(null);
@@ -174,9 +172,6 @@ export function useComposerCommands({
               content: `${data.message}\n\nPath: \`${data.path}\``,
               timestamp: Date.now(),
             });
-            if (data.exists && onFileOpen) {
-              onFileOpen(data.path);
-            }
           }
           break;
 
@@ -188,7 +183,7 @@ export function useComposerCommands({
           console.warn('Unknown built-in command action:', action);
       }
     },
-    [onFileOpen, onShowSettings, addMessage],
+    [onShowSettings, addMessage],
   );
 
   const closeCommandModal = useCallback(() => {

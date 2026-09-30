@@ -11,7 +11,6 @@ interface ToolDiffViewerProps {
   newContent: string;
   filePath: string;
   createDiff: (oldStr: string, newStr: string) => DiffLine[];
-  onFileClick?: () => void;
   badge?: string;
   badgeColor?: 'gray' | 'green';
 }
@@ -24,7 +23,6 @@ export const ToolDiffViewer: React.FC<ToolDiffViewerProps> = ({
   newContent,
   filePath,
   createDiff,
-  onFileClick,
   badge = 'Diff',
   badgeColor = 'gray'
 }) => {
@@ -46,18 +44,9 @@ export const ToolDiffViewer: React.FC<ToolDiffViewerProps> = ({
     <div className="overflow-hidden rounded border border-gray-200/60 dark:border-gray-700/50">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-gray-200/60 bg-gray-50/80 px-2.5 py-1 dark:border-gray-700/50 dark:bg-gray-800/40">
-        {onFileClick ? (
-          <button
-            onClick={onFileClick}
-            className="cursor-pointer truncate font-mono text-[11px] text-blue-600 transition-colors hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-          >
-            {filePath}
-          </button>
-        ) : (
-          <span className="truncate font-mono text-[11px] text-gray-600 dark:text-gray-400">
-            {filePath}
-          </span>
-        )}
+        <span className="truncate font-mono text-[11px] text-gray-600 dark:text-gray-400">
+          {filePath}
+        </span>
         <span className={`rounded px-1.5 py-px text-[10px] font-medium ${badgeClasses} ml-2 flex-shrink-0`}>
           {badge}
         </span>

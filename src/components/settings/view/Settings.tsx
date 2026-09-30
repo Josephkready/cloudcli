@@ -29,8 +29,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
     setProjectSortOrder,
     hideCliOriginChats,
     setHideCliOriginChats,
-    codeEditorSettings,
-    updateCodeEditorSetting,
     claudePermissions,
     setClaudePermissions,
     notificationPreferences,
@@ -143,11 +141,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
                   onProjectSortOrderChange={setProjectSortOrder}
                   hideCliOriginChats={hideCliOriginChats}
                   onHideCliOriginChatsChange={setHideCliOriginChats}
-                  codeEditorSettings={codeEditorSettings}
-                  onCodeEditorWordWrapChange={(value) => updateCodeEditorSetting('wordWrap', value)}
-                  onCodeEditorShowMinimapChange={(value) => updateCodeEditorSetting('showMinimap', value)}
-                  onCodeEditorLineNumbersChange={(value) => updateCodeEditorSetting('lineNumbers', value)}
-                  onCodeEditorFontSizeChange={(value) => updateCodeEditorSetting('fontSize', value)}
                 />
               )}
 

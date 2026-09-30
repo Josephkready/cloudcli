@@ -47,7 +47,16 @@ async function withProjectFilesServer(runTest: (harness: Harness) => Promise<voi
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    return { status: response.status, body: await response.json() };
+    // `/files/content` streams raw bytes and an unmounted route gets express's
+    // HTML 404, so only JSON responses are parsed.
+    const text = await response.text();
+    let parsed: unknown = text;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // not JSON: keep the text
+    }
+    return { status: response.status, body: parsed };
   };
 
   try {
@@ -67,19 +76,26 @@ test('project file routes stay mounted at their historical paths behind auth', a
     assert.equal(tree.status, 200);
     assert.deepEqual(tree.body.map((entry: { name: string }) => entry.name), ['src', 'README.md']);
 
-    const read = await request('GET', '/api/projects/:id/file?filePath=README.md');
-    assert.equal(read.status, 200);
-    assert.equal(read.body.content, '# hello\n');
+    const content = await request('GET', '/api/projects/:id/files/content?path=README.md');
+    assert.equal(content.status, 200);
+    assert.equal(content.body, '# hello\n');
+  });
+});
 
-    const saved = await request('PUT', '/api/projects/:id/file', { filePath: 'README.md', content: '# changed\n' });
-    assert.equal(saved.status, 200);
-    assert.equal(await readFile(path.join(projectRoot, 'README.md'), 'utf8'), '# changed\n');
+test('the code editor\'s single-file read/save routes are gone', async () => {
+  await withProjectFilesServer(async ({ projectRoot, request }) => {
+    const read = await request('GET', '/api/projects/:id/file?filePath=README.md');
+    assert.equal(read.status, 404);
+
+    const save = await request('PUT', '/api/projects/:id/file', { filePath: 'README.md', content: '# changed\n' });
+    assert.equal(save.status, 404);
+    assert.equal(await readFile(path.join(projectRoot, 'README.md'), 'utf8'), '# hello\n');
   });
 });
 
 test('project file routes reject traversal outside the project and unknown projects', async () => {
   await withProjectFilesServer(async ({ request }) => {
-    const escape = await request('GET', '/api/projects/:id/file?filePath=../../../etc/passwd');
+    const escape = await request('GET', '/api/projects/:id/files/content?path=../../../etc/passwd');
     assert.equal(escape.status, 403);
 
     const unknown = await request('GET', '/api/projects/does-not-exist/files');

@@ -16,9 +16,6 @@
  * {@link subscribeToClaudeSettings}, which listens for both the same-tab custom
  * event and the cross-tab `storage` event. Updates land immediately instead of
  * up to a second late, and an idle tab runs no timers at all.
- *
- * This mirrors `CODE_EDITOR_SETTINGS_CHANGED_EVENT`, which the code editor
- * settings already used for exactly the same reason.
  */
 
 /** The single localStorage key this module coordinates. */

@@ -26,7 +26,6 @@ function setup() {
   const setInput = vi.fn();
   const inputValueRef = { current: '' };
   const addMessage = vi.fn();
-  const onFileOpen = vi.fn();
   const onShowSettings = vi.fn();
 
   const { result } = renderHook(() => {
@@ -46,13 +45,12 @@ function setup() {
       inputValueRef,
       handleSubmitRef,
       addMessage,
-      onFileOpen,
       onShowSettings,
     });
     return { hook, handleSubmitRef };
   });
 
-  return { result, setInput, inputValueRef, addMessage, onFileOpen, onShowSettings };
+  return { result, setInput, inputValueRef, addMessage, onShowSettings };
 }
 
 const costCommand = { name: '/cost', description: 'cost', namespace: 'builtin' } as SlashCommand;

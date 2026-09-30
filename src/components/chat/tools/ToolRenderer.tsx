@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useCallback } from 'react';
+import React, { memo, useMemo } from 'react';
 
 import type { Project } from '../../../types/app';
 import type { SubagentChildTool } from '../types/types';
@@ -21,7 +21,6 @@ interface ToolRendererProps {
   toolResult?: any;
   toolId?: string;
   mode: 'input' | 'result';
-  onFileOpen?: (filePath: string, diffInfo?: any) => void;
   createDiff?: (oldStr: string, newStr: string) => DiffLine[];
   selectedProject?: Project | null;
   showRawParameters?: boolean;
@@ -76,7 +75,6 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
   toolResult,
   toolId,
   mode,
-  onFileOpen,
   createDiff,
   selectedProject,
   showRawParameters = false,
@@ -101,13 +99,6 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
     () => mode === 'input' ? deriveToolStatus(toolResult) : undefined,
     [mode, toolResult],
   );
-
-  const handleAction = useCallback(() => {
-    if (displayConfig?.action === 'open-file' && onFileOpen) {
-      const value = displayConfig.getValue?.(parsedData) || '';
-      onFileOpen(value);
-    }
-  }, [displayConfig, parsedData, onFileOpen]);
 
   // Route subagent containers to dedicated component (after hooks to satisfy Rules of Hooks)
   if (isSubagentContainer && subagentState) {
@@ -170,7 +161,6 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
         value={value}
         secondary={secondary}
         action={displayConfig.action}
-        onAction={handleAction}
         style={displayConfig.style}
         wrapText={displayConfig.wrapText}
         colorScheme={displayConfig.colorScheme}
@@ -188,7 +178,6 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
     const contentProps = displayConfig.getContentProps?.(parsedData, {
       selectedProject,
       createDiff,
-      onFileOpen
     }) || {};
 
     const isStreaming = mode === 'input' && !toolResult;
@@ -219,7 +208,6 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
     const contentProps = displayConfig.getContentProps?.(parsedData, {
       selectedProject,
       createDiff,
-      onFileOpen
     }) || {};
 
     let contentComponent: React.ReactNode = null;
@@ -231,7 +219,6 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
             <ToolDiffViewer
               {...contentProps}
               createDiff={createDiff}
-              onFileClick={() => onFileOpen?.(contentProps.filePath)}
             />
           );
         }
@@ -245,7 +232,6 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
         contentComponent = (
           <FileListContent
             files={contentProps.files || []}
-            onFileClick={onFileOpen}
             title={contentProps.title}
           />
         );
@@ -301,13 +287,6 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
       }
     }
 
-    const handleTitleClick = (toolName === 'Edit' || toolName === 'Write' || toolName === 'ApplyPatch') && contentProps.filePath && onFileOpen
-      ? () => onFileOpen(contentProps.filePath, {
-          old_string: contentProps.oldContent,
-          new_string: contentProps.newContent
-        })
-      : undefined;
-
     const badgeElement = toolStatus && toolStatus !== 'completed' ? <ToolStatusBadge status={toolStatus} /> : undefined;
 
     return (
@@ -316,7 +295,6 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
         toolId={toolId}
         title={title}
         defaultOpen={defaultOpen}
-        onTitleClick={handleTitleClick}
         badge={badgeElement}
         showRawParameters={mode === 'input' && showRawParameters}
         rawContent={rawToolInput}

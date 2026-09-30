@@ -8,14 +8,12 @@ import { setNotificationSoundEnabled } from '../../../utils/notificationSound';
 import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuthStatus';
 import { normalizeMainTab } from '../utils/settingsTabs';
 import {
-  DEFAULT_CODE_EDITOR_SETTINGS,
   DEFAULT_HIDE_CLI_ORIGIN_CHATS,
   DEFAULT_PROJECT_SORT_ORDER,
 } from '../constants/constants';
 import type {
   AgentProvider,
   ClaudePermissionsState,
-  CodeEditorSettingsState,
   CodexPermissionMode,
   NotificationPreferencesState,
   ProjectSortOrder,
@@ -70,13 +68,6 @@ const toCodexPermissionMode = (value: unknown): CodexPermissionMode => {
 
   return 'default';
 };
-
-const readCodeEditorSettings = (): CodeEditorSettingsState => ({
-  wordWrap: localStorage.getItem('codeEditorWordWrap') === 'true',
-  showMinimap: localStorage.getItem('codeEditorShowMinimap') !== 'false',
-  lineNumbers: localStorage.getItem('codeEditorLineNumbers') !== 'false',
-  fontSize: localStorage.getItem('codeEditorFontSize') ?? DEFAULT_CODE_EDITOR_SETTINGS.fontSize,
-});
 
 const createEmptyClaudePermissions = (): ClaudePermissionsState => ({
   allowedTools: [],
@@ -133,9 +124,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
   const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>(DEFAULT_PROJECT_SORT_ORDER);
   const [hideCliOriginChats, setHideCliOriginChats] = useState<boolean>(DEFAULT_HIDE_CLI_ORIGIN_CHATS);
-  const [codeEditorSettings, setCodeEditorSettings] = useState<CodeEditorSettingsState>(() => (
-    readCodeEditorSettings()
-  ));
 
   const [claudePermissions, setClaudePermissions] = useState<ClaudePermissionsState>(() => (
     createEmptyClaudePermissions()
@@ -278,13 +266,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     hideCliOriginChats,
   ]);
 
-  const updateCodeEditorSetting = useCallback(
-    <K extends keyof CodeEditorSettingsState>(key: K, value: CodeEditorSettingsState[K]) => {
-      setCodeEditorSettings((prev) => ({ ...prev, [key]: value }));
-    },
-    [],
-  );
-
   // The setters handed to the settings controls are the *only* way a value
   // changes because the user asked for it — `loadSettings` keeps using the raw
   // setters below, so hydrating the dialog never looks like an edit.
@@ -326,14 +307,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
   useEffect(() => {
     setNotificationSoundEnabled(notificationPreferences.channels.sound);
   }, [notificationPreferences.channels.sound]);
-
-  useEffect(() => {
-    localStorage.setItem('codeEditorWordWrap', String(codeEditorSettings.wordWrap));
-    localStorage.setItem('codeEditorShowMinimap', String(codeEditorSettings.showMinimap));
-    localStorage.setItem('codeEditorLineNumbers', String(codeEditorSettings.lineNumbers));
-    localStorage.setItem('codeEditorFontSize', codeEditorSettings.fontSize);
-    window.dispatchEvent(new Event('codeEditorSettingsChanged'));
-  }, [codeEditorSettings]);
 
   // Auto-save permissions and sort order with debounce
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -399,8 +372,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     setProjectSortOrder: editProjectSortOrder,
     hideCliOriginChats,
     setHideCliOriginChats: editHideCliOriginChats,
-    codeEditorSettings,
-    updateCodeEditorSetting,
     claudePermissions,
     setClaudePermissions: editClaudePermissions,
     notificationPreferences,

@@ -13,16 +13,6 @@ function baseProps() {
     onProjectSortOrderChange: vi.fn(),
     hideCliOriginChats: false,
     onHideCliOriginChatsChange: vi.fn(),
-    codeEditorSettings: {
-      wordWrap: true,
-      showMinimap: false,
-      lineNumbers: true,
-      fontSize: '14',
-    },
-    onCodeEditorWordWrapChange: vi.fn(),
-    onCodeEditorShowMinimapChange: vi.fn(),
-    onCodeEditorLineNumbersChange: vi.fn(),
-    onCodeEditorFontSizeChange: vi.fn(),
   };
 }
 
@@ -31,7 +21,13 @@ describe('AppearanceSettingsTab', () => {
     const props = baseProps();
     render(<AppearanceSettingsTab {...props} />);
     expect(screen.getByDisplayValue('Session Count')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('14px')).toBeInTheDocument();
+  });
+
+  it('has no code editor section (the editor was removed)', () => {
+    render(<AppearanceSettingsTab {...baseProps()} />);
+    // Only dark mode and hide-CLI-chats remain as switches.
+    expect(screen.getAllByRole('switch')).toHaveLength(2);
+    expect(screen.queryByText(/code editor/i)).not.toBeInTheDocument();
   });
 
   it('calls onProjectSortOrderChange when the sort select changes', () => {
@@ -50,23 +46,4 @@ describe('AppearanceSettingsTab', () => {
     expect(props.onHideCliOriginChatsChange).toHaveBeenCalledWith(true);
   });
 
-  it('toggles code editor word wrap, minimap, and line numbers', () => {
-    const props = baseProps();
-    render(<AppearanceSettingsTab {...props} />);
-    const toggles = screen.getAllByRole('switch');
-    // toggles: [dark mode, hideCli, wordWrap, showMinimap, lineNumbers]
-    fireEvent.click(toggles[2]);
-    expect(props.onCodeEditorWordWrapChange).toHaveBeenCalledWith(false);
-    fireEvent.click(toggles[3]);
-    expect(props.onCodeEditorShowMinimapChange).toHaveBeenCalledWith(true);
-    fireEvent.click(toggles[4]);
-    expect(props.onCodeEditorLineNumbersChange).toHaveBeenCalledWith(false);
-  });
-
-  it('changes the font size select', () => {
-    const props = baseProps();
-    render(<AppearanceSettingsTab {...props} />);
-    fireEvent.change(screen.getByDisplayValue('14px'), { target: { value: '18' } });
-    expect(props.onCodeEditorFontSizeChange).toHaveBeenCalledWith('18');
-  });
 });

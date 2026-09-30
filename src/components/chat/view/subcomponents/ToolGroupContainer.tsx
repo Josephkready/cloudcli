@@ -19,7 +19,6 @@ interface ToolGroupContainerProps {
   prevMessage: ChatMessage | null;
   createDiff: (oldStr: string, newStr: string) => DiffLine[];
   getMessageKey: (message: ChatMessage) => string;
-  onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
   onGrantToolPermission?: (suggestion: ClaudePermissionSuggestion) => PermissionGrantResult | null | undefined;
   showRawParameters?: boolean;
@@ -62,7 +61,6 @@ export default function ToolGroupContainer({
   prevMessage,
   createDiff,
   getMessageKey,
-  onFileOpen,
   onShowSettings,
   onGrantToolPermission,
   showRawParameters,
@@ -128,7 +126,6 @@ export default function ToolGroupContainer({
               message={message}
               prevMessage={index > 0 ? group.messages[index - 1] : prevMessage}
               createDiff={createDiff}
-              onFileOpen={onFileOpen}
               onShowSettings={onShowSettings}
               onGrantToolPermission={onGrantToolPermission}
               showRawParameters={showRawParameters}

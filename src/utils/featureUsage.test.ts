@@ -130,7 +130,7 @@ test('a missing fetch global never propagates to the caller', () => {
       { fetch: undefined, localStorage: createLocalStorage(), window: { addEventListener: () => {} } },
       () => {
         assert.doesNotThrow(() => {
-          recordFeatureUse('files.save');
+          recordFeatureUse('chat.send');
           __flushFeatureUsageForTests();
         });
       },

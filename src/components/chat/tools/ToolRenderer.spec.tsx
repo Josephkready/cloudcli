@@ -101,18 +101,18 @@ describe('ToolRenderer dispatch', () => {
       expect(screen.getByText('in src')).toBeInTheDocument();
     });
 
-    it('wires the open-file action for Read', () => {
-      const onFileOpen = vi.fn();
+    it('shows the Read file name as plain text with the full path on hover', () => {
       render(
         <ToolRenderer
           toolName="Read"
           toolInput={{ file_path: '/tmp/foo.ts' }}
           mode="input"
-          onFileOpen={onFileOpen}
         />,
       );
-      fireEvent.click(screen.getByText('foo.ts'));
-      expect(onFileOpen).toHaveBeenCalledWith('/tmp/foo.ts');
+      const name = screen.getByText('foo.ts');
+      expect(name.tagName).toBe('SPAN');
+      expect(name).toHaveAttribute('title', '/tmp/foo.ts');
+      expect(screen.queryByRole('button', { name: 'foo.ts' })).not.toBeInTheDocument();
     });
   });
 
@@ -152,20 +152,17 @@ describe('ToolRenderer dispatch', () => {
   });
 
   describe('collapsible / diff', () => {
-    it('renders a diff viewer for Edit when createDiff is provided, and wires title-click to onFileOpen', () => {
-      const onFileOpen = vi.fn();
+    it('renders a diff viewer for Edit when createDiff is provided, titled by the file name', () => {
       const { container } = render(
         <ToolRenderer
           toolName="Edit"
           toolInput={{ file_path: '/src/App.tsx', old_string: 'old', new_string: 'new' }}
           mode="input"
           createDiff={identityDiff}
-          onFileOpen={onFileOpen}
         />,
       );
-      // Title is the filename, and clicking it should trigger onFileOpen with the diff strings.
-      fireEvent.click(screen.getByText('App.tsx'));
-      expect(onFileOpen).toHaveBeenCalledWith('/src/App.tsx', { old_string: 'old', new_string: 'new' });
+      // The title is plain text inside the section's single toggle, not a separate link.
+      expect(screen.getAllByRole('button')).toHaveLength(1);
 
       // Diffs default collapsed and are lazy-mounted (#WP6), so createDiff has
       // not run yet — expand via the chevron trigger to mount the diff viewer.
@@ -221,21 +218,6 @@ describe('ToolRenderer dispatch', () => {
       // Title still renders even without diff content.
       expect(screen.getByText('App.tsx')).toBeInTheDocument();
     });
-
-    it('does not wire title-click for non file-opening tools', () => {
-      const onFileOpen = vi.fn();
-      render(
-        <ToolRenderer
-          toolName="Grep"
-          toolInput={{}}
-          toolResult={{ content: '{}', toolUseResult: { filenames: ['a.ts'] } }}
-          mode="result"
-          onFileOpen={onFileOpen}
-        />,
-      );
-      // Grep's result is collapsible/file-list, not clickable as a title.
-      expect(screen.getByText('Found 1 file')).toBeInTheDocument();
-    });
   });
 
   describe('collapsible / markdown (Task tool, transitively renders Markdown.tsx)', () => {
@@ -270,20 +252,18 @@ describe('ToolRenderer dispatch', () => {
   });
 
   describe('collapsible / file-list', () => {
-    it('renders file list content for a Grep result and forwards file clicks', () => {
-      const onFileOpen = vi.fn();
+    it('renders file list content for a Grep result as plain file names', () => {
       render(
         <ToolRenderer
           toolName="Grep"
           toolInput={{}}
           toolResult={{ toolUseResult: { filenames: ['/src/a.ts', '/src/b.ts'] } }}
           mode="result"
-          onFileOpen={onFileOpen}
         />,
       );
       expect(screen.getByText('Found 2 files')).toBeInTheDocument();
-      fireEvent.click(screen.getByText('a.ts'));
-      expect(onFileOpen).toHaveBeenCalledWith('/src/a.ts');
+      expect(screen.getByText('a.ts')).toHaveAttribute('title', '/src/a.ts');
+      expect(screen.queryByRole('button', { name: 'a.ts' })).not.toBeInTheDocument();
     });
   });
 

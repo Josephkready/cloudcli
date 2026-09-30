@@ -13,10 +13,6 @@ vi.mock('./subcomponents/MainContentHeader', () => ({
   default: () => <div data-testid="main-content-header" />,
 }));
 
-vi.mock('../../code-editor/view/EditorSidebar', () => ({
-  default: () => <div data-testid="editor-sidebar" />,
-}));
-
 const { default: MainContent } = await import('./MainContent');
 
 const project = (path: string): Project => ({

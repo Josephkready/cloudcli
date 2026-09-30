@@ -6,13 +6,14 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { FileListContent } from './FileListContent';
 
-test('renders each file\'s basename as a button and a title tooltip with the full path', () => {
+test('renders each file\'s basename as plain text with the full path as a tooltip', () => {
   const html = renderToStaticMarkup(
     React.createElement(FileListContent, { files: ['/a/b/one.ts', '/a/two.ts'] }),
   );
   assert.ok(html.includes('>one.ts<'));
   assert.ok(html.includes('>two.ts<'));
   assert.ok(html.includes('title="/a/b/one.ts"'));
+  assert.ok(!html.includes('<button'), 'file names are not clickable');
 });
 
 test('renders a title heading when provided', () => {
@@ -33,15 +34,6 @@ test('separates entries with a comma except after the last one', () => {
   );
   const commaCount = (html.match(/>,</g) || []).length;
   assert.equal(commaCount, 1, 'exactly one separator for two files');
-});
-
-test('supports FileListItem objects with their own onClick handler', () => {
-  const html = renderToStaticMarkup(
-    React.createElement(FileListContent, {
-      files: [{ path: '/a/custom.ts', onClick: () => {} }],
-    }),
-  );
-  assert.ok(html.includes('custom.ts'));
 });
 
 test('falls back to the full path when there is no "/" to split on', () => {
