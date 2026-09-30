@@ -393,6 +393,7 @@ def test_a_check_that_raises_is_reported_as_checks_failed(tmp_path, fail):
 def _phone_probe(app, query, before=None, after=None, keyboard=True):
     """Open /keyboard<query> on an iPhone-sized touch page (with keyboard.js unless keyboard=False),
     run before(page), take the layout checks, run after(page). -> (hits, before_val, after_val)."""
+    pytest.importorskip("playwright.sync_api")
     from playwright.sync_api import sync_playwright
 
     base, _ = app
