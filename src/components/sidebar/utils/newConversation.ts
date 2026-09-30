@@ -1,5 +1,4 @@
-import { Folder, FolderPlus } from 'lucide-react';
-import type { TFunction } from 'i18next';
+import { Folder } from 'lucide-react';
 
 import type { Project } from '../../../types/app';
 import type { ActionMenuItem } from '../../../shared/view/ui/ActionMenu';
@@ -10,17 +9,10 @@ type BuildNewConversationItemsArgs = {
   projects: Project[];
   onPickProject: (project: Project) => void;
   /**
-   * Opens the create-project flow. Optional because not every surface owns one:
-   * that flow is the sidebar's local state, so the mobile landing page (#331)
-   * cannot reach it and omits the item rather than rendering a dead control.
-   */
-  onCreateProject?: () => void;
-  /**
    * Include spaces whose folder isn't a repository root. Off by default — see
    * {@link buildNewConversationItems}.
    */
   includeNonRepositories?: boolean;
-  t: TFunction;
 };
 
 /**
@@ -38,9 +30,8 @@ type BuildNewConversationItemsArgs = {
  * substring, then path substring. A row that matches only deep in its path is
  * still reachable but never outranks one whose name matches.
  *
- * Every row is scored the same way, including the "New project…" escape hatch:
- * a query matching nothing is meant to leave the list empty and show the
- * "No folders found" message (#338), not one lone action.
+ * A query matching nothing is meant to leave the list empty and show the
+ * "No folders found" message (#338).
  */
 export function scoreFolderMatch(label: string, path: string, query: string): number {
   const needle = query.trim().toLowerCase();
@@ -117,13 +108,8 @@ function isListableRepository(project: Project): boolean {
  * so a new conversation must first be pointed at a folder. We list the existing
  * projects in a stable, scannable order — starred first, then alphabetically by
  * name (via {@link sortProjects} with `'name'`) so the menu reads predictably
- * regardless of the Projects tab's current sort setting — and append a
- * "New project…" escape hatch so a brand-new folder can be added when the target
- * isn't a project yet. Picking a project launches the chat composer there.
- *
- * The escape hatch is appended only when a handler for it is supplied, since a
- * caller without a create-project flow would otherwise render an item that does
- * nothing (#331).
+ * regardless of the Projects tab's current sort setting. Picking a project
+ * launches the chat composer there.
  *
  * Only repository *clones* are listed by default (#332, #344). A space row
  * exists for every session's cwd, so agents run inside `<repo>/tools/x`,
@@ -150,9 +136,7 @@ function isListableRepository(project: Project): boolean {
 export function buildNewConversationItems({
   projects,
   onPickProject,
-  onCreateProject,
   includeNonRepositories = false,
-  t,
 }: BuildNewConversationItemsArgs): NewConversationMenu {
   const serverReportsRepositories = projects.some(
     (project) => typeof project.isRepository === 'boolean',
@@ -174,17 +158,6 @@ export function buildNewConversationItems({
     icon: Folder,
     onSelect: () => onPickProject(project),
   }));
-
-  if (onCreateProject) {
-    items.push({
-      key: 'new-project',
-      label: t('conversations.newConversationNewProject', 'New project…'),
-      icon: FolderPlus,
-      onSelect: onCreateProject,
-      // Only divide when there are projects above it; otherwise it's the sole item.
-      showDividerBefore: items.length > 0,
-    });
-  }
 
   return { items, hiddenProjectCount };
 }

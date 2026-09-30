@@ -13,9 +13,8 @@ import { useOverlayLayer } from './overlayLayers';
  * two handlers into each of them — and get the stacking subtly wrong — they
  * opt in here (#243). Pair it with `useFocusTrap` (#274) for the focus half.
  *
- * **Stacking.** The folder picker renders *inside* the project-creation wizard,
- * so both are mounted at once and a document-level `keydown` would otherwise
- * close both with a single Esc. Active overlays register in the shared stack in
+ * **Stacking.** A dialog opened from inside another leaves both mounted at once,
+ * and a document-level `keydown` would otherwise close both with a single Esc. Active overlays register in the shared stack in
  * `overlayLayers.ts` and only the topmost one reacts, which matches how a user
  * reads a stack of dialogs: Esc peels off one layer.
  */

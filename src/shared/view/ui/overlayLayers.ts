@@ -5,10 +5,10 @@ import { useCallback, useEffect, useRef } from 'react';
  * and `useFocusTrap` (#274).
  *
  * Both hooks need the same answer to "am I the dialog the user is looking at?":
- * with the folder picker open on top of the project wizard, Esc must close only
- * the picker *and* Tab must cycle only inside the picker. Two independent
- * stacks could drift out of agreement — one thinking the picker is on top while
- * the other still favours the wizard — so registration order lives here once.
+ * with one dialog open on top of another, Esc must close only the top one *and*
+ * Tab must cycle only inside it. Two independent stacks could drift out of
+ * agreement — one thinking the child is on top while the other still favours
+ * the parent — so registration order lives here once.
  *
  * Registration order == visual stacking order: an overlay rendered by another
  * overlay's subtree always mounts (and therefore registers) after its parent.

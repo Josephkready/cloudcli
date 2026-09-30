@@ -108,7 +108,6 @@ export async function startBenchServer(options: {
         HOST: '127.0.0.1',
         DATABASE_PATH: path.join(home, 'bench.db'),
         HOME: home,
-        WORKSPACES_ROOT: home,
         VITE_AUTH_DISABLED: 'true',
         AGENT_MOCK_PROVIDER: 'true',
         JWT_SECRET: 'bench-secret',

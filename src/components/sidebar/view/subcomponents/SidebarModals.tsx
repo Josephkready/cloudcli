@@ -9,21 +9,17 @@ import type { DeleteProjectConfirmation, SessionDeleteConfirmation, SettingsProj
 import LazySurface, { lazySurface } from '../../../lazy/LazySurface';
 import SurfaceSkeleton from '../../../lazy/SurfaceSkeleton';
 
-// Both are modal-only surfaces — the settings tree alone is eight tabs deep and
-// pulls the MCP + skills screens with it — so neither belongs in the entry
-// chunk (issue #267). They are already rendered behind an `is open` flag, which
-// is what keeps the import from firing on boot.
+// A modal-only surface — the settings tree alone is eight tabs deep and pulls
+// the MCP + skills screens with it — so it does not belong in the entry chunk
+// (issue #267). It is already rendered behind an `is open` flag, which is what
+// keeps the import from firing on boot.
 const Settings = lazySurface(() => import('../../../settings/view/Settings'));
-const ProjectCreationWizard = lazySurface(() => import('../../../project-creation-wizard'));
 
 type SidebarModalsProps = {
   projects: Project[];
   showSettings: boolean;
   settingsInitialTab: string;
   onCloseSettings: () => void;
-  showNewProject: boolean;
-  onCloseNewProject: () => void;
-  onProjectCreated: () => void;
   deleteConfirmation: DeleteProjectConfirmation | null;
   onCancelDeleteProject: () => void;
   onConfirmDeleteProject: (deleteData?: boolean) => void;
@@ -51,9 +47,6 @@ export default function SidebarModals({
   showSettings,
   settingsInitialTab,
   onCloseSettings,
-  showNewProject,
-  onCloseNewProject,
-  onProjectCreated,
   deleteConfirmation,
   onCancelDeleteProject,
   onConfirmDeleteProject,
@@ -70,17 +63,6 @@ export default function SidebarModals({
 
   return (
     <>
-      {showNewProject &&
-        ReactDOM.createPortal(
-          <LazySurface fallback={<SurfaceSkeleton overlay label="Loading project wizard…" />}>
-            <ProjectCreationWizard
-              onClose={onCloseNewProject}
-              onProjectCreated={onProjectCreated}
-            />
-          </LazySurface>,
-          document.body,
-        )}
-
       {showSettings &&
         ReactDOM.createPortal(
           <LazySurface fallback={<SurfaceSkeleton overlay label="Loading settings…" />}>

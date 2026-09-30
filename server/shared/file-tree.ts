@@ -1,9 +1,9 @@
 /**
- * Filesystem-tree helpers shared by the folder-picker (`/api/browse-filesystem`)
- * and the project file-explorer (`/api/projects/:projectId/files`) endpoints.
+ * Filesystem-tree helpers for the project file-explorer
+ * (`/api/projects/:projectId/files`) endpoint.
  *
- * Extracted from server/index.js so the pure pieces (permToRwx,
- * expandWorkspacePath) are independently unit-testable, and the recursive
+ * Extracted from server/index.js so the pure piece (permToRwx) is
+ * independently unit-testable, and the recursive
  * getFileTree walk — including its bounded fs-concurrency limiter — has a
  * single home instead of living inline in the entry point.
  */
@@ -11,12 +11,6 @@ import { promises as fsPromises } from 'fs';
 import path from 'path';
 
 import { shouldExcludeFileTreeEntry } from './file-tree-excludes.js';
-
-export type DirectoryEntry = {
-  name: string;
-  path: string;
-  type: 'directory';
-};
 
 export type FileTreeEntry = {
   name: string;
@@ -36,51 +30,6 @@ export function permToRwx(perm: number): string {
   const w = perm & 2 ? 'w' : '-';
   const x = perm & 1 ? 'x' : '-';
   return r + w + x;
-}
-
-/** Expands a leading `~` in a browse/create-folder input path to the given workspace root. */
-export function expandWorkspacePath(inputPath: string, workspacesRoot: string): string {
-  if (!inputPath) return inputPath;
-  if (inputPath === '~') {
-    return workspacesRoot;
-  }
-  if (inputPath.startsWith('~/') || inputPath.startsWith('~\\')) {
-    return path.join(workspacesRoot, inputPath.slice(2));
-  }
-  return inputPath;
-}
-
-/**
- * Lightweight directory listing for the folder-picker UI: only the immediate
- * child directories of `dirPath`, with no per-entry stat() call. See the
- * `/api/browse-filesystem` handler for the perf rationale (issue #1).
- */
-export async function listDirectChildDirectories(dirPath: string): Promise<DirectoryEntry[]> {
-  let entries;
-  try {
-    entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
-  } catch (error: any) {
-    if (error?.code !== 'EACCES' && error?.code !== 'EPERM') {
-      console.error('Error reading directory:', error);
-    }
-    return [];
-  }
-
-  const directories: DirectoryEntry[] = [];
-  for (const entry of entries) {
-    // Skip heavy build/VCS/cache directories — same filter as getFileTree
-    // so the two listings stay consistent.
-    if (shouldExcludeFileTreeEntry(entry.name)) continue;
-
-    if (!entry.isDirectory()) continue;
-
-    directories.push({
-      name: entry.name,
-      path: path.join(dirPath, entry.name),
-      type: 'directory',
-    });
-  }
-  return directories;
 }
 
 const DEFAULT_FS_CONCURRENCY = 64;

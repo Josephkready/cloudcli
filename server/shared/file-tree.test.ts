@@ -5,9 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
-  expandWorkspacePath,
   getFileTree,
-  listDirectChildDirectories,
   permToRwx,
 } from '@/shared/file-tree.js';
 
@@ -38,43 +36,6 @@ test('permToRwx renders no permissions as ---', () => {
 
 test('permToRwx renders read+execute without write', () => {
   assert.equal(permToRwx(5), 'r-x');
-});
-
-//----------------- expandWorkspacePath ------------
-test('expandWorkspacePath returns the input unchanged when falsy', () => {
-  assert.equal(expandWorkspacePath('', '/home/user'), '');
-});
-
-test('expandWorkspacePath expands a bare tilde to the workspace root', () => {
-  assert.equal(expandWorkspacePath('~', '/home/user'), '/home/user');
-});
-
-test('expandWorkspacePath expands a tilde-prefixed path under the workspace root', () => {
-  assert.equal(expandWorkspacePath('~/projects/foo', '/home/user'), '/home/user/projects/foo');
-});
-
-test('expandWorkspacePath leaves an absolute path untouched', () => {
-  assert.equal(expandWorkspacePath('/abs/path', '/home/user'), '/abs/path');
-});
-
-//----------------- listDirectChildDirectories ------------
-test('listDirectChildDirectories returns only non-excluded child directories', async () => {
-  await withTree(async (root) => {
-    const entries = await listDirectChildDirectories(root);
-    assert.deepEqual(
-      entries.map((entry) => entry.name).sort(),
-      ['a-dir', 'b-dir'],
-    );
-    assert.deepEqual(entries.find((entry) => entry.name === 'a-dir'), {
-      name: 'a-dir',
-      path: path.join(root, 'a-dir'),
-      type: 'directory',
-    });
-  });
-});
-
-test('listDirectChildDirectories returns an empty list for a missing directory', async () => {
-  assert.deepEqual(await listDirectChildDirectories(path.join(tmpdir(), 'file-tree-missing-dir')), []);
 });
 
 //----------------- getFileTree ------------

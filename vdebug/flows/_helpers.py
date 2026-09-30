@@ -34,7 +34,7 @@ def open_sidebar(page, vd, label="sidebar open"):
     """Open the mobile drawer when the layout has one; a no-op where the sidebar is docked."""
     menu = page.get_by_role("button", name="Open menu")
     if page.get_by_role("button", name="Close sidebar").filter(visible=True).count():
-        return False  # already open (e.g. still up after the project wizard closes)
+        return False  # already open
     if menu.count() and menu.first.is_visible():
         menu.first.click()
         visible(page.get_by_role("button", name="Close sidebar")).wait_for()

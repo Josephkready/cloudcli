@@ -22,22 +22,10 @@ const DIST_INDEX_PATH = path.join(DIST_DIR, 'index.html');
 // added in server/index.js). This test proves both halves: importing is
 // side-effect-light enough to exercise the app directly, and no port gets
 // bound until we call `server.listen` ourselves below.
-//
-// Note: server/shared/utils.js hard-blocks `/tmp` itself as a workspace root
-// (it's in FORBIDDEN_WORKSPACE_PATHS, with only /var/tmp and /var/folders
-// carved out under /var) — so this temp dir must live under /var/tmp, not the
-// usual os.tmpdir() (which is /tmp on Linux), or every WORKSPACES_ROOT-scoped
-// route below would 403.
 const tempDirectory = await mkdtemp(path.join('/var/tmp', 'index-route-'));
-const workspaceRoot = path.join(tempDirectory, 'workspace');
-await mkdir(workspaceRoot, { recursive: true });
 process.env.DATABASE_PATH = path.join(tempDirectory, 'auth.db');
 process.env.VITE_AUTH_DISABLED = 'true';
 process.env.SERVER_PORT = '0';
-// browse-filesystem / create-folder are scoped to WORKSPACES_ROOT; point it at
-// a throwaway dir instead of the real home directory so these tests can't
-// read or write outside their temp sandbox.
-process.env.WORKSPACES_ROOT = workspaceRoot;
 
 // The full schema (users table etc.) must exist before any route under
 // authenticateToken's auth-bypass path runs `userDb.getFirstUser()`, and
@@ -88,52 +76,6 @@ test('GET /health responds without auth', async () => {
   });
 });
 
-test('GET /api/browse-filesystem lists the workspace root (auth bypassed)', async () => {
-  await withRunningServer(async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/browse-filesystem`);
-    assert.equal(response.status, 200);
-    const body = await response.json() as { path: string; suggestions: unknown; isAtRoot: boolean };
-    assert.equal(typeof body.path, 'string');
-    assert.equal(Array.isArray(body.suggestions), true);
-    assert.equal(body.isAtRoot, true);
-  });
-});
-
-test('GET /api/browse-filesystem?path=<traversal> is rejected outside the workspace root', async () => {
-  await withRunningServer(async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/browse-filesystem?path=${encodeURIComponent('/etc')}`);
-    assert.equal(response.status, 403);
-  });
-});
-
-test('POST /api/create-folder creates a directory and rejects a duplicate', async () => {
-  await withRunningServer(async (baseUrl) => {
-    const folderPath = path.join(workspaceRoot, 'new-folder');
-    const noPath = await fetch(`${baseUrl}/api/create-folder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    assert.equal(noPath.status, 400);
-
-    const created = await fetch(`${baseUrl}/api/create-folder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: folderPath }),
-    });
-    assert.equal(created.status, 200);
-    const createdBody = await created.json() as { success: boolean };
-    assert.equal(createdBody.success, true);
-
-    const duplicate = await fetch(`${baseUrl}/api/create-folder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: folderPath }),
-    });
-    assert.equal(duplicate.status, 409);
-  });
-});
-
 test('GET /nonexistent-file.png returns a plain 404 (static-asset short-circuit)', async () => {
   await withRunningServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/nonexistent-file.png`);
@@ -165,32 +107,6 @@ test('GET /some/spa/route redirects to the Vite dev server when no build exists'
       await rename(backupDir, DIST_DIR);
     }
   }
-});
-
-test('GET /api/browse-filesystem 400s on a file path and 404s on a missing one', async () => {
-  await withRunningServer(async (baseUrl) => {
-    const filePath = path.join(workspaceRoot, 'a-file.txt');
-    await writeFile(filePath, 'not a directory');
-
-    const notADir = await fetch(`${baseUrl}/api/browse-filesystem?path=${encodeURIComponent(filePath)}`);
-    assert.equal(notADir.status, 400);
-
-    const missingPath = path.join(workspaceRoot, 'does-not-exist');
-    const missing = await fetch(`${baseUrl}/api/browse-filesystem?path=${encodeURIComponent(missingPath)}`);
-    assert.equal(missing.status, 404);
-  });
-});
-
-test('POST /api/create-folder 404s when the parent directory is missing', async () => {
-  await withRunningServer(async (baseUrl) => {
-    const folderPath = path.join(workspaceRoot, 'missing-parent', 'child');
-    const response = await fetch(`${baseUrl}/api/create-folder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: folderPath }),
-    });
-    assert.equal(response.status, 404);
-  });
 });
 
 test('GET / and /index.html serve the built SPA with the router-basename injected, when dist exists', async () => {

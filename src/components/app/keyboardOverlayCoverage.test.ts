@@ -32,8 +32,8 @@ const SRC = path.resolve(HERE, '../..');
  * Marks a full-screen overlay: it covers the viewport, so it owns its bottom edge.
  *
  * Both spellings, because they are the same thing and the codebase uses both.
- * `ProjectCreationWizard` writes `fixed bottom-0 left-0 right-0 top-0` longhand
- * and was missed entirely by the `inset-0`-only version of this check — found
+ * The (since removed) project wizard wrote `fixed bottom-0 left-0 right-0 top-0`
+ * longhand and was missed entirely by the `inset-0`-only version of this check — found
  * while reviewing this test, not by the test.
  */
 const OVERLAY = /fixed inset-0|fixed bottom-0 left-0 right-0 top-0/;
@@ -73,8 +73,8 @@ function walk(dir: string, out: string[] = []): string[] {
  * Does this file, or a component it directly renders, take text?
  *
  * One level deep, because an overlay commonly holds no field itself and renders
- * children that do — `ProjectCreationWizard` has zero inputs of its own and
- * renders three components full of them, so a file-local check called it clean
+ * children that do — the (since removed) project wizard had zero inputs of its
+ * own and rendered three components full of them, so a file-local check called it clean
  * while the keyboard covered its form. One level is enough for that shape and
  * stops well short of walking the whole tree, which would drag in every leaf and
  * flag overlays that merely *can* reach a field somewhere.

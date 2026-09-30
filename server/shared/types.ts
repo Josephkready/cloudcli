@@ -588,14 +588,3 @@ export type CreateProjectPathResult = {
   project: ProjectRepositoryRow | null;
 };
 
-/**
- * Validation result for user-supplied workspace/project paths.
- *
- * `resolvedPath` is present only when validation succeeds. `error` is present
- * only when validation fails and is suitable for user-facing diagnostics.
- */
-export type WorkspacePathValidationResult = {
-  valid: boolean;
-  resolvedPath?: string;
-  error?: string;
-};

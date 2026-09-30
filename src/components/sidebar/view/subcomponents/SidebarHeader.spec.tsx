@@ -29,7 +29,6 @@ function renderHeader(overrides: Partial<React.ComponentProps<typeof SidebarHead
     onSetOverlay: vi.fn(),
     onRefresh: vi.fn(),
     isRefreshing: false,
-    onCreateProject: vi.fn(),
     onCollapseSidebar: vi.fn(),
     t,
     ...overrides,
@@ -83,7 +82,6 @@ describe('SidebarHeader search autofocus (#366)', () => {
       onSetOverlay: vi.fn(),
       onRefresh: vi.fn(),
       isRefreshing: false,
-      onCreateProject: vi.fn(),
       onCollapseSidebar: vi.fn(),
       t,
     };
@@ -95,16 +93,20 @@ describe('SidebarHeader search autofocus (#366)', () => {
 });
 
 /*
- * The mobile header's refresh and create-project buttons are icon-only. Without an
- * aria-label they were anonymous "button"s to screen readers and to vdebug's create-project flow.
- * jsdom applies no CSS, so the desktop header (named via title) and the mobile one both mount:
- * every copy must be named.
+ * The mobile header's refresh button is icon-only. Without an aria-label it was an
+ * anonymous "button" to screen readers. jsdom applies no CSS, so the desktop header
+ * (named via title) and the mobile one both mount: every copy must be named.
  */
 describe('SidebarHeader icon buttons', () => {
-  it('names every refresh and create-project button', () => {
+  it('names every refresh button', () => {
     renderHeader();
 
     expect(screen.getAllByRole('button', { name: 'tooltips.refresh' })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'tooltips.createProject' })).toHaveLength(2);
+  });
+
+  it('offers no create-project button (project creation was removed)', () => {
+    renderHeader();
+
+    expect(screen.queryByRole('button', { name: /create/i })).toBeNull();
   });
 });

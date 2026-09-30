@@ -5,7 +5,6 @@ import { useDeviceSettings } from '../../../hooks/useDeviceSettings';
 import { useVersionCheck } from '../../../hooks/useVersionCheck';
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { useSidebarController } from '../hooks/useSidebarController';
-import { usePaletteOps } from '../../../contexts/PaletteOpsContext';
 import type { LLMProvider } from '../../../types/app';
 import type { ArchivedSessionListItem, SidebarProps } from '../types/types';
 
@@ -39,13 +38,11 @@ function Sidebar({
   const { restartRequired, currentVersion } = useVersionCheck();
   const { preferences, setPreference } = useUiPreferences();
   const { sidebarVisible, spacesExpanded } = preferences;
-  const paletteOps = usePaletteOps();
 
   const {
     isSidebarCollapsed,
     expandedProjects,
     editingProject,
-    showNewProject,
     editingName,
     initialSessionsLoaded,
     currentTime,
@@ -90,7 +87,6 @@ function Sidebar({
     updateSessionSummary,
     collapseSidebar: handleCollapseSidebar,
     expandSidebar: handleExpandSidebar,
-    setShowNewProject,
     setEditingName,
     setEditingSession,
     setEditingSessionName,
@@ -123,10 +119,6 @@ function Sidebar({
     document.documentElement.classList.toggle('pwa-mode', isPWA);
     document.body.classList.toggle('pwa-mode', isPWA);
   }, [isPWA]);
-
-  const handleProjectCreated = () => {
-    void paletteOps.refreshProjects();
-  };
 
   // Stabilized so `React.memo` on the row components (SidebarProjectItem,
   // SidebarSessionItem, SidebarProjectSessions, ConversationRow) actually
@@ -206,8 +198,6 @@ function Sidebar({
   const onRefreshProjects = useCallback(() => {
     void refreshProjects();
   }, [refreshProjects]);
-
-  const onCreateProject = useCallback(() => setShowNewProject(true), [setShowNewProject]);
 
   const projectListProps: SidebarProjectListProps = useMemo(
     () => ({
@@ -295,9 +285,6 @@ function Sidebar({
         showSettings={showSettings}
         settingsInitialTab={settingsInitialTab}
         onCloseSettings={onCloseSettings}
-        showNewProject={showNewProject}
-        onCloseNewProject={() => setShowNewProject(false)}
-        onProjectCreated={handleProjectCreated}
         deleteConfirmation={deleteConfirmation}
         onCancelDeleteProject={() => setDeleteConfirmation(null)}
         onConfirmDeleteProject={confirmDeleteProject}
@@ -343,7 +330,6 @@ function Sidebar({
             onConversationResultClick={onConversationResultClick}
             onRefresh={onRefreshProjects}
             isRefreshing={isRefreshing}
-            onCreateProject={onCreateProject}
             onCollapseSidebar={handleCollapseSidebar}
             restartRequired={restartRequired}
             currentVersion={currentVersion}

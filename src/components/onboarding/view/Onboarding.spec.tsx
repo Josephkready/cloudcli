@@ -17,7 +17,7 @@ const { default: Onboarding } = await import('./Onboarding');
  * #236: a malformed git email left "Next" disabled with no explanation. Because
  * the button was disabled by the same predicate that guards handleNextStep, the
  * validation copy in that handler could never render — it was dead code. Next
- * now stays enabled (matching the project-creation wizard) so the message shows.
+ * now stays enabled so the message shows.
  */
 
 const jsonResponse = (payload: unknown) => ({

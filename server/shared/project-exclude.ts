@@ -7,10 +7,6 @@
  * user ever ran the CLI from — `/tmp/myrepo-feature-abc/`, multica workspace
  * dirs, agent worktrees — which clutters the sidebar with paths that no longer
  * exist on disk.
- *
- * Only auto-discovery runs through this filter. Explicit "Create Project" UI
- * flow still goes through `validateWorkspacePath`, which has its own root-dir
- * check.
  */
 
 /**

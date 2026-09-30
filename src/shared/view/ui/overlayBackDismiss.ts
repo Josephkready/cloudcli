@@ -11,8 +11,8 @@
  * sentinel; and an overlay closed by any other means (Esc, backdrop, its own X)
  * pops its own sentinel so a later Back isn't silently swallowed by a stale one.
  *
- * Why one shared listener instead of one per overlay: with the folder picker
- * stacked on the project wizard, a per-overlay listener + a per-overlay cleanup
+ * Why one shared listener instead of one per overlay: with one dialog stacked on
+ * another, a per-overlay listener + a per-overlay cleanup
  * `history.back()` would let one Back (or one programmatic cleanup) close *both*
  * — the classic modal-history double-close. A single listener that only ever
  * touches the top of the stack, plus one `ignoreNextPop` guard around the
@@ -24,10 +24,9 @@
  * Topmost == last registered, the same ordering `overlayLayers.ts` uses for Esc.
  * That holds only when a nested overlay opens in a *later* commit than its parent
  * (React fires child effects before parent effects, so a same-commit nested mount
- * would register child-first and mis-target Back). Today's only nested pair — the
- * folder picker inside the project wizard — opens via a separate click, so it is
- * always a later commit; a future stacked overlay that starts active alongside
- * its parent would need explicit depth ordering here and in `overlayLayers.ts`.
+ * would register child-first and mis-target Back). A nested overlay opened by a
+ * separate click is always a later commit; one that starts active alongside its
+ * parent would need explicit depth ordering here and in `overlayLayers.ts`.
  */
 
 type BackDismissEntry = {

@@ -35,7 +35,6 @@ function renderHeader(
     onSetOverlay: noop,
     onRefresh: noop,
     isRefreshing: false,
-    onCreateProject: noop,
     onCollapseSidebar: noop,
     t,
     ...overrides,

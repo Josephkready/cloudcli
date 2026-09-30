@@ -87,7 +87,6 @@ describe('entry chunk static import graph (#267)', () => {
       'src/components/code-editor/view/CodeEditor.tsx',
       'src/components/code-editor/view/EditorSidebar.tsx',
       'src/components/settings/view/Settings.tsx',
-      'src/components/project-creation-wizard/ProjectCreationWizard.tsx',
       'src/components/onboarding/view/Onboarding.tsx',
       // #287: the highlighted code block. Its unhighlighted stand-in
       // (`PlainCodeBlock`) IS eager by design — that is the point of the split,

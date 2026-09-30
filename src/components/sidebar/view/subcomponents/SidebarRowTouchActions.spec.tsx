@@ -78,7 +78,6 @@ function renderConversationsList() {
       currentTime={NOW}
       onSelect={vi.fn()}
       onNewConversation={vi.fn()}
-      onCreateProject={vi.fn()}
       t={t}
       {...rowActions}
     />,

@@ -137,7 +137,6 @@ type SidebarContentProps = {
   onConversationResultClick: (projectId: string | null, sessionId: string, provider: string, messageTimestamp?: string | null, messageSnippet?: string | null) => void;
   onRefresh: () => void;
   isRefreshing: boolean;
-  onCreateProject: () => void;
   onCollapseSidebar: () => void;
   restartRequired: boolean;
   currentVersion: string;
@@ -173,7 +172,6 @@ export default function SidebarContent({
   onConversationResultClick,
   onRefresh,
   isRefreshing,
-  onCreateProject,
   onCollapseSidebar,
   restartRequired,
   currentVersion,
@@ -216,7 +214,6 @@ export default function SidebarContent({
       // minute doesn't cascade into every row re-rendering too.
       onSelect={handleConversationSelect}
       onNewConversation={projectListProps.onNewSession}
-      onCreateProject={onCreateProject}
       editingSession={projectListProps.editingSession}
       editingSessionName={projectListProps.editingSessionName}
       onEditingSessionNameChange={projectListProps.onEditingSessionNameChange}
@@ -249,7 +246,6 @@ export default function SidebarContent({
         onSetOverlay={onSetOverlay}
         onRefresh={onRefresh}
         isRefreshing={isRefreshing}
-        onCreateProject={onCreateProject}
         onCollapseSidebar={onCollapseSidebar}
         t={t}
       />

@@ -65,11 +65,7 @@ Performance benchmark (measures the core chat journeys end to end, against a see
 
 Browser SSE calls use `Authorization: Bearer <token>`; bearer tokens are not
 accepted in URL query parameters. Conversation search remains
-`GET /api/providers/search/sessions?q=...`, while repository clone progress uses
-`POST /api/projects/clone-progress` with a JSON body containing `path`,
-`githubUrl`, and, when credentials are needed, optional `githubTokenId` or
-`newGithubToken`. Clients using the former GET/query-string clone contract must
-migrate to the POST body contract.
+`GET /api/providers/search/sessions?q=...`.
 
 ## Local feature-usage counters
 
@@ -125,8 +121,7 @@ accepted `zoom-disabled` hit in place of per-input `ios-input-zoom` hits (see
 `judge_notes.md`). Every text field the fixture can reach has a flow that types into it and
 marks while the keyboard is up: sidebar search (`home-sidebar`, `search-chats`), the composer
 and its `/` and `@` menus (`composer-keyboard`, `new-chat-turn`, `composer-commands`), the
-folder and model pickers (`new-chat-turn`, `model-picker`), the project wizard and folder
-browser (`create-project`), inline renames (`rename-project`, `rename-session`), the code
+folder and model pickers (`new-chat-turn`, `model-picker`), inline renames (`rename-project`, `rename-session`), the code
 editor (`code-editor`), the bug reporter (`bug-report`) and Settings (`settings-api-tokens`,
 `settings-permissions`, `settings-voice`). Not covered, because the fixture never shows them:
 login/setup (auth is off), onboarding's git fields (onboarding is pre-completed), the

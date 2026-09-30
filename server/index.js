@@ -10,17 +10,7 @@ import { pathToFileURL } from 'url';
 import express from 'express';
 import cors from 'cors';
 
-import {
-    AppError,
-    WORKSPACES_ROOT,
-    isGitRepositoryRoot,
-    validateWorkspacePath,
-} from '@/shared/utils.js';
-import {
-    annotateRepositoryFlags,
-    buildBrowseSuggestions,
-    parseBrowseCommonDirs,
-} from '@/shared/browse-suggestions.js';
+import { AppError } from '@/shared/utils.js';
 import {
     getRouterBasename,
     injectRouterBasenameIntoHtml,
@@ -79,7 +69,6 @@ import { IS_PLATFORM, AUTH_DISABLED } from './constants/config.js';
 import { resolveInstallMode } from './shared/self-update.js';
 import { createHealthRouter, readBuildInfo } from './shared/build-info.js';
 import { c } from './utils/colors.js';
-import { expandWorkspacePath, listDirectChildDirectories } from './shared/file-tree.js';
 import { getLocalServerMarkerPath, removeLocalServerMarker, writeLocalServerMarker } from './shared/local-server-marker.js';
 
 const __dirname = getModuleDir(import.meta.url);
@@ -323,139 +312,6 @@ mountStaticAssets(app, {
 // API Routes (protected)
 // /api/config endpoint removed - no longer needed
 // Frontend now uses window.location for WebSocket URLs
-
-// Common-dir names promoted to the front of the folder picker when browsing the
-// workspace root. Read once at startup from BROWSE_COMMON_DIRS. Default (unset)
-// keeps the historical hardcoded list for backward compatibility; set the var
-// to a comma-separated list to customize, or to an empty string to disable the
-// reordering entirely (useful when WORKSPACES_ROOT is a narrow root like ~/repos
-// where those names never appear — see issue #227). See server/shared/browse-suggestions.ts.
-const BROWSE_COMMON_DIRS = parseBrowseCommonDirs(process.env.BROWSE_COMMON_DIRS);
-
-// Browse filesystem endpoint for the project-creation folder picker. Returns
-// only immediate child directories of the requested path — no recursion, no
-// per-entry stat — which keeps the folder picker responsive even when the home
-// directory contains huge subtrees like ~/.claude/projects/.
-app.get('/api/browse-filesystem', authenticateToken, async (req, res) => {
-    try {
-        const { path: dirPath, repoFlags } = req.query;
-        // Opt-in: the folder picker needs to know which children are git
-        // repositories so it can list repos only (#309). Path autocomplete
-        // doesn't, and this costs a stat per entry — so it stays off by
-        // default rather than being folded into the listing.
-        const includeRepoFlags = repoFlags === '1' || repoFlags === 'true';
-
-        // Default to home directory if no path provided
-        const defaultRoot = WORKSPACES_ROOT;
-        let targetPath = dirPath ? expandWorkspacePath(dirPath, WORKSPACES_ROOT) : defaultRoot;
-
-        // Resolve and normalize the path
-        targetPath = path.resolve(targetPath);
-
-        // Security check - ensure path is within allowed workspace root
-        const validation = await validateWorkspacePath(targetPath);
-        if (!validation.valid) {
-            return res.status(403).json({ error: validation.error });
-        }
-        const resolvedPath = validation.resolvedPath || targetPath;
-
-        // Security check - ensure path is accessible
-        try {
-            await fs.promises.access(resolvedPath);
-            const stats = await fs.promises.stat(resolvedPath);
-
-            if (!stats.isDirectory()) {
-                return res.status(400).json({ error: 'Path is not a directory' });
-            }
-        } catch (err) {
-            return res.status(404).json({ error: 'Directory not accessible' });
-        }
-
-        // List only the immediate child directories. The folder picker doesn't
-        // render anything below this level, so there's no reason to recurse —
-        // see listDirectChildDirectories for the perf rationale.
-        const directories = (await listDirectChildDirectories(resolvedPath))
-            .sort((a, b) => {
-                const aHidden = a.name.startsWith('.');
-                const bHidden = b.name.startsWith('.');
-                if (aHidden && !bHidden) return 1;
-                if (!aHidden && bHidden) return -1;
-                return a.name.localeCompare(b.name);
-            });
-
-        // When browsing the workspace root, optionally promote the configured
-        // common-dir names to the front (see BROWSE_COMMON_DIRS above). The
-        // ordering logic lives in the pure, unit-tested buildBrowseSuggestions.
-        let resolvedWorkspaceRoot = defaultRoot;
-        try {
-            resolvedWorkspaceRoot = await fsPromises.realpath(defaultRoot);
-        } catch (error) {
-            // Use default root as-is if realpath fails
-        }
-        const isAtRoot = resolvedPath === resolvedWorkspaceRoot;
-        const orderedDirectories = buildBrowseSuggestions(
-            directories,
-            BROWSE_COMMON_DIRS,
-            isAtRoot,
-        );
-        const suggestions = includeRepoFlags
-            ? await annotateRepositoryFlags(orderedDirectories, isGitRepositoryRoot)
-            : orderedDirectories;
-
-        // `isAtRoot` is what lets the picker hide its ".." row here: only the
-        // server knows WORKSPACES_ROOT, so a client deriving the parent by
-        // string manipulation would offer a click that can only 403 (#238).
-        res.json({
-            path: resolvedPath,
-            suggestions: suggestions,
-            isAtRoot
-        });
-
-    } catch (error) {
-        console.error('Error browsing filesystem:', error);
-        res.status(500).json({ error: 'Failed to browse filesystem' });
-    }
-});
-
-app.post('/api/create-folder', authenticateToken, async (req, res) => {
-    try {
-        const { path: folderPath } = req.body;
-        if (!folderPath) {
-            return res.status(400).json({ error: 'Path is required' });
-        }
-        const expandedPath = expandWorkspacePath(folderPath, WORKSPACES_ROOT);
-        const resolvedInput = path.resolve(expandedPath);
-        const validation = await validateWorkspacePath(resolvedInput);
-        if (!validation.valid) {
-            return res.status(403).json({ error: validation.error });
-        }
-        const targetPath = validation.resolvedPath || resolvedInput;
-        const parentDir = path.dirname(targetPath);
-        try {
-            await fs.promises.access(parentDir);
-        } catch (err) {
-            return res.status(404).json({ error: 'Parent directory does not exist' });
-        }
-        try {
-            await fs.promises.access(targetPath);
-            return res.status(409).json({ error: 'Folder already exists' });
-        } catch (err) {
-            // Folder doesn't exist, which is what we want
-        }
-        try {
-            await fs.promises.mkdir(targetPath, { recursive: false });
-            res.json({ success: true, path: targetPath });
-        } catch (mkdirError) {
-            if (mkdirError.code === 'EEXIST') {
-                return res.status(409).json({ error: 'Folder already exists' });
-            }
-            throw mkdirError;
-        }
-    } catch (error) {
-        console.error('Error creating folder:', error);
-        res.status(500).json({ error: 'Failed to create folder' });
-    }
-});
 
 // Chat image uploads moved to POST /api/assets/images (server/modules/assets),
 // which stores them in the global ~/.cloudcli/assets folder.

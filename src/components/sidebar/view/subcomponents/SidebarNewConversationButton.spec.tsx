@@ -33,18 +33,16 @@ const mindSubfolder = project({
 
 function renderPicker(projects: Project[] = [mind, mindSubfolder]) {
   const onNewConversation = vi.fn();
-  const onCreateProject = vi.fn();
 
   render(
     <SidebarNewConversationButton
       projects={projects}
       onNewConversation={onNewConversation}
-      onCreateProject={onCreateProject}
       t={i18n.getFixedT('en', 'sidebar')}
     />,
   );
 
-  return { onNewConversation, onCreateProject };
+  return { onNewConversation };
 }
 
 async function openPicker(user: ReturnType<typeof userEvent.setup>) {

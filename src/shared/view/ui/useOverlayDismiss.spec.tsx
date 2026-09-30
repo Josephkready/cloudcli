@@ -8,9 +8,8 @@ import { useOverlayDismiss } from './useOverlayDismiss';
 /*
  * #243: several dialogs are hand-rolled `fixed inset-0` overlays rather than
  * the shared Dialog primitive, so Esc and backdrop clicks did nothing. This
- * hook is the shared opt-in they use. The stacking rule matters because the
- * folder picker renders *inside* the project wizard — one Esc must close only
- * the topmost overlay.
+ * hook is the shared opt-in they use. The stacking rule matters because a
+ * dialog can open inside another — one Esc must close only the topmost overlay.
  */
 
 function Overlay({

@@ -8,23 +8,17 @@ import type { DeleteProjectConfirmation, SessionDeleteConfirmation } from '../..
 
 import SidebarModals from './SidebarModals';
 
-// Avoid pulling in the real (heavy) Settings/ProjectCreationWizard chunks:
+// Avoid pulling in the real (heavy) Settings chunk:
 // stub `lazySurface` so it returns a plain, synchronously-rendered component
 // instead of a `React.lazy` wrapper around a dynamic import.
 vi.mock('../../../lazy/LazySurface', () => ({
   __esModule: true,
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  lazySurface: (loader: () => Promise<{ default: unknown }>) => {
-    const name = String(loader);
-    if (name.includes('settings')) {
-      return (props: Record<string, unknown>) => (
-        <div data-testid="settings-stub">
-          settings-open:{String(props.isOpen)}:tab:{String(props.initialTab)}:projects:{JSON.stringify(props.projects)}
-        </div>
-      );
-    }
-    return () => <div data-testid="wizard-stub">wizard</div>;
-  },
+  lazySurface: () => (props: Record<string, unknown>) => (
+    <div data-testid="settings-stub">
+      settings-open:{String(props.isOpen)}:tab:{String(props.initialTab)}:projects:{JSON.stringify(props.projects)}
+    </div>
+  ),
 }));
 
 const t = ((key: string, opts?: string | { defaultValue?: string; count?: number }) => {
@@ -49,9 +43,6 @@ function baseProps(overrides: Partial<Record<string, unknown>> = {}) {
     showSettings: false,
     settingsInitialTab: 'general',
     onCloseSettings: vi.fn(),
-    showNewProject: false,
-    onCloseNewProject: vi.fn(),
-    onProjectCreated: vi.fn(),
     deleteConfirmation: null,
     onCancelDeleteProject: vi.fn(),
     onConfirmDeleteProject: vi.fn(),
@@ -67,7 +58,6 @@ describe('SidebarModals', () => {
   it('renders nothing visible when every surface is closed', () => {
     const { container } = render(<SidebarModals {...(baseProps() as any)} />);
     expect(container.querySelector('[data-testid="settings-stub"]')).toBeNull();
-    expect(container.querySelector('[data-testid="wizard-stub"]')).toBeNull();
     expect(screen.queryByText('deleteConfirmation.deleteProject')).not.toBeInTheDocument();
   });
 
@@ -77,11 +67,6 @@ describe('SidebarModals', () => {
     expect(stub.textContent).toContain('settings-open:true');
     expect(stub.textContent).toContain('tab:voice');
     expect(stub.textContent).toContain('My Project');
-  });
-
-  it('renders the new-project wizard when showNewProject is true', () => {
-    render(<SidebarModals {...(baseProps({ showNewProject: true }) as any)} />);
-    expect(screen.getByTestId('wizard-stub')).toBeInTheDocument();
   });
 
   it('shows the delete-project confirmation with the session count when sessions exist', () => {
