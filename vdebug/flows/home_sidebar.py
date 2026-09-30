@@ -5,7 +5,7 @@ from _helpers import boot, open_sidebar, visible
 NAME = "home-sidebar"
 DESCRIPTION = ("App boot -> project chooser; open the sidebar (drawer on small screens), "
                "expand the Spaces list, then type into 'Search projects' to filter it (on iPhone/iPad "
-               "the on-screen keyboard is up while typing), then press Enter to dismiss the keyboard")
+               "the on-screen keyboard is up while typing), then dismiss the keyboard (field blurred)")
 SOURCE = "standard"
 START = None
 

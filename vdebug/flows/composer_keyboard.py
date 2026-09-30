@@ -6,7 +6,8 @@ NAME = "composer-keyboard"
 DESCRIPTION = ("Open a long (~120-turn) conversation -> tap the message composer at the bottom "
                "(on iPhone/iPad the on-screen keyboard opens and the composer must stay visible "
                "above it) -> type a reply, then a second line with Shift+Enter (the composer grows) "
-               "-> tap Send (keyboard closes) -> the mock assistant reply streams in at the bottom")
+               "-> tap Send (the composer keeps focus, so the keyboard stays up by design) -> the mock "
+               "assistant reply streams in above the composer")
 SOURCE = "standard"
 START = None
 
@@ -26,7 +27,7 @@ def run(page, vd):
     composer.press("Shift+Enter")
     composer.press_sequentially("Keep the answer short, please.", delay=15)
     vd.mark("multiline draft")
-    visible(page.get_by_role("button", name="Send")).click()   # tapping Send blurs: keyboard closes
+    visible(page.get_by_role("button", name="Send")).click()   # composer refocuses: keyboard stays up
     page.get_by_text("the mock provider.").last.wait_for()
     visible(page.get_by_role("button", name="Send")).wait_for()
     vd.mark("reply complete")

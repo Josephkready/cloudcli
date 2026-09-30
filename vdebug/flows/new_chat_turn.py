@@ -6,7 +6,7 @@ NAME = "new-chat-turn"
 DESCRIPTION = ("'New conversation' -> folder picker -> type in 'Search folders…' to filter it "
                "(on iPhone/iPad the on-screen keyboard opens; the filtered list must stay above it) "
                "-> choose the project -> empty composer; type a prompt (keyboard up), send it "
-               "(keyboard closes), and watch the (mock) assistant reply stream in")
+               "(composer keeps focus, keyboard stays up), and watch the (mock) assistant reply stream in")
 SOURCE = "standard"
 START = None
 
@@ -23,7 +23,7 @@ def run(page, vd):
     # keyboard too). No autofocus by design (#366), so tap the search box first.
     search = visible(page.get_by_placeholder("Search folders…"))
     search.click()
-    search.press_sequentially("bench", delay=20)
+    search.press_sequentially("primary", delay=20)
     vd.mark("folder search typed")
     visible(page.locator("[cmdk-item]")).click()
     composer = visible(page.locator(COMPOSER))
