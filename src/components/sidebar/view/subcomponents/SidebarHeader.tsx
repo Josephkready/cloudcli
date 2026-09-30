@@ -252,6 +252,7 @@ export default function SidebarHeader({
           <div className="flex flex-shrink-0 gap-1.5">
             <button
               className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted/50 transition-transform duration-instant active:scale-95"
+              aria-label={t('tooltips.refresh')}
               onClick={onRefresh}
               disabled={isRefreshing}
             >
@@ -259,6 +260,7 @@ export default function SidebarHeader({
             </button>
             <button
               className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/90 text-primary-foreground transition-transform duration-instant active:scale-95"
+              aria-label={t('tooltips.createProject')}
               onClick={onCreateProject}
             >
               <FolderPlus className="h-4 w-4" />
