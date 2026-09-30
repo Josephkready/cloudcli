@@ -5,7 +5,7 @@ type SurfaceSkeletonProps = {
   label?: string;
   /**
    * Render as a centred overlay instead of an in-flow pane. Used by the
-   * portalled modal surfaces (settings, project wizard) so the click that
+   * portalled modal surfaces (e.g. settings) so the click that
    * opened them produces immediate feedback.
    */
   overlay?: boolean;

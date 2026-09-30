@@ -122,7 +122,6 @@ export function useSidebarController({
   const paletteOps = usePaletteOps();
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [editingProject, setEditingProject] = useState<string | null>(null);
-  const [showNewProject, setShowNewProject] = useState(false);
   const [editingName, setEditingName] = useState('');
   const [initialSessionsLoaded, setInitialSessionsLoaded] = useState<Set<string>>(new Set());
   // Shared once-a-minute clock (see useMinuteClock) instead of a private
@@ -906,7 +905,6 @@ export function useSidebarController({
     isSidebarCollapsed,
     expandedProjects,
     editingProject,
-    showNewProject,
     editingName,
     initialSessionsLoaded,
     currentTime,
@@ -947,7 +945,6 @@ export function useSidebarController({
     updateSessionSummary,
     collapseSidebar,
     expandSidebar,
-    setShowNewProject,
     setEditingName,
     setEditingSession,
     setEditingSessionName,

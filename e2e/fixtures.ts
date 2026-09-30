@@ -1,5 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 import { test as base, expect } from '@playwright/test';
@@ -12,16 +12,16 @@ import { test as base, expect } from '@playwright/test';
  *   - a unique SERVER_PORT (single-port prod-style: the server serves the
  *     pre-built dist/ SPA — no Vite proxy),
  *   - a throwaway DATABASE_PATH,
- *   - a temp HOME/WORKSPACES_ROOT under /var/tmp (which the workspace-path
- *     validator allows, unlike /tmp), so `GET /api/projects` scans an empty
+ *   - a temp HOME under /var/tmp, so `GET /api/projects` scans an empty
  *     `~/.claude` instead of the real (slow) one (issue #188),
  *   - VITE_AUTH_DISABLED=true (login-free boot, seeds the default user),
  *   - AGENT_MOCK_PROVIDER=true (chat runtimes re-pointed at the deterministic
  *     in-process mock).
  *
- * It then seeds onboarding-complete + one project over REST (auth is disabled,
- * so no token is needed) and hands the worker's tests a `baseURL` plus the
- * seeded project path.
+ * One project is seeded straight into the database before the server starts
+ * (there is no create-project endpoint), then onboarding is completed over REST
+ * (auth is disabled, so no token is needed). The worker's tests get a `baseURL`
+ * plus the seeded project path.
  */
 
 export type E2EServer = {
@@ -96,6 +96,12 @@ export const test = base.extend<
       const dbPath = path.join(home, 'auth.db');
       const projectName = 'e2e-project';
       const projectPath = path.join(home, projectName);
+      mkdirSync(projectPath);
+      execFileSync(
+        path.join(REPO_ROOT, 'node_modules', '.bin', 'tsx'),
+        ['--tsconfig', 'server/tsconfig.json', 'server/modules/database/seed-project.ts', projectPath, projectName],
+        { cwd: REPO_ROOT, env: { ...process.env, DATABASE_PATH: dbPath, HOME: home }, stdio: 'pipe' },
+      );
 
       const child: ChildProcess = spawn(
         path.join(REPO_ROOT, 'node_modules', '.bin', 'tsx'),
@@ -110,7 +116,6 @@ export const test = base.extend<
             HOST: '127.0.0.1',
             DATABASE_PATH: dbPath,
             HOME: home,
-            WORKSPACES_ROOT: home,
             VITE_AUTH_DISABLED: 'true',
             AGENT_MOCK_PROVIDER: 'true',
             JWT_SECRET: 'e2e-secret',
@@ -137,12 +142,8 @@ export const test = base.extend<
               ? `Exit code ${serverExitCode}. Last server output:\n${serverLog.slice(-30).join('')}`
               : null,
         });
-        // Seed: complete onboarding for the default user, then register one project.
+        // Seed: complete onboarding for the default user (the project row is already in the DB).
         await postJson(baseURL, '/api/user/complete-onboarding');
-        await postJson(baseURL, '/api/projects/create-project', {
-          path: projectPath,
-          customName: projectName,
-        });
 
         await use({ baseURL, port, home, projectPath, projectName });
       } finally {

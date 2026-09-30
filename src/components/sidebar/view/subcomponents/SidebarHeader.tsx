@@ -1,4 +1,4 @@
-import { Archive, FolderPlus, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
+import { Archive, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
 import { useEffect, useRef, type ComponentType } from 'react';
 import type { TFunction } from 'i18next';
 
@@ -26,7 +26,6 @@ type SidebarHeaderProps = {
   onSetOverlay: (next: SidebarOverlay) => void;
   onRefresh: () => void;
   isRefreshing: boolean;
-  onCreateProject: () => void;
   onCollapseSidebar: () => void;
   t: TFunction;
 };
@@ -81,7 +80,6 @@ export default function SidebarHeader({
   onSetOverlay,
   onRefresh,
   isRefreshing,
-  onCreateProject,
   onCollapseSidebar,
   t,
 }: SidebarHeaderProps) {
@@ -178,15 +176,6 @@ export default function SidebarHeader({
               variant="ghost"
               size="sm"
               className="h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-accent/80 hover:text-foreground"
-              onClick={onCreateProject}
-              title={t('tooltips.createProject')}
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-accent/80 hover:text-foreground"
               onClick={onCollapseSidebar}
               title={t('tooltips.hideSidebar')}
             >
@@ -257,13 +246,6 @@ export default function SidebarHeader({
               disabled={isRefreshing}
             >
               <RefreshCw className={`h-4 w-4 text-muted-foreground ${isRefreshing ? 'animate-spin' : ''}`} />
-            </button>
-            <button
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/90 text-primary-foreground transition-transform duration-instant active:scale-95"
-              aria-label={t('tooltips.createProject')}
-              onClick={onCreateProject}
-            >
-              <FolderPlus className="h-4 w-4" />
             </button>
           </div>
         </div>

@@ -162,11 +162,6 @@ export const api = {
     const params = new URLSearchParams({ q: query, limit: String(limit) });
     return `/api/providers/search/sessions?${params.toString()}`;
   },
-  createProject: (projectData) =>
-    authenticatedFetch('/api/projects/create-project', {
-      method: 'POST',
-      body: JSON.stringify(projectData),
-    }),
   migrateLegacyProjectStars: (projectIds) =>
     authenticatedFetch('/api/projects/migrate-legacy-stars', {
       method: 'POST',
@@ -185,20 +180,6 @@ export const api = {
     }),
   getFiles: (projectId, options = {}) =>
     authenticatedFetch(`/api/projects/${projectId}/files`, options),
-
-  // Browse filesystem for project suggestions
-  browseFilesystem: (dirPath = null) => {
-    const params = new URLSearchParams();
-    if (dirPath) params.append('path', dirPath);
-
-    return authenticatedFetch(`/api/browse-filesystem?${params}`);
-  },
-
-  createFolder: (folderPath) =>
-    authenticatedFetch('/api/create-folder', {
-      method: 'POST',
-      body: JSON.stringify({ path: folderPath }),
-    }),
 
   // User endpoints
   user: {

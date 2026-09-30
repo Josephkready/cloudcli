@@ -47,7 +47,6 @@ export const FEATURE_KEYS = [
   'sidebar.archived_view',
   'session.archive',
   'session.rename',
-  'project.create',
   'project.rename',
   'project.star',
 

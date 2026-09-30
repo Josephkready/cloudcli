@@ -45,7 +45,6 @@ type SidebarConversationsListProps = SessionRowActions & {
   // Launches a new conversation in the chosen project (wired to handleNewSession).
   onNewConversation: (project: Project) => void;
   // Opens the create-project flow, for starting a conversation in a new folder.
-  onCreateProject: () => void;
   t: TFunction;
 };
 
@@ -412,7 +411,6 @@ export default function SidebarConversationsList({
   currentTime,
   onSelect,
   onNewConversation,
-  onCreateProject,
   editingSession,
   editingSessionName,
   onEditingSessionNameChange,
@@ -460,7 +458,6 @@ export default function SidebarConversationsList({
           <SidebarNewConversationButton
             projects={projects}
             onNewConversation={onNewConversation}
-            onCreateProject={onCreateProject}
             t={t}
           />
         </div>
@@ -487,7 +484,6 @@ export default function SidebarConversationsList({
         <SidebarNewConversationButton
           projects={projects}
           onNewConversation={onNewConversation}
-          onCreateProject={onCreateProject}
           t={t}
         />
       </div>

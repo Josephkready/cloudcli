@@ -211,8 +211,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   <button
                     // Deliberately NOT gated on validity: disabling here would
                     // re-hide the reason the step is blocked, which is the whole
-                    // bug (#236). Matches the project-creation wizard, which
-                    // keeps Next live and surfaces the error on click.
+                    // bug (#236). Next stays live and surfaces the error on click.
                     onClick={handleNextStep}
                     disabled={isSubmitting}
                     className={`flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 font-medium text-primary-foreground shadow-lg shadow-primary/25 transition-[transform,box-shadow] duration-fast enabled:active:scale-[0.99] enabled:hover:brightness-110 ${disabledControlClasses}`}

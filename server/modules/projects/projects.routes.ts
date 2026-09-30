@@ -1,7 +1,6 @@
 import express from 'express';
 
-import { createProject, updateProjectDisplayName } from '@/modules/projects/services/project-management.service.js';
-import { startCloneProject } from '@/modules/projects/services/project-clone.service.js';
+import { updateProjectDisplayName } from '@/modules/projects/services/project-management.service.js';
 import { getSessionTokenUsage, requestBackgroundSessionSynchronization } from '@/modules/providers/index.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 import { getArchivedProjectsWithSessions, getProjectSessionsPage, getProjectsWithSessions } from '@/modules/projects/services/projects-with-sessions-fetch.service.js';
@@ -9,10 +8,6 @@ import { deleteOrArchiveProject, restoreArchivedProject } from '@/modules/projec
 import { applyLegacyStarredProjectIds, toggleProjectStar } from '@/modules/projects/services/project-star.service.js';
 
 const router = express.Router();
-
-type AuthenticatedUser = {
-  id?: number | string;
-};
 
 function readQueryStringValue(value: unknown): string {
   if (typeof value === 'string') {
@@ -51,18 +46,6 @@ function parseNonNegativeIntQuery(value: unknown, name: string, fallback: number
   }
 
   return parsedValue;
-}
-
-function resolveRouteErrorMessage(error: unknown): string {
-  if (error instanceof AppError) {
-    return error.message;
-  }
-
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-
-  return 'Failed to clone repository';
 }
 
 router.get(
@@ -128,44 +111,6 @@ router.get(
   }),
 );
 
-router.post(
-  '/create-project',
-  asyncHandler(async (req, res) => {
-    const requestBody = req.body as Record<string, unknown>;
-    const projectPath = typeof requestBody.path === 'string' ? requestBody.path : '';
-    const customName = typeof requestBody.customName === 'string' ? requestBody.customName : null;
-
-    if (requestBody.workspaceType !== undefined) {
-      throw new AppError('workspaceType is no longer supported. Use the single create-project flow.', {
-        code: 'LEGACY_WORKSPACE_TYPE_UNSUPPORTED',
-        statusCode: 400,
-      });
-    }
-
-    if (requestBody.githubUrl || requestBody.githubTokenId || requestBody.newGithubToken) {
-      throw new AppError('Repository cloning is not supported on create-project', {
-        code: 'CLONE_NOT_SUPPORTED_ON_CREATE_PROJECT',
-        statusCode: 400,
-        details: 'Use /api/projects/clone-progress for cloning workflows',
-      });
-    }
-
-    const projectCreationResult = await createProject({
-      projectPath,
-      customName,
-    });
-
-    res.json({
-      success: true,
-      project: projectCreationResult.project,
-      message:
-        projectCreationResult.outcome === 'reactivated_archived'
-          ? 'Archived project path reused successfully'
-          : 'Project created successfully',
-    });
-  }),
-);
-
 /**
  * One-time (or idempotent) migration: apply legacy `localStorage` starred projectIds to the DB, then clear client storage.
  */
@@ -179,71 +124,6 @@ router.post(
     res.json({ success: true, updated });
   }),
 );
-
-router.post('/clone-progress', async (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-
-  const sendEvent = (type: string, data: Record<string, unknown>) => {
-    if (res.writableEnded) {
-      return;
-    }
-
-    res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
-  };
-
-  let cloneOperation: Awaited<ReturnType<typeof startCloneProject>> | null = null;
-  const closeListener = () => {
-    cloneOperation?.cancel();
-  };
-  req.on('close', closeListener);
-
-  try {
-    const requestBody = req.body as Record<string, unknown>;
-    const workspacePath = readQueryStringValue(requestBody.path);
-    const githubUrl = readQueryStringValue(requestBody.githubUrl);
-    const githubTokenId = readOptionalNumericQueryValue(requestBody.githubTokenId);
-    const newGithubToken = readQueryStringValue(requestBody.newGithubToken) || null;
-
-    const authenticatedUser = (req as typeof req & { user?: AuthenticatedUser }).user;
-    const userId = authenticatedUser?.id;
-    if (userId === undefined || userId === null) {
-      throw new AppError('Authenticated user is required', {
-        code: 'AUTHENTICATION_REQUIRED',
-        statusCode: 401,
-      });
-    }
-
-    cloneOperation = await startCloneProject(
-      {
-        workspacePath,
-        githubUrl,
-        githubTokenId,
-        newGithubToken,
-        userId,
-      },
-      {
-        onProgress: (message) => {
-          sendEvent('progress', { message });
-        },
-        onComplete: ({ project, message }) => {
-          sendEvent('complete', { project, message });
-        },
-      },
-    );
-
-    await cloneOperation.waitForCompletion;
-  } catch (error) {
-    sendEvent('error', { message: resolveRouteErrorMessage(error) });
-  } finally {
-    req.off('close', closeListener);
-    if (!res.writableEnded) {
-      res.end();
-    }
-  }
-});
 
 router.put('/:projectId/rename', (req, res) => {
   try {

@@ -238,7 +238,7 @@ initial read). Keep it in the `.pure.ts` file, but cover that part in a
 ## Demand-loaded surfaces
 
 Only the sidebar and the chat view's own wiring are on the boot path. Everything
-else — the code editor, settings, onboarding, the project wizard, the markdown
+else — the code editor, settings, onboarding, the markdown
 renderer, bug reporting, the `/model`/`/cost`/`/status`/`/help` command modal,
 and the `AskUserQuestion` permission panel — is behind `React.lazy` and ships in
 its own chunk (issue #267; the last four added by perf-audit package WP7).

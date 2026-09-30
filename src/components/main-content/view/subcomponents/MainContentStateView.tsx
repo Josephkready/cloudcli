@@ -95,13 +95,9 @@ export default function MainContentStateView({
               meant opening the burger menu and finding the sidebar's button, so
               the landing page was missing its other half. This is that same
               button, not a second implementation, so the picker it opens keeps
-              the sidebar's ordering of the folders you can start in.
-
-              It is deliberately given no create-project handler: that flow is
-              the sidebar's own state and is unreachable from here, so the
-              component drops its "New project…" item rather than rendering one
-              that does nothing. Nothing is lost — this branch only renders when
-              there is already at least one project to start in.
+              the sidebar's ordering of the folders you can start in. This
+              branch only renders when there is already at least one project to
+              start in.
             */}
             {onNewConversation && (
               <SidebarNewConversationButton
@@ -191,7 +187,7 @@ export default function MainContentStateView({
             <p className="mb-5 text-sm leading-relaxed text-muted-foreground">{t('mainContent.selectProjectDescription')}</p>
             <div className="rounded-xl border border-primary/10 bg-primary/5 p-3.5">
               <p className="text-sm text-primary">
-                <strong>{t('mainContent.tip')}:</strong> {isMobile ? t('mainContent.createProjectMobile') : t('mainContent.createProjectDesktop')}
+                <strong>{t('mainContent.tip')}:</strong> {isMobile ? t('mainContent.projectTipMobile') : t('mainContent.projectTipDesktop')}
               </p>
             </div>
           </div>

@@ -295,7 +295,6 @@ describe('Sidebar', () => {
       onDeleteArchivedSession: capturedContentProps.onDeleteArchivedSession,
       onConversationResultClick: capturedContentProps.onConversationResultClick,
       onRefresh: capturedContentProps.onRefresh,
-      onCreateProject: capturedContentProps.onCreateProject,
       projectListProps: capturedContentProps.projectListProps as Record<string, unknown>,
     };
 
@@ -307,7 +306,6 @@ describe('Sidebar', () => {
     expect(capturedContentProps.onDeleteArchivedSession).toBe(before.onDeleteArchivedSession);
     expect(capturedContentProps.onConversationResultClick).toBe(before.onConversationResultClick);
     expect(capturedContentProps.onRefresh).toBe(before.onRefresh);
-    expect(capturedContentProps.onCreateProject).toBe(before.onCreateProject);
 
     // The whole projectListProps object is also stable...
     expect(capturedContentProps.projectListProps).toBe(before.projectListProps);

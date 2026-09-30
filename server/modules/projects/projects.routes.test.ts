@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import http from 'node:http';
-import os, { tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { mock } from 'node:test';
 
@@ -237,55 +237,11 @@ test('GET /api/projects/:projectId/sessions/:sessionId/token-usage reports usage
   });
 });
 
-test('POST /api/projects/create-project rejects legacy workspaceType and github clone params', async () => {
+test('project creation and cloning endpoints are gone', async () => {
   await withSeededDatabase(async (server) => {
-    const legacyWorkspace = await requestText(server.port, 'POST', '/api/projects/create-project', {
-      path: '/workspace/new-proj',
-      workspaceType: 'git',
-    });
-    assert.equal(legacyWorkspace.statusCode, 400);
-    assert.match(legacyWorkspace.body, /workspaceType is no longer supported/);
-
-    const withGithub = await requestText(server.port, 'POST', '/api/projects/create-project', {
-      path: '/workspace/new-proj',
-      githubUrl: 'https://github.com/foo/bar',
-    });
-    assert.equal(withGithub.statusCode, 400);
-    assert.match(withGithub.body, /Repository cloning is not supported/);
-  });
-});
-
-test('POST /api/projects/create-project creates a new project', async () => {
-  // createProject validates the path is under WORKSPACES_ROOT, which -- since
-  // WORKSPACES_ROOT is captured from the environment at module import time,
-  // long before this test file can override it -- resolves to the real
-  // os.homedir() here. That's writable on a dev box, but some CI containers
-  // run as root, where FORBIDDEN_WORKSPACE_PATHS blocks /root outright and
-  // this scenario can never validate. Skip there rather than asserting a
-  // false failure; the createProject success path itself (with an injected,
-  // always-valid `validatePath`) is covered directly in
-  // project-management.service.test.ts.
-  const { validateWorkspacePath } = await import('@/shared/utils.js');
-  const candidateDir = path.join(os.homedir(), '.cloudcli-projects-routes-test-probe');
-  const probe = await validateWorkspacePath(candidateDir);
-  if (!probe.valid) {
-    return;
-  }
-
-  await withSeededDatabase(async (server) => {
-    const newProjectDir = await mkdtemp(path.join(os.homedir(), '.cloudcli-projects-routes-test-'));
-    try {
-      const response = await requestText(server.port, 'POST', '/api/projects/create-project', {
-        path: newProjectDir,
-        customName: 'Brand New',
-      });
-      assert.equal(response.statusCode, 200);
-      const body = JSON.parse(response.body);
-      assert.equal(body.success, true);
-      assert.equal(body.project.customName, 'Brand New');
-      assert.match(body.message, /Project created successfully/);
-    } finally {
-      await rm(newProjectDir, { recursive: true, force: true });
+    for (const route of ['/api/projects/create-project', '/api/projects/clone-progress']) {
+      const response = await requestText(server.port, 'POST', route, { path: '/workspace/new-proj' });
+      assert.equal(response.statusCode, 404, route);
     }
   });
 });
@@ -345,23 +301,5 @@ test('DELETE then POST .../restore round-trips an archived project back to activ
     assert.equal(restoreBody.success, true);
     assert.equal(restoreBody.data.isArchived, false);
     assert.equal(projectsDb.getProjectPath('/workspace/indexed-proj')?.isArchived, 0);
-  });
-});
-
-test('clone progress accepts POST JSON instead of credentials in a GET URL', async () => {
-  await withSeededDatabase(async (server) => {
-    const getResponse = await requestText(server.port, 'GET', '/api/projects/clone-progress');
-    assert.equal(getResponse.statusCode, 404);
-
-    const postResponse = await requestText(server.port, 'POST', '/api/projects/clone-progress', {
-      path: '/workspace',
-      githubUrl: '-invalid-option-like-url',
-      newGithubToken: 'body-only-secret',
-    });
-
-    assert.equal(postResponse.statusCode, 200);
-    assert.match(postResponse.body, /"type":"error"/);
-    assert.match(postResponse.body, /Invalid githubUrl/);
-    assert.doesNotMatch(postResponse.body, /body-only-secret/);
   });
 });

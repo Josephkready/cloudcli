@@ -54,9 +54,8 @@ export function useFocusTrap<T extends HTMLElement = HTMLElement>({
   const restoreFocusRefRef = useRef(restoreFocusRef);
   restoreFocusRefRef.current = restoreFocusRef;
 
-  // A dialog can legitimately hold nothing focusable — the project wizard
-  // disables its close button and both footer buttons while a create is in
-  // flight. Focusing the container itself keeps an anchor inside the dialog
+  // A dialog can legitimately hold nothing focusable — e.g. one that disables
+  // its close and footer buttons while a request is in flight. Focusing the container itself keeps an anchor inside the dialog
   // (WAI-ARIA APG) instead of parking focus on <body>, which would strand a
   // keyboard user in exactly the window where Esc is disabled too.
   const focusFirst = useCallback((container: T) => {

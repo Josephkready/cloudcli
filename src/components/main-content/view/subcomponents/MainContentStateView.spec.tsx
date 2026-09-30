@@ -18,16 +18,17 @@ import i18n from '@/i18n/config.js';
  */
 
 describe('MainContentStateView — empty-state tip (#241)', () => {
-  it('points desktop users at the + create control, not a non-existent folder icon', () => {
+  it('points desktop users at the sidebar and New conversation, not a non-existent control', () => {
     render(<MainContentStateView mode="empty" isMobile={false} onMenuClick={vi.fn()} />);
 
     // `Tip:` lives in a nested <strong>; the advice is on the surrounding <p>.
     const tip = screen.getByText(/Tip:/).parentElement?.textContent ?? '';
 
     expect(tip).not.toMatch(/folder icon/i);
-    // The desktop sidebar header renders a Plus button titled "Create new project".
-    expect(tip).toMatch(/\+/);
+    // The sidebar's + create-project button was removed; the tip must not point at it.
+    expect(tip).not.toMatch(/\+/);
     expect(tip).toMatch(/sidebar/i);
+    expect(tip).toMatch(/New conversation/);
   });
 
   it('keeps the mobile tip pointing at the menu button', () => {
@@ -223,11 +224,8 @@ describe('MainContentStateView — mobile conversation picker (#326)', () => {
  *
  * The fix reuses the sidebar's own SidebarNewConversationButton rather than
  * adding a second affordance, so the project picker it opens keeps the sidebar's
- * ordering and behaviour. The deliberate difference: no "New project…" item,
- * because the create-project flow is the sidebar's local state and is not
- * reachable from here — a visible item that did nothing would be worse than its
- * absence, and every branch showing this button already has a project to start
- * in.
+ * ordering and behaviour. Every branch showing this button already has a
+ * project to start in.
  */
 
 describe('MainContentStateView — mobile new conversation (#331)', () => {
@@ -285,14 +283,6 @@ describe('MainContentStateView — mobile new conversation (#331)', () => {
     expect(onNewConversation).toHaveBeenCalledWith(projects[1]);
     // Starting fresh is not resuming — the session handler must stay untouched.
     expect(onSessionSelect).not.toHaveBeenCalled();
-  });
-
-  it('does not offer a "New project…" item it cannot actually open', async () => {
-    render(<MainContentStateView {...newConversationProps()} />);
-
-    await userEvent.click(newConversationButton());
-
-    expect(screen.queryByText(/new project/i)).toBeNull();
   });
 
   it('leaves the conversation list intact alongside it', () => {

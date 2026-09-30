@@ -81,7 +81,6 @@ function render(overrides: Partial<React.ComponentProps<typeof SidebarContent>> 
     onConversationResultClick: noop,
     onRefresh: noop,
     isRefreshing: false,
-    onCreateProject: noop,
     onCollapseSidebar: noop,
     restartRequired: false,
     currentVersion: '0.0.0',
