@@ -40,7 +40,7 @@ Used by: Bash, Read, Grep, Glob, TodoRead, TaskCreate, TaskUpdate, TaskGet
 Renders as a single line with `border-l-2` accent. Supports multiple rendering modes based on `action`:
 
 - **terminal** (`style: 'terminal'`) — Dark pill around command text, green `$` prompt
-- **open-file** — Shows filename only (truncated from full path), clickable to open
+- **file-name** — Shows the filename only (truncated from the full path, which is the hover title)
 - **jump-to-results** — Shows pattern with anchor link to result section
 - **copy** — Shows value with a copy button (visible on hover or touch)
 - **none** — Plain display
@@ -52,8 +52,7 @@ Renders as a single line with `border-l-2` accent. Supports multiple rendering m
   label="Read"              // Tool label
   value="/path/to/file.ts"  // Main display value
   secondary="description"   // Optional secondary text (italic)
-  action="open-file"        // Action type
-  onAction={() => ...}      // Click handler
+  action="file-name"        // Action type
   colorScheme={{             // Per-tool colors
     primary: 'text-...',
     border: 'border-...',
@@ -75,9 +74,8 @@ Wraps `CollapsibleSection` (`<details>`/`<summary>`) with a `border-l-2` accent 
 <CollapsibleDisplay
   toolName="Edit"
   toolId="123"
-  title="filename.ts"           // Section title (can be clickable)
+  title="filename.ts"           // Section title
   defaultOpen={false}
-  onTitleClick={() => ...}      // Makes title a clickable link (for edit tools)
   showRawParameters={true}      // Show raw JSON toggle
   rawContent="..."              // Raw JSON string
   toolCategory="edit"           // Drives border color
@@ -177,7 +175,7 @@ MyTool: {
     type: 'one-line',              // or 'collapsible'
     label: 'MyTool',
     getValue: (input) => input.some_field,
-    action: 'open-file',
+    action: 'file-name',
     colorScheme: {
       primary: 'text-purple-600 dark:text-purple-400',
       border: 'border-purple-400 dark:border-purple-500'
@@ -209,7 +207,7 @@ interface ToolDisplayConfig {
     label?: string;
     getValue?: (input) => string;
     getSecondary?: (input) => string | undefined;
-    action?: 'copy' | 'open-file' | 'jump-to-results' | 'none';
+    action?: 'copy' | 'file-name' | 'jump-to-results' | 'none';
     style?: string;                              // 'terminal' for Bash
     wrapText?: boolean;
     colorScheme?: {
@@ -248,7 +246,7 @@ interface ToolDisplayConfig {
 | Tool | Input | Result | Notes |
 |------|-------|--------|-------|
 | Bash | terminal one-line | hide success | Dark command pill, green accent |
-| Read | one-line (open-file) | hidden | Shows filename, clicks to open |
+| Read | one-line (file-name) | hidden | Shows filename, full path on hover |
 | Edit | collapsible (diff) | hide success | Amber border, clickable filename |
 | Write | collapsible (diff) | hide success | "New" badge on diff |
 | ApplyPatch | collapsible (diff) | hide success | "Patch" badge on diff |

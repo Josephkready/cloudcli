@@ -110,6 +110,30 @@ describe('useComposerCommands — built-in commands', () => {
     );
   });
 
+  it('/memory reports the memory file path in a chat message and opens nothing', async () => {
+    vi.mocked(authenticatedFetch).mockResolvedValue(
+      jsonResponse({
+        type: 'builtin',
+        action: 'memory',
+        data: { message: 'Project memory', path: '/tmp/proj/CLAUDE.md', exists: true },
+      }),
+    );
+    const { result, addMessage, onShowSettings } = setup();
+
+    await act(async () => {
+      await result.current.hook.executeCommand({ name: '/memory', description: 'memory', namespace: 'builtin' } as SlashCommand);
+    });
+
+    // The in-app editor it used to auto-open is gone: the path in the message is the whole result.
+    expect(addMessage).toHaveBeenCalledTimes(1);
+    expect(addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'assistant',
+      content: 'Project memory\n\nPath: `/tmp/proj/CLAUDE.md`',
+    }));
+    expect(onShowSettings).not.toHaveBeenCalled();
+    expect(result.current.hook.commandModalPayload).toBeNull();
+  });
+
   it('closeCommandModal clears the modal payload', async () => {
     vi.mocked(authenticatedFetch).mockResolvedValue(
       jsonResponse({ type: 'builtin', action: 'cost', data: {} }),

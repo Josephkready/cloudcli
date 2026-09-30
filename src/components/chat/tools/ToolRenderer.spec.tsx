@@ -9,7 +9,7 @@ import { ToolRenderer } from './ToolRenderer';
  * config from toolConfigs and routes to the matching sub-renderer. These
  * tests exercise the routing decisions and the small pieces of logic that
  * live directly in this file (status derivation, Bash's special-cased input
- * row, the title-click-to-open-file wiring) rather than re-testing each leaf
+ * row, the diff title) rather than re-testing each leaf
  * content renderer's own internals.
  *
  * Uses vitest/jsdom (not node:test) because the 'markdown' contentType
