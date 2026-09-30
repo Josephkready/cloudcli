@@ -1,10 +1,11 @@
-"""Registers the markers the vdebug tests use, so they run cleanly under --strict-markers.
+"""Registers the `browser` marker the vdebug tests use (they drive real Chromium via Playwright).
 
-`live` is this repo's original name for "drives a real browser"; the synced template tests use
-`browser` for the same thing (and still `live` in a few keyboard tests), so both are registered.
-Deselect with `-m "not live and not browser"` where Playwright isn't installed."""
+Deliberately NOT `live`: many repos use `live` for "hits a real external API" and deselect it
+by default, which would silently skip these. cloudcli's earlier port used `live` for the same
+thing; since video-debugger #560 every browser test here is `browser`, and
+test_every_marker_is_registered_by_the_copied_conftest keeps it that way. Deselect with
+`-m "not browser"` where Playwright isn't installed."""
 
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "live: drives a real browser (Playwright/Chromium)")
     config.addinivalue_line("markers", "browser: drives a real browser (Playwright/Chromium)")
