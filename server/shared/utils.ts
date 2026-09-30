@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import {
-  access,
   lstat,
   mkdir,
   open,

@@ -20,9 +20,6 @@ type SidebarNewConversationButtonProps = {
   projects: Project[];
   // Launches the chat composer for a chosen project (wired to handleNewSession).
   onNewConversation: (project: Project) => void;
-  // Opens the create-project flow for when the target folder isn't a project yet.
-  // Optional: that flow is the sidebar's own state, so surfaces outside it (the
-  // mobile landing page, #331) drop the item instead of showing a dead control.
   className?: string;
   t: TFunction;
 };
