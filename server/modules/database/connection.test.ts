@@ -4,7 +4,13 @@ import path from 'node:path';
 import os from 'node:os';
 import test from 'node:test';
 
-import { getConnection, closeConnection, getDatabasePath } from './connection.js';
+import {
+  IN_MEMORY_DATABASE_PATH,
+  closeConnection,
+  getConnection,
+  getDatabasePath,
+  shouldMigrateLegacyDatabase,
+} from './connection.js';
 
 const originalDatabasePath = process.env.DATABASE_PATH;
 
@@ -79,4 +85,35 @@ test('getConnection skips WAL pragmas for :memory: databases', () => {
   } finally {
     closeConnection();
   }
+});
+
+test('with no DATABASE_PATH, the connection is in-memory and nothing is written to disk', () => {
+  // Tests and scripts that import a repository (or middleware/auth.js) without
+  // the server's load-env.js used to create <repo>/database/auth.db here.
+  delete process.env.DATABASE_PATH;
+  try {
+    assert.equal(getDatabasePath(), IN_MEMORY_DATABASE_PATH);
+    const db = getConnection();
+    db.exec('CREATE TABLE probe (id INTEGER)');
+    assert.equal(db.name, IN_MEMORY_DATABASE_PATH);
+  } finally {
+    closeConnection();
+  }
+});
+
+test('legacy migration only seeds the default location, and only when it is missing', () => {
+  const legacy = '/install/database/auth.db';
+  const defaultPath = '/home/u/.cloudcli/auth.db';
+  const onlyLegacy = (filePath: string) => filePath === legacy;
+
+  // The upgrade it exists for: default location empty, legacy db present.
+  assert.equal(shouldMigrateLegacyDatabase(defaultPath, legacy, defaultPath, onlyLegacy), true);
+  // Already migrated, or nothing to migrate.
+  assert.equal(shouldMigrateLegacyDatabase(defaultPath, legacy, defaultPath, () => true), false);
+  assert.equal(shouldMigrateLegacyDatabase(defaultPath, legacy, defaultPath, () => false), false);
+  // An explicit DATABASE_PATH (prod's /var/lib, e2e/bench temp dirs) is never seeded
+  // from whatever database sits in the checkout.
+  assert.equal(shouldMigrateLegacyDatabase('/var/tmp/e2e/auth.db', legacy, defaultPath, onlyLegacy), false);
+  // Copying to ':memory:' used to write a real file named ':memory:' into the cwd.
+  assert.equal(shouldMigrateLegacyDatabase(IN_MEMORY_DATABASE_PATH, legacy, defaultPath, onlyLegacy), false);
 });

@@ -12,6 +12,7 @@
 
 import Database from 'better-sqlite3';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -24,22 +25,35 @@ const __dirname = path.dirname(__filename);
 // Path resolution
 // ---------------------------------------------------------------------------
 
+/** SQLite's special path for a private, throwaway, in-memory database. */
+export const IN_MEMORY_DATABASE_PATH = ':memory:';
+
 /**
- * Resolves the database file path from environment or falls back
- * to the legacy location inside the server/database/ folder.
+ * The server's default location, set by load-env.js when DATABASE_PATH is not
+ * configured. Duplicated rather than imported: importing load-env.js would run
+ * its side effects (reading .env, defaulting DATABASE_PATH) in every consumer.
+ */
+const DEFAULT_DATABASE_PATH = path.join(os.homedir(), '.cloudcli', 'auth.db');
+
+/**
+ * Resolves the database file path.
  *
- * Priority:
- *   1. DATABASE_PATH environment variable (set by cli.js or load-env-vars.js)
- *   2. Legacy path: server/database/auth.db
+ * The server always has DATABASE_PATH: load-env.js sets it from .env or to
+ * ~/.cloudcli/auth.db before anything opens the database. It is only unset when
+ * a module reaches the database without going through the server entry point —
+ * a test or a script that imports a repository (or `middleware/auth.js`, which
+ * reads the JWT secret at import time). Those get a throwaway in-memory
+ * database. This used to fall back to `<repo>/database/auth.db`, which created a
+ * real database inside the checkout that the legacy migration below then
+ * copied into every fresh DATABASE_PATH.
  */
 function resolveDatabasePath(): string {
-    // process.env.DATABASE_PATH is set by load-env-vars.js to either the .env value or a default(~/.cloudcli/auth.db) in the user's home directory. 
-    return process.env.DATABASE_PATH || resolveLegacyDatabasePath();
+  return process.env.DATABASE_PATH || IN_MEMORY_DATABASE_PATH;
 }
 
 /**
- * Resolves the legacy database path (always inside server/database/).
- * Used for the one-time migration to the new external location.
+ * Resolves the legacy database path: `database/auth.db` in the install root.
+ * Used only for the one-time migration to the default external location.
  */
 function resolveLegacyDatabasePath(): string {
   const serverDir = path.resolve(__dirname, '..', '..', '..');
@@ -59,16 +73,51 @@ function ensureDatabaseDirectory(dbPath: string): void {
 }
 
 /**
- * If the database was moved to an external location (e.g. ~/.cloudcli/)
+ * Whether to copy a legacy install-directory auth.db into `targetPath`.
+ *
+ * Only for the upgrade it exists for: the database moved from the install
+ * directory to the default ~/.cloudcli/auth.db, which does not exist yet. An
+ * explicitly configured DATABASE_PATH (prod's /var/lib/cloudcli, the e2e and
+ * bench fixtures' temp dirs) is never seeded from whatever database happens to
+ * sit in the checkout, and an in-memory database cannot be a copy target at all
+ * (copying to the path ':memory:' wrote a real file by that name into the cwd).
+ */
+export function shouldMigrateLegacyDatabase(
+  targetPath: string,
+  legacyPath: string,
+  defaultPath: string = DEFAULT_DATABASE_PATH,
+  exists: (filePath: string) => boolean = fs.existsSync,
+): boolean {
+  if (targetPath === IN_MEMORY_DATABASE_PATH) return false;
+  if (path.resolve(targetPath) !== path.resolve(defaultPath)) return false;
+  if (path.resolve(targetPath) === path.resolve(legacyPath)) return false;
+  return !exists(targetPath) && exists(legacyPath);
+}
+
+/**
+ * If the database was moved to the default external location (~/.cloudcli/)
  * but the user still has a legacy auth.db inside the install directory,
  * copy it to the new location as a one-time migration.
  */
 function migrateLegacyDatabase(targetPath: string): void {
   const legacyPath = resolveLegacyDatabasePath();
 
-  if (targetPath === legacyPath) return;
-  if (fs.existsSync(targetPath)) return;
-  if (!fs.existsSync(legacyPath)) return;
+  if (!shouldMigrateLegacyDatabase(targetPath, legacyPath)) {
+    // A fresh explicit DATABASE_PATH is not seeded from the checkout's database,
+    // but say so: an operator moving an old install to a custom path should copy
+    // it deliberately rather than silently start from an empty database.
+    if (
+      path.resolve(targetPath) !== path.resolve(legacyPath)
+      && !fs.existsSync(targetPath)
+      && fs.existsSync(legacyPath)
+    ) {
+      console.warn('Legacy database left in place: DATABASE_PATH is a new, non-default location', {
+        legacy: legacyPath,
+        databasePath: targetPath,
+      });
+    }
+    return;
+  }
 
   try {
     fs.copyFileSync(legacyPath, targetPath);
@@ -93,6 +142,7 @@ function migrateLegacyDatabase(targetPath: string): void {
 // ---------------------------------------------------------------------------
 
 let instance: Database.Database | null = null;
+let warnedInMemory = false;
 
 /**
  * Returns the shared database connection, creating it on first call.
@@ -110,8 +160,15 @@ export function getConnection(): Database.Database {
 
   const dbPath = resolveDatabasePath();
 
-  ensureDatabaseDirectory(dbPath);
-  migrateLegacyDatabase(dbPath);
+  if (dbPath !== IN_MEMORY_DATABASE_PATH) {
+    ensureDatabaseDirectory(dbPath);
+    migrateLegacyDatabase(dbPath);
+  } else if (!process.env.DATABASE_PATH && !warnedInMemory) {
+    // Expected in tests. Anywhere else it means an entry point skipped load-env.js
+    // and nothing it writes will survive the process, so say it once.
+    warnedInMemory = true;
+    console.warn('DATABASE_PATH is not set: using an in-memory database (nothing will persist)');
+  }
 
   instance = new Database(dbPath);
 
@@ -125,9 +182,9 @@ export function getConnection(): Database.Database {
   // `busy_timeout` avoids SQLITE_BUSY if a second process (e.g. the
   // `cloudcli usage` CLI) touches the DB concurrently.
   //
-  // Skipped for ':memory:' databases (used by some tests) — WAL is a no-op
-  // there and better-sqlite3 warns/no-ops on the pragma anyway.
-  if (dbPath !== ':memory:') {
+  // Skipped for in-memory databases (tests) — WAL is a no-op there and
+  // better-sqlite3 warns/no-ops on the pragma anyway.
+  if (dbPath !== IN_MEMORY_DATABASE_PATH) {
     instance.pragma('journal_mode = WAL');
     instance.pragma('synchronous = NORMAL');
     instance.pragma('busy_timeout = 5000');
