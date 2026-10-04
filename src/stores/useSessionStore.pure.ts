@@ -602,8 +602,10 @@ export function isSameServerTranscript(
  * makes the merge a splice: keep the loaded rows that predate the page, then
  * take the page.
  *
- * When the page's first row is not among the loaded rows the two windows are
- * disjoint — the page is entirely newer — and it is appended. A gap is possible
+ * A page that reaches back past the first loaded row joins at 0 and so
+ * replaces the loaded rows outright (it covers all of them). When the windows
+ * share no row at all they are disjoint — the page is entirely newer — and it
+ * is appended. A gap is possible
  * in principle (more rows appended than the window covers), which is why
  * callers size the window from what they need reconciled rather than by taste.
  */
@@ -626,7 +628,9 @@ export function mergeRefreshedTail(
 
 /**
  * Where a refreshed page joins the rows already loaded, or `-1` when it does
- * not reach back far enough to touch them.
+ * not reach back far enough to touch them. A page that reaches back past the
+ * first loaded row joins at `0`: it covers every loaded row, so it replaces them.
+ * Assumes message ids are unique within each array, as the server guarantees.
  *
  * `-1` is the case worth acting on. It means the window the caller asked for
  * was smaller than the number of rows appended since, so the two arrays do not
@@ -643,7 +647,18 @@ export function findRefreshTailJoin(
   if (page.length === 0 || loaded.length === 0) {
     return -1;
   }
-  return loaded.findIndex((message) => message.id === page[0].id);
+  const pageStart = loaded.findIndex((message) => message.id === page[0].id);
+  if (pageStart >= 0) {
+    return pageStart;
+  }
+  // The page can also reach back *past* the loaded rows: a session opens with
+  // only its newest page, while a finished turn asks for more than that. The
+  // page's first row was then never loaded, but the first loaded row is inside
+  // the page, so the page covers everything loaded. Joining at 0 makes the
+  // splice yield exactly the page. Treating this as disjoint re-read the whole
+  // transcript after every turn on any session longer than the opening page.
+  const firstLoadedId = loaded[0].id;
+  return page.some((message) => message.id === firstLoadedId) ? 0 : -1;
 }
 
 /**
