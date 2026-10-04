@@ -187,6 +187,26 @@ function buildNotificationPayload(event) {
   };
 }
 
+// Log only the push service origin plus a short prefix of the path: the full
+// endpoint is a bearer capability for delivering to the user's device.
+function describeEndpoint(endpoint) {
+  try {
+    const url = new URL(String(endpoint));
+    const pathPrefix = url.pathname.slice(0, 12);
+    return `${url.origin}${pathPrefix}${url.pathname.length > 12 ? '...' : ''}`;
+  } catch {
+    return '<invalid endpoint>';
+  }
+}
+
+function describeRejectionBody(reason) {
+  const body = reason?.body ?? reason?.message ?? '';
+  const text = typeof body === 'string' ? body : JSON.stringify(body);
+  const trimmed = (text || '').trim();
+  if (!trimmed) return '<empty>';
+  return trimmed.length > 300 ? `${trimmed.slice(0, 300)}...` : trimmed;
+}
+
 function sendWebPushPayload(userId, payload) {
   const subscriptions = pushSubscriptionsDb.getSubscriptions(userId);
   if (!subscriptions.length) return Promise.resolve();
@@ -211,6 +231,12 @@ function sendWebPushPayload(userId, payload) {
         const statusCode = result.reason?.statusCode;
         if (statusCode === 410 || statusCode === 404) {
           pushSubscriptionsDb.removeSubscription(subscriptions[index].endpoint);
+        } else {
+          // Anything else (e.g. Apple's 403 BadJwtToken, #496) used to vanish silently.
+          console.error(
+            `[web-push] Send failed for ${describeEndpoint(subscriptions[index].endpoint)}: ` +
+              `status=${statusCode ?? 'n/a'} body=${describeRejectionBody(result.reason)}`
+          );
         }
       }
     });

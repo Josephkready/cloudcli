@@ -125,3 +125,75 @@ test('no "run failed" push while the server is shutting down (#535)', async () =
     webPush.sendNotification = originalSendNotification;
   }
 });
+
+function pushError(statusCode, body) {
+  const error = new Error('Received unexpected response code');
+  error.statusCode = statusCode;
+  error.body = body;
+  return error;
+}
+
+async function sendWithRejection(rejection) {
+  const originalSendNotification = webPush.sendNotification;
+  const originalConsoleError = console.error;
+  const errors = [];
+  const endpoint = 'https://web.push.apple.com/QSECRETTOKENabcdefghijklmnopqrstuvwxyz';
+  // Unique per call: the orchestrator dedupes identical events within 20s.
+  const sessionId = `app-session-reject-${rejection.statusCode}`;
+
+  webPush.sendNotification = async () => {
+    throw rejection;
+  };
+  console.error = (...args) => errors.push(args.join(' '));
+
+  try {
+    let remaining;
+    await withIsolatedDatabase(async () => {
+      const user = userDb.createUser(`reject-user-${rejection.statusCode}`, 'hash');
+      const userId = Number(user.id);
+
+      notificationPreferencesDb.updatePreferences(userId, {
+        channels: { webPush: true },
+        events: { actionRequired: true, stop: true, error: true },
+      });
+      pushSubscriptionsDb.saveSubscription(userId, endpoint, 'p256dh-secret', 'auth-secret');
+      sessionsDb.createAppSession(sessionId, 'claude', '/workspace/demo');
+
+      notifyRunStopped({
+        userId,
+        provider: 'claude',
+        sessionId,
+        stopReason: 'completed',
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      remaining = pushSubscriptionsDb.getSubscriptions(userId).length;
+    });
+    return { errors, remaining, endpoint };
+  } finally {
+    console.error = originalConsoleError;
+    webPush.sendNotification = originalSendNotification;
+  }
+}
+
+test('non-410/404 push rejections are logged with status and body, not secrets (#496)', async () => {
+  const { errors, remaining, endpoint } = await sendWithRejection(
+    pushError(403, '{"reason":"BadJwtToken"}'),
+  );
+
+  assert.equal(remaining, 1, 'a 403 must not delete the subscription');
+  assert.equal(errors.length, 1);
+  const [line] = errors;
+  assert.match(line, /status=403/);
+  assert.match(line, /BadJwtToken/);
+  assert.match(line, /https:\/\/web\.push\.apple\.com/);
+  assert.ok(!line.includes(endpoint), 'full endpoint must not be logged');
+  assert.ok(!line.includes('p256dh-secret'));
+  assert.ok(!line.includes('auth-secret'));
+});
+
+test('410 push rejections remove the subscription without logging an error', async () => {
+  const { errors, remaining } = await sendWithRejection(pushError(410, 'gone'));
+  assert.equal(remaining, 0);
+  assert.equal(errors.length, 0);
+});
