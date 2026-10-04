@@ -157,8 +157,11 @@ the debug instance has no auth, so it never listens on a LAN address. Loopback b
 under a per-port home-screen name (`vdebug-4870`), so two instances never share an icon. Budget
 ~2 min per flow (lease, install, launch), and always let the run finish or the lease release.
 `run_ios` steps use `IosApp` in `vdebug/flows/_helpers.py`, which turns DOM rects into screen
-points (the standalone webview starts below the status bar) and records a
-`keyboard-covers-control` hit when the keyboard hides the composer. The Simulator runs a newer
+points and records a `keyboard-covers-control` hit when the keyboard hides the composer. The
+DOM-to-screen y offset depends on the iOS version and the shell CSS (0 on iOS 26.5, 47pt on iOS 27,
+though `screen.height - innerHeight` is 47 on both), so it is calibrated per page against the
+native accessibility tree (`device.source()`), checked after each tap and recalibrated once on a
+miss. `screen.height - innerHeight` is only a logged fallback when no anchor element matches. The Simulator runs a newer
 iOS on a fast Mac: it catches layout and behaviour, not real-phone timings or touch latency.
 
 **Real-user flow capture.** `public/vd-recorder.js` sends intent events to

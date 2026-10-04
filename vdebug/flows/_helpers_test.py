@@ -18,9 +18,16 @@ class FakeDevice:
     """Records native taps; answers eval_js from `answers`: the first (substring, value) whose
     substring occurs in the script wins. A callable value is called with the script."""
 
-    def __init__(self, *answers, screen_minus_inner=47):
+    def __init__(self, *answers, screen_minus_inner=47, source=""):
         self.answers = [("screen.height - window.innerHeight", screen_minus_inner), *answers]
         self.scripts, self.taps = [], []
+        self.source_xml, self.source_calls = source, 0
+
+    def source(self):
+        self.source_calls += 1
+        if isinstance(self.source_xml, Exception):
+            raise self.source_xml
+        return self.source_xml() if callable(self.source_xml) else self.source_xml
 
     def eval_js(self, script):
         self.scripts.append(script)
@@ -39,22 +46,156 @@ class FakeVd:
         self.frames = [{"label": f} for f in frames]
 
 
-# ------------------------------------------------------------------ top inset + taps
-def test_top_inset_is_screen_height_minus_inner_height_measured_once():
+# ------------------------------------------------------------------ offset calibration + taps
+def tree(*nodes):
+    """An XCUITest source dump holding `nodes`: (type, x, y, w, h[, label])."""
+    body = "".join(f'<XCUIElementType{t} type="XCUIElementType{t}" x="{x}" y="{y}" width="{w}" '
+                   f'height="{h}" visible="true" label="{(rest or [""])[0]}"/>' for t, x, y, w, h, *rest in nodes)
+    return f'<?xml version="1.0"?><AppiumAUT><XCUIElementTypeApplication>{body}</XCUIElementTypeApplication></AppiumAUT>'
+
+
+# The composer on an iPhone 13 Pro: DOM rect 16..374 x 667..731, centre (195, 699).
+COMPOSER = {"x": 195, "y": 699, "w": 358, "h": 64, "tag": "textarea", "label": "Message", "vv": 0, "page": "p1"}
+
+
+def app_for(target=COMPOSER, source="", hit=None, anchors=(), **kw):
+    """IosApp over a fake device whose tap target is `target`, whose native tree is `source`,
+    whose post-tap hit check answers `hit`, and whose anchor lookups answer `anchors`."""
+    device = FakeDevice(("__vdTapHit = null", 1 if hit is not None else None),
+                        ("return window.__vdTapHit;", hit),
+                        ("scrollIntoView", target), *anchors, source=source, **kw)
+    return IosApp(device, log=logs.append), device
+
+
+logs: list[str] = []
+
+
+@pytest.fixture(autouse=True)
+def _clear_logs():
+    logs.clear()
+
+
+def test_fallback_inset_is_screen_height_minus_inner_height_measured_at_construction():
     device = FakeDevice()
     app = IosApp(device)
-    assert app.top_inset == 47.0
+    assert app.fallback_inset == 47.0 and app.offsets == {}
     assert device.scripts == ["return screen.height - window.innerHeight"]
+    assert device.source_calls == 0  # calibration is lazy: first tap
 
 
-def test_top_inset_defaults_to_zero_when_eval_returns_nothing():
-    assert IosApp(FakeDevice(screen_minus_inner=None)).top_inset == 0.0
+def test_fallback_inset_defaults_to_zero_when_eval_returns_nothing():
+    assert IosApp(FakeDevice(screen_minus_inner=None)).fallback_inset == 0.0
 
 
-def test_tap_offsets_y_by_the_top_inset_but_not_x():
-    device = FakeDevice(("getBoundingClientRect", {"x": 100.4, "y": 200.6}))
-    IosApp(device).tap(by_css("#send"), "send")
+def test_offset_is_zero_when_the_native_textview_sits_where_the_dom_says():
+    # iOS 26.5 on current main: screen - innerHeight is 47, but the composer is natively at 667.
+    app, device = app_for(source=tree(("TextView", 16, 667, 358, 64)))
+    app.tap(by_css("textarea"), "composer")
+    assert device.taps == [(195, 699)] and app.offsets == {"p1": 0.0} and logs == []
+
+
+def test_offset_is_47_when_the_native_textview_is_47_lower():
+    app, device = app_for(source=tree(("TextView", 16, 714, 358, 64)))
+    app.tap(by_css("textarea"), "composer")
+    assert device.taps == [(195, 746)] and app.offsets == {"p1": 47.0}
+
+
+def test_x_is_never_shifted_even_with_an_offset():
+    target = {**COMPOSER, "x": 100.4, "y": 200.6, "w": 50, "h": 20, "tag": "button", "label": "Send"}
+    app, device = app_for(target, source=tree(("Button", 75.4, 237.6, 50, 20, "Send")))
+    app.tap(by_label("Send"), "send")
     assert device.taps == [(100, 248)]  # round(100.4), round(200.6 + 47)
+
+
+def test_no_matching_native_node_falls_back_to_screen_minus_inner_height_and_logs_it():
+    # A native TextView of another size, and a Button where the target is a textarea.
+    app, device = app_for(source=tree(("TextView", 16, 667, 300, 64), ("Button", 16, 667, 358, 64)),
+                          screen_minus_inner=47)
+    app.tap(by_css("textarea"), "composer")
+    assert device.taps == [(195, 746)] and app.offsets == {"p1": 47.0}
+    assert len(logs) == 1 and "falling back" in logs[0] and "47pt" in logs[0]
+
+
+def test_an_unreadable_native_tree_falls_back_too():
+    for source in (RuntimeError("no session"), "<not xml"):
+        logs.clear()
+        app, device = app_for(source=source)
+        app.tap(by_css("textarea"), "composer")
+        assert device.taps == [(195, 746)] and any("falling back" in m for m in logs)
+
+
+def test_an_unmappable_target_calibrates_against_the_composer_anchor():
+    menu_item = {"x": 60, "y": 300, "w": 120, "h": 40, "tag": "div", "label": "x", "page": "p1"}
+    anchor = ("querySelectorAll('textarea')", COMPOSER)
+    app, device = app_for(menu_item, source=tree(("TextView", 16, 667, 358, 64)), anchors=[anchor])
+    app.tap(by_css("[cmdk-item]"), "item")
+    assert device.taps == [(60, 300)] and app.offsets == {"p1": 0.0}
+
+
+def test_falls_through_to_the_menu_button_anchor_when_there_is_no_composer():
+    menu = {"x": 30, "y": 20, "w": 40, "h": 40, "tag": "button", "label": "Open menu", "page": "p1"}
+    item = {"x": 60, "y": 300, "w": 120, "h": 40, "tag": "div", "page": "p1"}
+    app, device = app_for(item, source=tree(("Button", 10, 47, 40, 40, "Open menu")),
+                          anchors=[("querySelectorAll('textarea')", None), ('"Open menu"', menu)])
+    app.tap(by_css("div"), "item")
+    assert device.taps == [(60, 347)] and app.offsets == {"p1": 47.0}
+
+
+def test_same_size_twins_are_told_apart_by_label_or_left_ambiguous():
+    send = {**COMPOSER, "x": 350, "y": 699, "w": 32, "h": 32, "tag": "button", "label": "Send"}
+    twins = [("Button", 334, 683, 32, 32, "Stop"), ("Button", 334, 730, 32, 32, "Send")]
+    app, _ = app_for(send, source=tree(*twins))
+    app.tap(by_label("Send"), "send")
+    assert app.offsets == {"p1": 47.0}
+    unlabeled = [("Button", 334, 683, 32, 32, "?"), ("Button", 334, 730, 32, 32, "?")]
+    app, _ = app_for(send, source=tree(*unlabeled))
+    app.tap(by_label("Send"), "send")
+    assert app.offsets == {"p1": 47.0} and any("falling back" in m for m in logs)  # ambiguous
+
+
+def test_a_same_size_node_in_another_column_is_not_the_target():
+    send = {**COMPOSER, "x": 350, "y": 699, "w": 32, "h": 32, "tag": "button", "label": ""}
+    app, _ = app_for(send, source=tree(("Button", 18, 683, 32, 32), ("Button", 334, 730, 32, 32)))
+    app.tap(by_css("button"), "send")
+    assert app.offsets == {"p1": 47.0} and logs == []  # the x-matched one, not the fallback
+
+
+def test_the_offset_is_cached_per_page_and_recalibrated_on_a_new_page():
+    pages = iter(["p1", "p1", "p2"])
+    app, device = app_for(lambda _s: {**COMPOSER, "page": next(pages)},
+                          source=tree(("TextView", 16, 667, 358, 64)))
+    for _ in range(3):
+        app.tap(by_css("textarea"), "composer")
+    assert device.source_calls == 2 and set(app.offsets) == {"p1", "p2"}
+
+
+def test_the_visual_viewport_pan_is_subtracted_from_the_dom_y():
+    # Keyboard open: the layout viewport is panned 100pt up, so the element is 100pt higher on screen.
+    panned = {**COMPOSER, "y": 799, "vv": 100}
+    app, device = app_for(panned, source=tree(("TextView", 16, 667, 358, 64)))
+    app.tap(by_css("textarea"), "composer")
+    assert device.taps == [(195, 699)] and app.offsets == {"p1": 0.0}
+
+
+def test_a_missed_tap_recalibrates_once_and_retaps_at_the_new_offset():
+    sources = iter([tree(("TextView", 16, 714, 358, 64)), tree(("TextView", 16, 667, 358, 64))])
+    app, device = app_for(source=lambda: next(sources), hit=False)
+    app.tap(by_css("textarea"), "composer")
+    assert device.taps == [(195, 746), (195, 699)] and app.offsets == {"p1": 0.0}
+    assert any("missed" in m for m in logs)
+
+
+def test_a_missed_tap_is_not_repeated_when_recalibration_agrees():
+    app, device = app_for(source=tree(("TextView", 16, 667, 358, 64)), hit=False)
+    app.tap(by_css("textarea"), "composer")
+    assert device.taps == [(195, 699)] and device.source_calls == 2
+
+
+def test_a_landed_tap_is_not_recalibrated():
+    app, device = app_for(source=tree(("TextView", 16, 667, 358, 64)), hit=True)
+    app.tap(by_css("textarea"), "composer")
+    app.tap(by_css("textarea"), "composer")
+    assert device.taps == [(195, 699)] * 2 and device.source_calls == 1
 
 
 def test_tap_scrolls_the_element_into_view_and_reports_its_centre():
