@@ -205,3 +205,98 @@ describe('useSessionStore.refreshFromServer — window too small to reach the lo
     ]);
   });
 });
+
+describe('useSessionStore.refreshFromServer — window larger than the loaded rows', () => {
+  const range = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, index) => from + index);
+
+  it('splices a page that covers the loaded rows without re-reading the transcript', async () => {
+    const { result } = renderHook(() => useSessionStore());
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // A long session opens with only its newest 20 rows.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(81, 100).map(msg), total: 100, hasMore: true }),
+    );
+    await act(async () => {
+      await result.current.fetchFromServer(SESSION, { limit: 20, offset: 0 });
+    });
+
+    // A turn completes and the refresh asks for liveRows + headroom — more
+    // than is loaded, so the page's first row (m60) was never loaded.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(60, 102).map(msg), total: 102, hasMore: true }),
+    );
+    await act(async () => {
+      await result.current.refreshFromServer(SESSION, { limit: 43 });
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('re-reading it in full'));
+    warn.mockRestore();
+
+    const slot = result.current.getSlot(SESSION);
+    expect(slot.serverMessages.map((message) => message.id)).toEqual(
+      range(60, 102).map((n) => `m${n}`),
+    );
+    expect(slot.offset).toBe(43);
+    expect(slot.hasMore).toBe(true);
+    expect(slot.total).toBe(102);
+  });
+
+  it('lets "load older" continue from the covering page without duplicates or gaps', async () => {
+    const { result } = renderHook(() => useSessionStore());
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(81, 100).map(msg), total: 100, hasMore: true }),
+    );
+    await act(async () => {
+      await result.current.fetchFromServer(SESSION, { limit: 20, offset: 0 });
+    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(60, 102).map(msg), total: 102, hasMore: true }),
+    );
+    await act(async () => {
+      await result.current.refreshFromServer(SESSION, { limit: 43 });
+    });
+
+    // offset=43 from the newest end of a 102-row transcript is m59 downward.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(40, 59).map(msg), total: 102, hasMore: true }),
+    );
+    await act(async () => {
+      await result.current.fetchMore(SESSION, { limit: 20 });
+    });
+
+    expect(requestedUrls()[2]).toContain('offset=43');
+    const ids = result.current.getSlot(SESSION).serverMessages.map((message) => message.id);
+    expect(ids).toEqual(range(40, 102).map((n) => `m${n}`));
+  });
+
+  it('still falls back to a full read when the windows are disjoint', async () => {
+    const { result } = renderHook(() => useSessionStore());
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(81, 100).map(msg), total: 100, hasMore: true }),
+    );
+    await act(async () => {
+      await result.current.fetchFromServer(SESSION, { limit: 20, offset: 0 });
+    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(105, 110).map(msg), total: 110, hasMore: true }),
+    );
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(1, 110).map(msg), total: 110, hasMore: false }),
+    );
+    await act(async () => {
+      await result.current.refreshFromServer(SESSION, { limit: 6 });
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(requestedUrls()[2]).not.toContain('limit=');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('re-reading it in full'));
+    warn.mockRestore();
+    expect(result.current.getSlot(SESSION).serverMessages).toHaveLength(110);
+  });
+});

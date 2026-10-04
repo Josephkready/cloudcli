@@ -9,6 +9,7 @@ import {
   getUserTurnOrdinalBefore,
   hasServerEchoForLocalUser,
   isAssistantTextEchoedInSameTurnOnServer,
+  findRefreshTailJoin,
   isSameServerTranscript,
   mergeRefreshedTail,
   pruneRealtimeSupersededByServer,
@@ -691,6 +692,36 @@ describe('mergeRefreshedTail', () => {
 
     const once = mergeRefreshedTail(loaded, page);
     assert.deepEqual(mergeRefreshedTail(once, page).map((m) => m.id), once.map((m) => m.id));
+  });
+});
+
+describe('mergeRefreshedTail — page larger than the loaded window', () => {
+  // A session opens with only the newest 20 rows, but a finished turn asks for
+  // `liveRows + 40`. That page reaches back *past* the first loaded row, so its
+  // own first row was never loaded — yet it fully covers what is.
+  const rows = (from: number, to: number): NormalizedMessage[] =>
+    Array.from({ length: to - from + 1 }, (_, index) =>
+      assistant(`r${from + index}`, `row ${from + index}`, from + index));
+
+  it('replaces the loaded rows with a page that fully covers them', () => {
+    const loaded = rows(80, 99);
+    const page = rows(57, 102);
+
+    const merged = mergeRefreshedTail(loaded, page);
+    assert.equal(merged.length, page.length);
+    assert.deepEqual(merged.map((m) => m.id), page.map((m) => m.id));
+  });
+
+  it('treats a covering page as joined at the start of the loaded rows', () => {
+    assert.equal(findRefreshTailJoin(rows(80, 99), rows(57, 102)), 0);
+  });
+
+  it('still joins an ordinary overlapping page at its first row', () => {
+    assert.equal(findRefreshTailJoin(rows(80, 99), rows(95, 102)), 15);
+  });
+
+  it('still reports genuinely disjoint windows as not joined', () => {
+    assert.equal(findRefreshTailJoin(rows(80, 99), rows(105, 110)), -1);
   });
 });
 

@@ -432,6 +432,11 @@ export function useSessionStore() {
 
       slot._appliedFetchSeq = fetchTicket;
 
+      // A window that reaches back to (or past) the first loaded row replaces
+      // the loaded rows outright, so the result is exactly the server's page.
+      const pageCoversLoaded = limit !== null
+        && slot.serverMessages.length > 0
+        && findRefreshTailJoin(slot.serverMessages, refreshed) === 0;
       const nextServerMessages = limit === null
         ? refreshed
         : mergeRefreshedTail(slot.serverMessages, refreshed);
@@ -447,7 +452,15 @@ export function useSessionStore() {
       // applying it would light up "load older" on a slot that already holds
       // everything, or clear it on one that does not. The previous answer is
       // still the right one, because a refresh never drops older rows.
-      slot.hasMore = limit === null ? Boolean(data.hasMore) : slot.hasMore;
+      // Except when the page covers every loaded row: the slot then *is* the
+      // server's page, so its `hasMore` does describe the slot. OR-ing in the
+      // previous answer keeps "load older" lit if the server under-reports —
+      // a spurious one self-corrects on the next (empty) `fetchMore`.
+      if (limit === null) {
+        slot.hasMore = Boolean(data.hasMore);
+      } else if (pageCoversLoaded) {
+        slot.hasMore = Boolean(data.hasMore) || slot.hasMore;
+      }
       // Keep the pagination cursor equal to the loaded row count, the invariant
       // `fetchMore` walks backwards from.
       slot.offset = slot.serverMessages.length;
