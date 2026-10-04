@@ -397,12 +397,10 @@ export function useSessionStore() {
       // caller's window to have been generous enough, notice when it was not
       // and re-read the whole transcript — the cost the window exists to avoid,
       // paid only in the rare case that actually needs it.
-      if (
-        limit !== null
-        && refreshed.length > 0
-        && slot.serverMessages.length > 0
-        && findRefreshTailJoin(slot.serverMessages, refreshed) < 0
-      ) {
+      const refreshJoin = limit !== null && refreshed.length > 0 && slot.serverMessages.length > 0
+        ? findRefreshTailJoin(slot.serverMessages, refreshed)
+        : null;
+      if (refreshJoin !== null && refreshJoin < 0) {
         console.warn(
           `[SessionStore] windowed refresh of ${limit} message(s) did not reach the loaded transcript for ${sessionId}; re-reading it in full`,
         );
@@ -434,9 +432,14 @@ export function useSessionStore() {
 
       // A window that reaches back to (or past) the first loaded row replaces
       // the loaded rows outright, so the result is exactly the server's page.
+      // So does any window over a slot with nothing loaded yet.
       const pageCoversLoaded = limit !== null
-        && slot.serverMessages.length > 0
-        && findRefreshTailJoin(slot.serverMessages, refreshed) === 0;
+        && (slot.serverMessages.length === 0 || refreshJoin === 0);
+      if (pageCoversLoaded && slot.serverMessages.length > 0) {
+        console.debug(
+          `[SessionStore] windowed refresh of ${limit} message(s) covers all ${slot.serverMessages.length} loaded for ${sessionId}; replacing them`,
+        );
+      }
       const nextServerMessages = limit === null
         ? refreshed
         : mergeRefreshedTail(slot.serverMessages, refreshed);

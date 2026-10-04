@@ -273,6 +273,81 @@ describe('useSessionStore.refreshFromServer — window larger than the loaded ro
     expect(ids).toEqual(range(40, 102).map((n) => `m${n}`));
   });
 
+  it.each([
+    { opened: false, page: true, expected: true },
+    { opened: true, page: false, expected: true },
+    { opened: false, page: false, expected: false },
+  ])('ORs hasMore when the page covers the loaded rows (opened $opened, page $page)', async ({ opened, page, expected }) => {
+    const { result } = renderHook(() => useSessionStore());
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(81, 100).map(msg), total: 100, hasMore: opened }),
+    );
+    await act(async () => {
+      await result.current.fetchFromServer(SESSION, { limit: 20, offset: 0 });
+    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(60, 102).map(msg), total: 102, hasMore: page }),
+    );
+    await act(async () => {
+      await result.current.refreshFromServer(SESSION, { limit: 43 });
+    });
+
+    expect(result.current.getSlot(SESSION).hasMore).toBe(expected);
+  });
+
+  it('takes the server hasMore when a windowed refresh is the first load', async () => {
+    const { result } = renderHook(() => useSessionStore());
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(98, 100).map(msg), total: 100, hasMore: true }),
+    );
+    await act(async () => {
+      await result.current.refreshFromServer(SESSION, { limit: 3 });
+    });
+
+    const slot = result.current.getSlot(SESSION);
+    expect(slot.serverMessages.map((message) => message.id)).toEqual(['m98', 'm99', 'm100']);
+    expect(slot.hasMore).toBe(true);
+    expect(slot.offset).toBe(3);
+  });
+
+  it('keeps a live streaming row and drops a live row the covering page now owns', async () => {
+    const { result } = renderHook(() => useSessionStore());
+
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(81, 100).map(msg), total: 100, hasMore: true }),
+    );
+    await act(async () => {
+      await result.current.fetchFromServer(SESSION, { limit: 20, offset: 0 });
+    });
+    act(() => {
+      // m101 arrived over the socket and is now persisted; the stream is still open.
+      result.current.appendRealtime(SESSION, msg(101) as never);
+      result.current.appendRealtime(SESSION, {
+        id: `__streaming_${SESSION}`,
+        sessionId: SESSION,
+        kind: 'stream_delta',
+        role: 'assistant',
+        content: 'still typing',
+        timestamp: new Date(1_700_000_200_000).toISOString(),
+      } as never);
+    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ messages: range(60, 101).map(msg), total: 101, hasMore: true }),
+    );
+    await act(async () => {
+      await result.current.refreshFromServer(SESSION, { limit: 42 });
+    });
+
+    const slot = result.current.getSlot(SESSION);
+    expect(slot.realtimeMessages.map((message) => message.id)).toEqual([`__streaming_${SESSION}`]);
+    const mergedIds = slot.merged.map((message) => message.id);
+    expect(mergedIds.filter((id) => id === 'm101')).toHaveLength(1);
+    expect(mergedIds).toContain(`__streaming_${SESSION}`);
+    expect(mergedIds[0]).toBe('m60');
+  });
+
   it('still falls back to a full read when the windows are disjoint', async () => {
     const { result } = renderHook(() => useSessionStore());
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
