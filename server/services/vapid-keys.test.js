@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
-import { DEFAULT_VAPID_SUBJECT, resolveVapidSubject } from './vapid-keys.js';
+import webPush from 'web-push';
+
+import { closeConnection, initializeDatabase } from '../modules/database/index.js';
+import { vapidKeysDb } from '../modules/database/repositories/vapid-keys.js';
+
+import { DEFAULT_VAPID_SUBJECT, configureWebPush, resolveVapidSubject } from './vapid-keys.js';
 
 function captureWarnings(run) {
   const original = console.warn;
@@ -52,6 +60,8 @@ test('VAPID subject rejects .local / localhost hosts and bad schemes (#496)', ()
     'https://localhost:3001',
     'https://app.localhost',
     'https://cloudcli.local',
+    'https://local',
+    'mailto:x@local',
     'http://example.com',
     'example.com',
     'mailto:',
@@ -62,5 +72,40 @@ test('VAPID subject rejects .local / localhost hosts and bad schemes (#496)', ()
     const { value, warnings } = captureWarnings(() => resolveVapidSubject(raw));
     assert.equal(value, DEFAULT_VAPID_SUBJECT, `expected fallback for ${raw}`);
     assert.equal(warnings.length, 1, `expected a warning for ${raw}`);
+  }
+});
+
+test('configureWebPush passes the resolved subject and the stored keys to web-push', async () => {
+  const previousDatabasePath = process.env.DATABASE_PATH;
+  const previousSubject = process.env.VAPID_SUBJECT;
+  const originalSetVapidDetails = webPush.setVapidDetails;
+  const originalLog = console.log;
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'vapid-subject-'));
+  const calls = [];
+
+  closeConnection();
+  process.env.DATABASE_PATH = path.join(tempDirectory, 'auth.db');
+  await initializeDatabase();
+  webPush.setVapidDetails = (...args) => calls.push(args);
+  console.log = () => {};
+
+  try {
+    // Existing keys must be reused untouched, or live subscriptions break.
+    const stored = webPush.generateVAPIDKeys();
+    vapidKeysDb.createVapidKeys(stored.publicKey, stored.privateKey);
+    process.env.VAPID_SUBJECT = 'mailto:noreply@cloudcli.local';
+
+    configureWebPush();
+
+    assert.deepEqual(calls, [[DEFAULT_VAPID_SUBJECT, stored.publicKey, stored.privateKey]]);
+  } finally {
+    webPush.setVapidDetails = originalSetVapidDetails;
+    console.log = originalLog;
+    if (previousSubject === undefined) delete process.env.VAPID_SUBJECT;
+    else process.env.VAPID_SUBJECT = previousSubject;
+    closeConnection();
+    if (previousDatabasePath === undefined) delete process.env.DATABASE_PATH;
+    else process.env.DATABASE_PATH = previousDatabasePath;
+    await rm(tempDirectory, { recursive: true, force: true });
   }
 });

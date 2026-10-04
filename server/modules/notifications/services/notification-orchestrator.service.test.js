@@ -16,7 +16,12 @@ import {
 } from '../../database/index.js';
 import { markShutdownDraining, resetShutdownDrainingForTests } from '../../../shared/shutdown-drain.js';
 
-import { notifyRunFailed, notifyRunStopped } from './notification-orchestrator.service.js';
+import {
+  describeEndpoint,
+  describeRejectionBody,
+  notifyRunFailed,
+  notifyRunStopped,
+} from './notification-orchestrator.service.js';
 
 async function withIsolatedDatabase(runTest) {
   const previousDatabasePath = process.env.DATABASE_PATH;
@@ -133,30 +138,43 @@ function pushError(statusCode, body) {
   return error;
 }
 
-async function sendWithRejection(rejection) {
+const APPLE_ENDPOINT = 'https://web.push.apple.com/QSECRETTOKENabcdefghijklmnopqrstuvwxyz';
+const FCM_ENDPOINT = 'https://fcm.googleapis.com/fcm/send/GONETOKEN0123456789';
+
+let rejectionRun = 0;
+
+/**
+ * Save one subscription per entry of `outcomes` (endpoint -> rejection, or null
+ * for success), fire one notification, and report what was logged and kept.
+ */
+async function sendWithOutcomes(outcomes) {
   const originalSendNotification = webPush.sendNotification;
   const originalConsoleError = console.error;
   const errors = [];
-  const endpoint = 'https://web.push.apple.com/QSECRETTOKENabcdefghijklmnopqrstuvwxyz';
   // Unique per call: the orchestrator dedupes identical events within 20s.
-  const sessionId = `app-session-reject-${rejection.statusCode}`;
+  rejectionRun += 1;
+  const sessionId = `app-session-reject-${rejectionRun}`;
 
-  webPush.sendNotification = async () => {
-    throw rejection;
+  webPush.sendNotification = async (subscription) => {
+    const rejection = outcomes[subscription.endpoint];
+    if (rejection) throw rejection;
+    return {};
   };
   console.error = (...args) => errors.push(args.join(' '));
 
   try {
     let remaining;
     await withIsolatedDatabase(async () => {
-      const user = userDb.createUser(`reject-user-${rejection.statusCode}`, 'hash');
+      const user = userDb.createUser(`reject-user-${rejectionRun}`, 'hash');
       const userId = Number(user.id);
 
       notificationPreferencesDb.updatePreferences(userId, {
         channels: { webPush: true },
         events: { actionRequired: true, stop: true, error: true },
       });
-      pushSubscriptionsDb.saveSubscription(userId, endpoint, 'p256dh-secret', 'auth-secret');
+      for (const endpoint of Object.keys(outcomes)) {
+        pushSubscriptionsDb.saveSubscription(userId, endpoint, 'p256dh-secret', 'auth-secret');
+      }
       sessionsDb.createAppSession(sessionId, 'claude', '/workspace/demo');
 
       notifyRunStopped({
@@ -167,33 +185,76 @@ async function sendWithRejection(rejection) {
       });
 
       await new Promise((resolve) => setTimeout(resolve, 10));
-      remaining = pushSubscriptionsDb.getSubscriptions(userId).length;
+      remaining = pushSubscriptionsDb.getSubscriptions(userId).map((sub) => sub.endpoint);
     });
-    return { errors, remaining, endpoint };
+    return { errors, remaining };
   } finally {
     console.error = originalConsoleError;
     webPush.sendNotification = originalSendNotification;
   }
 }
 
-test('non-410/404 push rejections are logged with status and body, not secrets (#496)', async () => {
-  const { errors, remaining, endpoint } = await sendWithRejection(
-    pushError(403, '{"reason":"BadJwtToken"}'),
-  );
+function assertNoSecrets(line) {
+  assert.ok(!line.includes('QSECRETTOKEN'), 'endpoint path must not be logged');
+  assert.ok(!line.includes('GONETOKEN'), 'endpoint path must not be logged');
+  assert.ok(!line.includes('p256dh-secret'));
+  assert.ok(!line.includes('auth-secret'));
+}
 
-  assert.equal(remaining, 1, 'a 403 must not delete the subscription');
+test('non-410/404 push rejections are logged with status and body, not secrets (#496)', async () => {
+  const { errors, remaining } = await sendWithOutcomes({
+    [APPLE_ENDPOINT]: pushError(403, '{"reason":"BadJwtToken"}'),
+  });
+
+  assert.deepEqual(remaining, [APPLE_ENDPOINT], 'a 403 must not delete the subscription');
   assert.equal(errors.length, 1);
   const [line] = errors;
   assert.match(line, /status=403/);
   assert.match(line, /BadJwtToken/);
   assert.match(line, /https:\/\/web\.push\.apple\.com/);
-  assert.ok(!line.includes(endpoint), 'full endpoint must not be logged');
-  assert.ok(!line.includes('p256dh-secret'));
-  assert.ok(!line.includes('auth-secret'));
+  assertNoSecrets(line);
 });
 
 test('410 push rejections remove the subscription without logging an error', async () => {
-  const { errors, remaining } = await sendWithRejection(pushError(410, 'gone'));
-  assert.equal(remaining, 0);
+  const { errors, remaining } = await sendWithOutcomes({ [FCM_ENDPOINT]: pushError(410, 'gone') });
+  assert.deepEqual(remaining, []);
   assert.equal(errors.length, 0);
+});
+
+test('each subscription is handled by its own outcome when a user has several', async () => {
+  const { errors, remaining } = await sendWithOutcomes({
+    [APPLE_ENDPOINT]: pushError(403, '{"reason":"BadJwtToken"}'),
+    [FCM_ENDPOINT]: pushError(404, 'not found'),
+    'https://updates.push.services.mozilla.com/wpush/v2/OKTOKEN': null,
+  });
+
+  assert.deepEqual(
+    [...remaining].sort(),
+    [APPLE_ENDPOINT, 'https://updates.push.services.mozilla.com/wpush/v2/OKTOKEN'].sort(),
+  );
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /web\.push\.apple\.com/);
+  assert.match(errors[0], /status=403/);
+  assertNoSecrets(errors[0]);
+});
+
+test('describeEndpoint keeps only the origin and tolerates garbage', () => {
+  assert.equal(describeEndpoint(APPLE_ENDPOINT), 'https://web.push.apple.com');
+  assert.equal(describeEndpoint('not a url'), '<invalid endpoint>');
+  assert.equal(describeEndpoint(undefined), '<invalid endpoint>');
+});
+
+test('describeRejectionBody handles string, object, message-only, empty and long bodies', () => {
+  assert.equal(describeRejectionBody({ body: ' {"reason":"BadJwtToken"} ' }), '{"reason":"BadJwtToken"}');
+  assert.equal(describeRejectionBody({ body: { reason: 'BadJwtToken' } }), '{"reason":"BadJwtToken"}');
+  assert.equal(describeRejectionBody(new Error('socket hang up')), 'socket hang up');
+  assert.equal(describeRejectionBody({ body: '' }), '<empty>');
+  assert.equal(describeRejectionBody(undefined), '<empty>');
+
+  const long = describeRejectionBody({ body: 'x'.repeat(500) });
+  assert.equal(long, `${'x'.repeat(300)}...`);
+
+  const circular = {};
+  circular.self = circular;
+  assert.equal(describeRejectionBody({ body: circular }), '[object Object]');
 });
