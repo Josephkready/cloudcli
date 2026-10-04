@@ -2,7 +2,9 @@
 
 import re
 
-from _helpers import boot, open_large_conversation, visible
+import time
+
+from _helpers import boot, ios_boot, ios_open_large_conversation, open_large_conversation, visible
 
 NAME = "open-conversation"
 DESCRIPTION = ("Pick a ~120-turn conversation from the sidebar -> transcript renders at the "
@@ -29,3 +31,28 @@ def run(page, vd):
         visible(page.get_by_role("button", name=re.compile(r"Index bounda"))).click()
     page.get_by_text("bench-marker-", exact=False).first.wait_for()
     vd.mark("switched session")
+
+
+# The transcript scrolls inside its own container, not the window (ios_hub's device.scroll() is a
+# window.scrollBy), so scroll the nearest scrollable ancestor of a message directly.
+_SCROLL_TRANSCRIPT = """let el = document.querySelector('.chat-message');
+while (el && !(el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)))
+  el = el.parentElement;
+if (!el) return null;
+el.scrollTop -= %d;
+return Math.round(el.scrollTop);"""
+
+
+def run_ios(device, vd):
+    """Open the long conversation on a real iOS Simulator (standalone PWA) and scroll up through
+    it in steps, so Safari's rendering of older messages (#495: position jumps) is recorded."""
+    app = ios_boot(device, vd)
+    ios_open_large_conversation(app, vd)
+    time.sleep(1.0)
+    vd.mark("transcript loaded")
+    for _ in range(6):
+        if app.js(_SCROLL_TRANSCRIPT % 300) is None:
+            raise RuntimeError("ios-sim: found no scrollable transcript container")
+        time.sleep(0.25)
+    time.sleep(0.6)
+    vd.mark("scrolled up")

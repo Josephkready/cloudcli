@@ -132,6 +132,38 @@ keyboard with `KEYBOARD = False`. Read `vdebug-runs/latest/report.md` (gitignore
 code, re-record the flows that touch those screens before opening a PR.** Full
 method: the `video-debugger` skill.
 
+**On a real iOS Simulator (`--viewports ios-sim`).** Chromium's `iphone-13-pro` preset cannot
+enter iOS standalone mode, which is where the home-screen app's keyboard and layout bugs live
+(#354 reproduced only from the icon). The opt-in `ios-sim` viewport drives a real iPhone 13 Pro
+Simulator on perfbook through `ios_hub` (the `ios-automation` skill): it installs the app to the
+home screen, launches it standalone, and runs each flow's `run_ios(device, vd)` with native
+taps, so the real keyboard opens. `composer-keyboard`, `new-chat-turn` and `open-conversation`
+have one; other flows are skipped for `ios-sim`. The Simulator is another machine, so serve
+the fixture with a reverse tunnel to it:
+
+```bash
+npm run ios:debug          # fixture on 127.0.0.1:4870, tunnelled to perfbook's own loopback
+python3 vdebug/vdebug.py record --base-url http://localhost:4870 --viewports ios-sim \
+  --flow composer-keyboard,new-chat-turn,open-conversation
+```
+
+`ios_hub` is not a cloudcli dependency: install it once with `pip install -e ~/repos/ios-hub`.
+Once the tunnel is verified from perfbook, `ios:debug` prints
+`VDEBUG_IOS_BASE_URL=http://localhost:4870` (the `--base-url` to pass). Ctrl-C or SIGTERM, at
+any point including mid-startup, stops the server, closes the tunnel and deletes the fixture HOME.
+`npm run ios:debug -- --port N --ios-tunnel <host> --profile standard --skip-build` adjusts it.
+`localhost` is right here only because of the tunnel (perfbook's loopback forwards to dante);
+the debug instance has no auth, so it never listens on a LAN address. Loopback base URLs install
+under a per-port home-screen name (`vdebug-4870`), so two instances never share an icon. Budget
+~2 min per flow (lease, install, launch), and always let the run finish or the lease release.
+`run_ios` steps use `IosApp` in `vdebug/flows/_helpers.py`, which turns DOM rects into screen
+points and records a `keyboard-covers-control` hit when the keyboard hides the composer. The
+DOM-to-screen y offset depends on the iOS version and the shell CSS (0 on iOS 26.5, 47pt on iOS 27,
+though `screen.height - innerHeight` is 47 on both), so it is calibrated per page against the
+native accessibility tree (`device.source()`), checked after each tap and recalibrated once on a
+miss. `screen.height - innerHeight` is only a logged fallback when no anchor element matches. The Simulator runs a newer
+iOS on a fast Mac: it catches layout and behaviour, not real-phone timings or touch latency.
+
 **Real-user flow capture.** `public/vd-recorder.js` sends intent events to
 `POST /api/_vd/events`, stored in `flows.db` beside `DATABASE_PATH`
 (`/var/lib/cloudcli/flows.db` on dante; override with `VD_FLOWS_DB`). No input

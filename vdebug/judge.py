@@ -54,6 +54,13 @@ MAX_TOKENS = 8192
 # frame by more than a few blocks' worth — tuned so a toast sliding in survives but video
 # encoder noise on a still page does not.
 DEDUP_FILTER = "mpdecimate=hi=64*12:lo=64*5:frac=0.33"
+# Parity with vdebug.VIDEO_MAX_EDGE: Playwright recordings (.webm) are already downscaled to
+# this edge at record time via record_video_size(); a real-device recording (e.g. the
+# ios-sim target's .mp4, straight off `xcrun simctl io recordVideo` at the device's native
+# 1170x2532) is not, so extract_frames downscales any frame whose longer edge exceeds this —
+# both to keep judge request size/cost comparable across targets and because larger images
+# don't measurably improve findings (judge.md).
+FRAME_MAX_EDGE = 1920
 
 SEVERITIES = ("critical", "major", "minor")
 CATEGORIES = (
@@ -161,13 +168,20 @@ def _data_url(path: pathlib.Path, mime: str) -> str:
 
 
 def extract_frames(video: pathlib.Path, out_dir: pathlib.Path, *, fps: int = DEFAULT_FPS,
-                   max_frames: int = MAX_FRAMES) -> list[dict]:
+                   max_frames: int = MAX_FRAMES, max_edge: int = FRAME_MAX_EDGE) -> list[dict]:
     """Sample `video` at `fps`, drop consecutive near-duplicates, return [{label, t, path, candidates}]
     (`candidates` = how many distinct frames existed before the max_frames cap).
 
     `-frame_pts 1` names each kept frame by its timestamp in 1/fps units, so labels carry
     the real time in the flow. More than `max_frames` survivors (content that never stops
     moving) are thinned evenly, always keeping the first and last.
+
+    Works on both Playwright's .webm (constant frame rate) and a real-device .mp4 recording
+    (e.g. `xcrun simctl io recordVideo`, which is VARIABLE frame rate — simctl only writes a
+    frame when the screen changes). The `fps=` filter resamples either to a constant rate
+    before mpdecimate runs, so VFR input is not a special case here; frames whose longer edge
+    exceeds `max_edge` are downscaled first (a no-op for anything already smaller — see
+    FRAME_MAX_EDGE).
     """
     if max_frames < 2:  # the thinning keeps first AND last, and divides by max_frames - 1
         raise ValueError(f"max_frames must be >= 2, got {max_frames}")
@@ -176,8 +190,9 @@ def extract_frames(video: pathlib.Path, out_dir: pathlib.Path, *, fps: int = DEF
     out_dir.mkdir(parents=True, exist_ok=True)
     for old in out_dir.glob("*.png"):
         old.unlink()
+    scale = f"scale='min({max_edge},iw)':'min({max_edge},ih)':force_original_aspect_ratio=decrease,"
     proc = subprocess.run(
-        ["ffmpeg", "-loglevel", "error", "-i", str(video), "-vf", f"fps={fps},{DEDUP_FILTER}",
+        ["ffmpeg", "-loglevel", "error", "-i", str(video), "-vf", f"fps={fps},{scale}{DEDUP_FILTER}",
          "-fps_mode", "vfr", "-frame_pts", "1", str(out_dir / "%06d.png")],
         capture_output=True, text=True,
     )
@@ -381,6 +396,15 @@ def judge_entry(entry: dict, run_dir: pathlib.Path, *, model: str, api_key: str,
         return {"error": str(e), "model": model, "findings": []}
 
 
+def _judge_entry_or_skip(entry: dict, run_dir: pathlib.Path, *, model: str, api_key: str, fps: int,
+                         notes: str | None) -> dict:
+    """judge_entry, but a flow skipped at record time (e.g. ios-sim with no run_ios) is never
+    sent to the model — there is no video.mp4/.webm to extract frames from."""
+    if entry.get("skipped"):
+        return {"skipped": entry["skipped"], "model": model, "findings": []}
+    return judge_entry(entry, run_dir, model=model, api_key=api_key, fps=fps, notes=notes)
+
+
 def judge_run(run_dir: pathlib.Path, *, model: str, api_key: str, fps: int = DEFAULT_FPS,
               log=print, workers: int = 6, notes: str | None = None) -> dict:
     """Judge every entry in <run_dir>/report.json (concurrently) and rewrite it in place."""
@@ -389,13 +413,15 @@ def judge_run(run_dir: pathlib.Path, *, model: str, api_key: str, fps: int = DEF
     runs = report["runs"]
     log(f"judging {len(runs)} flow x viewport recording(s) with {model} (video frames @ {fps} fps, deduped) ...")
     with ThreadPoolExecutor(max_workers=max(1, min(workers, len(runs)))) as pool:
-        results = list(pool.map(lambda e: judge_entry(e, run_dir, model=model, api_key=api_key, fps=fps,
-                                                      notes=notes), runs))
+        results = list(pool.map(lambda e: _judge_entry_or_skip(e, run_dir, model=model, api_key=api_key, fps=fps,
+                                                                notes=notes), runs))
     total = 0.0
     for entry, j in zip(runs, results, strict=False):
         entry["judge"] = j
         where = f"  {entry['flow']} @ {entry['viewport']}:"
-        if j.get("error"):
+        if j.get("skipped"):
+            log(f"{where} skipped ({j['skipped']}), not judged")
+        elif j.get("error"):
             log(f"{where} judge error: {j['error']}")
         else:
             cov, tok = j.get("coverage") or {}, j.get("tokens") or {}

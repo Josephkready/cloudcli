@@ -132,3 +132,254 @@ def pinch(page, locator, scale: float, *, steps: int = 10, spread: float = 40) -
             cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         finally:
             cdp.detach()
+
+
+# ------------------------------------------------------------------ ios-sim (run_ios)
+# A flow's optional run_ios(device, vd) drives the real iOS Simulator (`--viewports ios-sim`)
+# through an ios_hub.Device: no Playwright locators, only eval_js + native taps. IosApp wraps the
+# two things every cloudcli run_ios needs: finding an element by role/label/text in the page, and
+# tapping it with a REAL native touch (focus from a synthetic click does not open the keyboard the
+# way a finger does, which is the whole point of running on a Simulator).
+
+# Resolve an element from a JS function body over `document` (see by_label/by_text/by_css), then
+# report its centre (to tap) or its vertical extent against the visible viewport (keyboard check).
+# Only the tap path scrolls the element into view: the extent check must see it where it is.
+_FIND_JS = "const el = (() => { %s })();\nif (!el) return null;\n"
+# Besides the centre, report what calibration needs to find the same element in the native
+# accessibility tree: size, tag, accessible label, the visual viewport's pan (keyboard open), and
+# a page key (load + path) the calibrated offset is cached under.
+_RECT_JS = """const r = el.getBoundingClientRect();
+return r.width && r.height ? {x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height,
+  tag: el.tagName.toLowerCase(), label: el.getAttribute('aria-label') || el.getAttribute('title') ||
+  el.getAttribute('placeholder') || el.textContent.trim().slice(0, 80),
+  vv: visualViewport.offsetTop, page: performance.timeOrigin + ' ' + location.pathname} : null;"""
+_CENTRE_JS = _FIND_JS + "el.scrollIntoView({block: 'nearest'});\n" + _RECT_JS
+_INFO_JS = _FIND_JS + _RECT_JS  # same report, no scroll: for calibration anchors
+# One-shot capture-phase listener: did the next native touch land inside the element?
+_ARM_JS = _FIND_JS + """window.__vdTapHit = null;
+const f = e => { window.__vdTapHit = el === e.target || el.contains(e.target); };
+document.addEventListener('pointerdown', f, {capture: true, once: true});
+return 1;"""
+_EXTENT_JS = _FIND_JS + """const r = el.getBoundingClientRect();
+return {top: r.top, bottom: r.bottom, visibleBottom: visualViewport.offsetTop + visualViewport.height};"""
+
+
+def js_str(s: str) -> str:
+    """A Python str as a JS string literal (JSON is valid JS)."""
+    import json
+    return json.dumps(s)
+
+
+# "Tappable": rendered, horizontally on screen (a closed drawer keeps its links mounted, slid off
+# to the left), and — when vertically on screen — the topmost thing at its centre, so a drawer or
+# dialog covering it disqualifies it (a native tap there would land on the overlay instead).
+# Content above/below the fold passes; the tap path scrolls it into view first.
+_TAPPABLE = ("(e => { if (!e.getClientRects().length) return false; const r = e.getBoundingClientRect(); "
+             "const x = r.left + r.width / 2, y = r.top + r.height / 2; "
+             "if (x < 0 || x > innerWidth) return false; "
+             "if (y < 0 || y > innerHeight) return true; "
+             "const h = document.elementFromPoint(x, y); return !!h && (h === e || e.contains(h)); })")
+
+
+def by_label(label: str, tag: str = "button") -> str:
+    """JS finding the first visible `tag` whose aria-label/title/text matches `label` exactly."""
+    return (f"return [...document.querySelectorAll({js_str(tag)})].find(e => {_TAPPABLE}(e) && "
+            f"[e.getAttribute('aria-label'), e.getAttribute('title'), e.textContent.trim()].includes({js_str(label)}));")
+
+
+def by_text(pattern: str, tag: str = "a, button") -> str:
+    """JS finding the first tappable `tag` whose text matches the JS regex source `pattern`."""
+    return (f"return [...document.querySelectorAll({js_str(tag)})].find(e => {_TAPPABLE}(e) && "
+            f"new RegExp({js_str(pattern)}).test(e.textContent));")
+
+
+def by_css(selector: str) -> str:
+    """JS finding the first tappable match of a CSS selector (prefer data-slot/test ids, not paths)."""
+    return f"return [...document.querySelectorAll({js_str(selector)})].find({_TAPPABLE});"
+
+
+# DOM tag -> the XCUIElementType(s) WebKit exposes it as in the native accessibility tree.
+_NATIVE_TYPES = {
+    "textarea": ("XCUIElementTypeTextView",),
+    "input": ("XCUIElementTypeTextField", "XCUIElementTypeSearchField", "XCUIElementTypeSecureTextField"),
+    "button": ("XCUIElementTypeButton",),
+    "a": ("XCUIElementTypeLink",),
+}
+_MATCH_TOLERANCE = 2.0  # points: size and x-centre slack between the DOM rect and the native frame
+
+
+def native_centre_y(source_xml: str, dom: dict) -> float | None:
+    """The native centre y of the ONE node in an XCUITest source dump that is the DOM element
+    `dom` (a _RECT_JS report): same element type, same size and same x centre (x is not shifted),
+    narrowed by accessible label when several match. None when nothing, or nothing unique, does."""
+    import xml.etree.ElementTree as ET
+    types = _NATIVE_TYPES.get(dom.get("tag") or "")
+    if not types or not dom.get("w") or not dom.get("h") or not source_xml:
+        return None
+    try:
+        root = ET.fromstring(source_xml)
+    except ET.ParseError:
+        return None
+    tol = _MATCH_TOLERANCE
+    hits = []
+    for node in root.iter():
+        if node.tag not in types or node.get("visible") == "false":
+            continue
+        try:
+            x, y, w, h = (float(node.get(k)) for k in ("x", "y", "width", "height"))
+        except (TypeError, ValueError):
+            continue
+        if abs(w - dom["w"]) <= tol and abs(h - dom["h"]) <= tol and abs(x + w / 2 - dom["x"]) <= tol:
+            hits.append((node, y + h / 2))
+    if len(hits) > 1 and dom.get("label"):
+        hits = [hit for hit in hits if dom["label"] in (hit[0].get("label"), hit[0].get("name"))]
+    return hits[0][1] if len(hits) == 1 else None
+
+
+class IosApp:
+    """cloudcli's standalone PWA on an ios_hub.Device, addressed in DOM terms.
+
+    `device.tap(x, y)` takes SCREEN points, but getBoundingClientRect() is in viewport points, so a
+    tap adds a vertical offset (x is never shifted). That offset depends on the iOS version AND the
+    app's shell CSS: on an iPhone 13 Pro `screen.height - innerHeight` is 47 on both iOS 26.5 and 27,
+    yet the true offset is 47 on iOS 27 and 0 on iOS 26.5 with current main. So it is measured, not
+    derived: the element being tapped (or a stable anchor — the composer, the menu button) is found
+    in the native accessibility tree (`device.source()`), and offset = native centre y - DOM centre
+    y. It is cached per page (load + path), checked after every tap with a capture-phase
+    pointerdown listener, and recalibrated once on a miss. `screen.height - innerHeight` (measured
+    at construction, keyboard closed) is only the logged last resort when no anchor matches.
+    """
+
+    ANCHORS = (("composer", "return [...document.querySelectorAll('textarea')].find(" + _TAPPABLE + ");"),
+               ("menu button", by_label("Open menu")))
+
+    def __init__(self, device, timeout: float = 20.0, log=None):
+        import sys
+        self.device = device
+        self.timeout = timeout
+        self.log = log or (lambda m: print(m, file=sys.stderr))
+        self.fallback_inset = float(device.eval_js("return screen.height - window.innerHeight") or 0)
+        self.offsets: dict[str, float] = {}  # page key -> calibrated y offset
+
+    def calibrate(self, target: dict | None = None) -> float:
+        """Measure the DOM->screen y offset against the native tree and cache it for the page."""
+        try:
+            source = self.device.source()
+        except Exception as e:  # noqa: BLE001 — a missing tree is a fallback, not a failed flow
+            self.log(f"ios-sim: device.source() failed ({e})")
+            source = ""
+        candidates = [("the tap target", target)] if target else []
+        candidates += [(name, self.js(_INFO_JS % find_js)) for name, find_js in self.ANCHORS]
+        page = (target or {}).get("page")
+        for name, dom in candidates:
+            if not dom:
+                continue
+            native_y = native_centre_y(source, dom)
+            if native_y is not None:
+                offset = native_y - (dom["y"] - (dom.get("vv") or 0))
+                self.offsets[page or dom.get("page")] = offset
+                return offset
+        self.log(f"ios-sim: no anchor matched in the native tree; falling back to "
+                 f"screen.height - innerHeight = {self.fallback_inset:g}pt")
+        self.offsets[page] = self.fallback_inset
+        return self.fallback_inset
+
+    def js(self, script: str):
+        return self.device.eval_js(script)
+
+    def wait(self, condition_js: str, what: str, timeout: float | None = None):
+        """Poll a JS expression (wrapped in `return`) until truthy; return its value."""
+        import time
+        deadline = time.monotonic() + (timeout or self.timeout)
+        while True:
+            value = self.js(f"return ({condition_js});")
+            if value:
+                return value
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"ios-sim: timed out waiting for {what}")
+            time.sleep(0.25)
+
+    def rect(self, find_js: str, what: str) -> dict:
+        import time
+        deadline = time.monotonic() + self.timeout
+        while True:
+            r = self.js(_CENTRE_JS % find_js)
+            if r:
+                return r
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"ios-sim: no visible {what}")
+            time.sleep(0.25)
+
+    def tap(self, find_js: str, what: str) -> None:
+        """A native touch at the centre of the element `find_js` resolves to."""
+        r = self.rect(find_js, what)
+        offset = self.offsets.get(r.get("page"))
+        if offset is None:
+            offset = self.calibrate(r)
+        if self._tap_hit(find_js, r, offset) is False:
+            r = self.rect(find_js, what)  # the stray touch may have moved things
+            retry = self.calibrate(r)
+            self.log(f"ios-sim: tap on {what} missed at offset {offset:g}pt; recalibrated to {retry:g}pt")
+            if retry != offset:
+                self._tap_hit(find_js, r, retry)
+
+    def _tap_hit(self, find_js: str, r: dict, offset: float) -> bool | None:
+        """Tap r's centre at `offset`; True/False whether the touch landed in the element, None
+        when that could not be observed (no pointerdown seen, element gone)."""
+        armed = self.js(_ARM_JS % find_js)
+        self.device.tap(x=round(r["x"]), y=round(r["y"] - (r.get("vv") or 0) + offset))
+        return self.js("return window.__vdTapHit;") if armed else None
+
+    def go(self, path: str) -> None:
+        """In-app navigation (location assignment) — stays inside the standalone window, unlike
+        device.navigate(), which drives Safari's URL bar."""
+        self.js(f"location.assign({js_str(path)}); return 1;")
+
+    def keyboard_height(self) -> float:
+        """How much of the layout viewport the on-screen keyboard currently hides."""
+        return float(self.js("return window.innerHeight - visualViewport.height - visualViewport.offsetTop") or 0)
+
+    def check_not_covered(self, vd, find_js: str, what: str, check: str = "keyboard-covers-control") -> None:
+        """Record a check hit on `vd` when the element's bottom is below the visible viewport —
+        the iOS-real counterpart of the Chromium keyboard checks (layout_checks.js)."""
+        r = self.js(_EXTENT_JS % find_js)
+        if r and r["bottom"] > r["visibleBottom"] + 1:
+            vd.checks.append({"check": check, "selector": what, "rect": None, "source": "ios_run",
+                              "frame": vd.frames[-1]["label"] if vd.frames else None,
+                              "frames": [vd.frames[-1]["label"]] if vd.frames else [],
+                              "detail": f"{what} bottom {r['bottom']:.0f}px is below the visible "
+                                        f"viewport bottom {r['visibleBottom']:.0f}px (keyboard covering it)"})
+
+
+def ios_boot(device, vd) -> IosApp:
+    """Show the seeded CLI chats (like boot()), reload, wait for the shell, mark 'start'."""
+    app = IosApp(device)
+    app.js(SHOW_CLI_CHATS + " location.reload(); return 1;")
+    app.wait("document.querySelector('[aria-label=\"Open menu\"], a[href*=\"/session/\"]')", "the app shell")
+    vd.mark("start")
+    return app
+
+
+# The drawer's backdrop is a full-width "Close sidebar" button under the drawer itself, so it is
+# never tappable at its centre; its presence is what says the drawer is open.
+_DRAWER_OPEN = "!!document.querySelector('[aria-label=\"Close sidebar\"]')"
+
+
+def ios_open_sidebar(app: IosApp, vd) -> None:
+    if app.js(f"return {_DRAWER_OPEN};"):
+        return
+    app.tap(by_label("Open menu"), "'Open menu' button")
+    app.wait(_DRAWER_OPEN, "the sidebar drawer")
+    vd.mark("sidebar open")
+
+
+def ios_open_large_conversation(app: IosApp, vd) -> None:
+    """Tap the 120-turn conversation: listed on the phone's 'Choose Your Conversation' screen or in
+    an already-open drawer; otherwise open the drawer first. Waits for the list to render."""
+    link = by_text(r"\(120 turns\)")
+    app.wait(f"(() => {{ {link} }})() || (() => {{ {by_label('Open menu')} }})()",
+             "the conversation list or the menu button")
+    if not app.js(link):
+        ios_open_sidebar(app, vd)
+    app.tap(link, "the 120-turn conversation link")
+    app.wait("document.querySelector('.chat-message')", "the transcript")
