@@ -86,10 +86,20 @@ export async function startBenchServer(options: {
   port?: number;
   /** Prints seeding/boot progress. */
   onProgress?: (message: string) => void;
+  /**
+   * Aborting mid-startup (Ctrl-C during the health wait) kills the server's process group and
+   * deletes the fixture HOME synchronously, then rejects. Without it, a detached child would be
+   * orphaned on its port, since startup has not yet returned a `stop` to call.
+   */
+  signal?: AbortSignal;
 }): Promise<BenchServer> {
   const report = options.onProgress ?? (() => {});
-  const home = mkdtempSync('/var/tmp/cloudcli-bench-');
+  const { signal } = options;
+  signal?.throwIfAborted();
+  // Before the HOME exists: nothing to clean up if this await is where an abort lands.
   const port = options.port ?? (await findFreePort());
+  signal?.throwIfAborted();
+  const home = mkdtempSync('/var/tmp/cloudcli-bench-');
   const baseURL = `http://127.0.0.1:${port}`;
 
   report(`seeding fixture in ${home} (profile: ${options.profile ?? 'standard'})`);
@@ -145,10 +155,13 @@ export async function startBenchServer(options: {
     }
     rmSync(home, { recursive: true, force: true });
   };
+  const onAbort = () => void stop();
+  signal?.addEventListener('abort', onAbort, { once: true });
 
   try {
     const deadline = Date.now() + 60_000;
     for (;;) {
+      signal?.throwIfAborted();
       if (exitCode !== undefined) {
         throw new Error(`bench: server exited (${exitCode}).\n${log.slice(-40).join('')}`);
       }
@@ -182,6 +195,7 @@ export async function startBenchServer(options: {
     const started = Date.now();
     let discovered = 0;
     for (let attempt = 0; attempt < 5; attempt++) {
+      signal?.throwIfAborted();
       const projects = await getJson(`${baseURL}/api/projects`);
       discovered = Array.isArray(projects) ? projects.length : 0;
       if (discovered >= fixture.totals.projects) {
@@ -198,9 +212,12 @@ export async function startBenchServer(options: {
       );
     }
 
+    signal?.throwIfAborted();
     return { baseURL, port, home, fixture, stop };
   } catch (error) {
     await stop();
     throw error;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
   }
 }

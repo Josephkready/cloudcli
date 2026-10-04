@@ -29,45 +29,53 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-import { parseServeFixtureArgs, startIosTunnel, type IosTunnel } from '../bench/ios-tunnel.js';
+import {
+  createFixtureLifecycle,
+  parseServeFixtureArgs,
+  startIosTunnel,
+} from '../bench/ios-tunnel.js';
 import { startBenchServer } from '../bench/server.js';
 
 const { profile, skipBuild, port, tunnelHost } = parseServeFixtureArgs(process.argv.slice(2));
 const repoRoot = process.cwd();
 
-if (!skipBuild || !existsSync(path.join(repoRoot, 'dist', 'index.html'))) {
-  console.error('[vdebug] building client bundle (VITE_AUTH_DISABLED=true)...');
-  execFileSync('npm', ['run', 'build:client'], {
-    cwd: repoRoot,
-    stdio: ['ignore', 'inherit', 'inherit'],
-    env: { ...process.env, VITE_AUTH_DISABLED: 'true' },
-  });
-}
+// Installed before anything starts: the bench server runs in its own process group (detached), so
+// a Ctrl-C during the health wait or tunnel check would otherwise orphan it on the fixed port and
+// leave its temp HOME. The in-flight step is aborted via `signal`, finished ones via onShutdown.
+const lifecycle = createFixtureLifecycle();
+process.on('SIGINT', () => void lifecycle.shutdown(0));
+process.on('SIGTERM', () => void lifecycle.shutdown(0));
+const { signal } = lifecycle;
 
-const progress = (message: string) => console.error(`[vdebug] ${message}`);
-const server = await startBenchServer({ repoRoot, profile, port, onProgress: progress });
-console.log(`VDEBUG_BASE_URL=${server.baseURL}`);
-
-let tunnel: IosTunnel | null = null;
-if (tunnelHost !== null) {
-  try {
-    tunnel = await startIosTunnel({ port: server.port, host: tunnelHost, onProgress: progress });
-  } catch (error) {
-    await server.stop();
-    throw error;
+try {
+  if (!skipBuild || !existsSync(path.join(repoRoot, 'dist', 'index.html'))) {
+    console.error('[vdebug] building client bundle (VITE_AUTH_DISABLED=true)...');
+    execFileSync('npm', ['run', 'build:client'], {
+      cwd: repoRoot,
+      stdio: ['ignore', 'inherit', 'inherit'],
+      env: { ...process.env, VITE_AUTH_DISABLED: 'true' },
+    });
   }
-  console.log(`VDEBUG_IOS_BASE_URL=http://localhost:${server.port}`);
-  progress(`ios-sim: python3 vdebug/vdebug.py record --base-url http://localhost:${server.port} ` +
-           '--viewports ios-sim --flow composer-keyboard');
-}
-console.error('[vdebug] ready — Ctrl-C (or SIGTERM) stops the server' +
-              (tunnel ? ', closes the tunnel' : '') + ' and deletes the fixture HOME');
 
-const shutdown = async () => {
-  tunnel?.stop();
-  await server.stop();
-  process.exit(0);
-};
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-setInterval(() => {}, 1 << 30);
+  const progress = (message: string) => console.error(`[vdebug] ${message}`);
+  const server = await startBenchServer({ repoRoot, profile, port, onProgress: progress, signal });
+  lifecycle.onShutdown(server.stop);
+  console.log(`VDEBUG_BASE_URL=${server.baseURL}`);
+
+  if (tunnelHost !== null) {
+    const tunnel = await startIosTunnel({ port: server.port, host: tunnelHost, onProgress: progress, signal });
+    lifecycle.onShutdown(tunnel.stop);
+    console.log(`VDEBUG_IOS_BASE_URL=http://localhost:${server.port}`);
+    progress(`ios-sim: python3 vdebug/vdebug.py record --base-url http://localhost:${server.port} ` +
+             '--viewports ios-sim --flow composer-keyboard');
+  }
+  console.error('[vdebug] ready — Ctrl-C (or SIGTERM) stops the server' +
+                (tunnelHost !== null ? ', closes the tunnel' : '') + ' and deletes the fixture HOME');
+  setInterval(() => {}, 1 << 30);
+} catch (error) {
+  // A step aborted by Ctrl-C has already cleaned up after itself; shutdown() is exiting.
+  if (!signal.aborted) {
+    console.error(error);
+    await lifecycle.shutdown(1);
+  }
+}

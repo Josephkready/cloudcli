@@ -355,7 +355,8 @@ def test_every_marker_is_registered_by_the_copied_conftest():
     """Only `browser` is registered (conftest.py). A stray `live` passes here, where dante-config
     registers it, and then gets deselected or rejected in the repos the templates are copied to."""
     import re
-    for f in (HERE / "vdebug_test.py", HERE / "judge_test.py", CAPTURE_DIR / "flowstore_test.py"):
+    for f in (HERE / "vdebug_test.py", HERE / "judge_test.py", CAPTURE_DIR / "flowstore_test.py",
+              HERE / "flows" / "_helpers_test.py"):
         used = set(re.findall(r"@pytest\.mark\.(\w+)", f.read_text()))
         assert used <= {"browser", "parametrize"}, (f.name, used)
 

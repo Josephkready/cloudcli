@@ -27,6 +27,11 @@ export const DEFAULT_TUNNEL_HOST = 'perfbook';
 /** Default port for --ios-tunnel: a fixed one, so the installed home-screen app keeps working across restarts. */
 export const DEFAULT_IOS_PORT = 4870;
 const PROFILES: readonly ProfileName[] = ['small', 'standard', 'large'];
+/**
+ * An ssh destination: a hostname/alias, optionally `user@`. It becomes an ssh argument, so a
+ * value starting with `-` (`-oProxyCommand=...`) would be parsed as an option and run a command.
+ */
+const TUNNEL_HOST = /^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9_][A-Za-z0-9._-]*$/;
 
 /**
  * `[--profile small|standard|large] [--skip-build] [--port N] [--ios-tunnel [host]]`.
@@ -56,6 +61,9 @@ export function parseServeFixtureArgs(argv: readonly string[]): ServeFixtureArgs
     } else if (arg === '--ios-tunnel') {
       // The host is optional: `--ios-tunnel` alone means perfbook.
       if (next !== undefined && !next.startsWith('--')) {
+        if (!TUNNEL_HOST.test(next)) {
+          throw new Error(`--ios-tunnel needs an ssh host or alias like perfbook or user@host (got ${next})`);
+        }
         out.tunnelHost = next;
         i++;
       } else {
@@ -112,7 +120,11 @@ export async function startIosTunnel(options: {
   verify?: (host: string, port: number) => Promise<boolean>;
   attempts?: number;
   intervalMs?: number;
+  /** Aborting mid-verification closes the tunnel and rejects (Ctrl-C before it is up). */
+  signal?: AbortSignal;
 }): Promise<IosTunnel> {
+  const { signal } = options;
+  signal?.throwIfAborted();
   const report = options.onProgress ?? (() => {});
   const verify = options.verify ?? verifyFromHost;
   const attempts = options.attempts ?? 10;
@@ -140,21 +152,72 @@ export async function startIosTunnel(options: {
     stopped = true;
     if (exited === null) child.kill('SIGTERM');
   };
-
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    if (exited !== null) {
-      stop();
-      throw new Error(`tunnel to ${options.host} failed: ${exited}. ${stderr.join('').trim()}`.trim());
+  signal?.addEventListener('abort', stop, { once: true });
+  try {
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      signal?.throwIfAborted();
+      if (exited !== null) {
+        throw new Error(`tunnel to ${options.host} failed: ${exited}. ${stderr.join('').trim()}`.trim());
+      }
+      const reachable = await verify(options.host, options.port);
+      signal?.throwIfAborted();
+      if (reachable) {
+        report(`tunnel up: ${options.host} reaches the fixture at http://localhost:${options.port}/health`);
+        return { stop };
+      }
     }
-    if (await verify(options.host, options.port)) {
-      report(`tunnel up: ${options.host} reaches the fixture at http://localhost:${options.port}/health`);
-      return { stop };
-    }
+    throw new Error(
+      `tunnel to ${options.host} opened, but ${options.host} could not reach ` +
+      `http://127.0.0.1:${options.port}/health after ${attempts} attempts`,
+    );
+  } catch (error) {
+    stop();
+    throw error;
+  } finally {
+    signal?.removeEventListener('abort', stop);
   }
-  stop();
-  throw new Error(
-    `tunnel to ${options.host} opened, but ${options.host} could not reach ` +
-    `http://127.0.0.1:${options.port}/health after ${attempts} attempts`,
-  );
+}
+
+export type FixtureLifecycle = {
+  /** Passed to every startup step, so a shutdown mid-startup aborts it (and it cleans up itself). */
+  signal: AbortSignal;
+  /** Registers teardown for something that has finished starting. Run in reverse order. */
+  onShutdown: (cleanup: () => void | Promise<void>) => void;
+  /** Aborts startup, runs every registered teardown once, then exits. Idempotent. */
+  shutdown: (code?: number) => Promise<void>;
+};
+
+/**
+ * Teardown for serve-fixture.ts that is valid from the first line: signal handlers go in before
+ * anything starts, and whatever has started by the time Ctrl-C lands gets torn down — the
+ * finished steps via onShutdown, the in-flight one via the abort signal.
+ */
+export function createFixtureLifecycle(
+  exit: (code: number) => void = (code) => process.exit(code),
+  logError: (message: string) => void = (message) => console.error(message),
+): FixtureLifecycle {
+  const controller = new AbortController();
+  const cleanups: Array<() => void | Promise<void>> = [];
+  let shuttingDown: Promise<void> | null = null;
+  return {
+    signal: controller.signal,
+    onShutdown: (cleanup) => {
+      cleanups.push(cleanup);
+    },
+    shutdown: (code = 0) => {
+      shuttingDown ??= (async () => {
+        controller.abort();
+        for (const cleanup of cleanups.reverse()) {
+          try {
+            await cleanup();
+          } catch (error) {
+            logError(`[vdebug] teardown step failed: ${(error as Error).message}`);
+          }
+        }
+        exit(code);
+      })();
+      return shuttingDown;
+    },
+  };
 }

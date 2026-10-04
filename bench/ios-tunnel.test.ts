@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
+  createFixtureLifecycle,
   DEFAULT_IOS_PORT,
   iosTunnelSshArgs,
   parseServeFixtureArgs,
@@ -44,6 +45,19 @@ describe('parseServeFixtureArgs', () => {
     assert.throws(() => parseServeFixtureArgs(['--profile', 'huge']), /--profile needs one of/);
     assert.throws(() => parseServeFixtureArgs(['--port', '80']), /1024-65535/);
     assert.throws(() => parseServeFixtureArgs(['--port']), /got nothing/);
+  });
+
+  it('accepts ssh aliases, hostnames and user@host as the tunnel host', () => {
+    for (const host of ['perfbook', 'mac-mini.local', 'jk@10.0.0.5', 'my_host']) {
+      assert.equal(parseServeFixtureArgs(['--ios-tunnel', host]).tunnelHost, host);
+    }
+  });
+
+  it('rejects a tunnel host ssh would parse as an option, or that is not host-shaped', () => {
+    // `-oProxyCommand=...` as ssh's destination argument would run an arbitrary command.
+    for (const host of ['-oProxyCommand=touch /tmp/pwned', '-p', 'perf book', 'host;id', 'a@-b', '@host', '']) {
+      assert.throws(() => parseServeFixtureArgs(['--ios-tunnel', host]), /--ios-tunnel needs an ssh host/, host);
+    }
   });
 });
 
@@ -87,5 +101,85 @@ describe('startIosTunnel', () => {
       }),
       /could not reach http:\/\/127\.0\.0\.1:4910\/health after 2 attempts/,
     );
+  });
+
+  it('an abort mid-verification closes the tunnel and rejects', async () => {
+    const controller = new AbortController();
+    let probes = 0;
+    await assert.rejects(
+      startIosTunnel({
+        port: 4910, host: 'perfbook', sshCommand: fakeSsh, intervalMs: 10, attempts: 1000,
+        verify: async () => {
+          if (++probes === 3) controller.abort();
+          return false;
+        },
+        signal: controller.signal,
+      }),
+      { name: 'AbortError' },
+    );
+    assert.equal(probes, 3, 'stops probing once aborted');
+  });
+
+  it('an abort during a slow probe kills ssh at once, not when the probe returns', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'ios-tunnel-test-'));
+    const pidSsh = path.join(dir, 'ssh');
+    writeFileSync(pidSsh, `#!/bin/sh\necho $$ > ${dir}/pid\nexec sleep 30\n`);
+    chmodSync(pidSsh, 0o755);
+    const controller = new AbortController();
+    let killedDuringProbe = false;
+    await assert.rejects(
+      startIosTunnel({
+        port: 4910, host: 'perfbook', sshCommand: pidSsh, intervalMs: 50, signal: controller.signal,
+        verify: async () => {
+          const pid = Number(readFileSync(path.join(dir, 'pid'), 'utf8'));
+          controller.abort();
+          for (let i = 0; i < 100 && !killedDuringProbe; i++) {
+            try {
+              process.kill(pid, 0);
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            } catch {
+              killedDuringProbe = true;
+            }
+          }
+          return true;
+        },
+      }),
+      { name: 'AbortError' },
+    );
+    assert.ok(killedDuringProbe, 'ssh must be gone while the probe is still running');
+  });
+});
+
+describe('createFixtureLifecycle', () => {
+  it('aborts the in-flight step, tears down finished ones in reverse, and exits once', async () => {
+    const order: string[] = [];
+    const exits: number[] = [];
+    const lifecycle = createFixtureLifecycle((code) => exits.push(code), () => {});
+    lifecycle.signal.addEventListener('abort', () => order.push('abort'));
+    lifecycle.onShutdown(() => {
+      order.push('server');
+    });
+    lifecycle.onShutdown(async () => {
+      order.push('tunnel');
+    });
+    await Promise.all([lifecycle.shutdown(0), lifecycle.shutdown(1)]);
+    await lifecycle.shutdown(0);
+    assert.deepEqual(order, ['abort', 'tunnel', 'server']);
+    assert.deepEqual(exits, [0]);
+  });
+
+  it('a failing teardown step does not skip the rest', async () => {
+    const order: string[] = [];
+    const errors: string[] = [];
+    const lifecycle = createFixtureLifecycle(() => order.push('exit'), (message) => errors.push(message));
+    lifecycle.onShutdown(() => {
+      order.push('server');
+    });
+    lifecycle.onShutdown(() => {
+      throw new Error('ssh already gone');
+    });
+    await lifecycle.shutdown();
+    assert.deepEqual(order, ['server', 'exit']);
+    assert.match(errors[0], /ssh already gone/);
   });
 });

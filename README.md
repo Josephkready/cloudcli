@@ -147,6 +147,10 @@ python3 vdebug/vdebug.py record --base-url http://localhost:4870 --viewports ios
   --flow composer-keyboard,new-chat-turn,open-conversation
 ```
 
+`ios_hub` is not a cloudcli dependency: install it once with `pip install -e ~/repos/ios-hub`.
+Once the tunnel is verified from perfbook, `ios:debug` prints
+`VDEBUG_IOS_BASE_URL=http://localhost:4870` (the `--base-url` to pass). Ctrl-C or SIGTERM, at
+any point including mid-startup, stops the server, closes the tunnel and deletes the fixture HOME.
 `npm run ios:debug -- --port N --ios-tunnel <host> --profile standard --skip-build` adjusts it.
 `localhost` is right here only because of the tunnel (perfbook's loopback forwards to dante);
 the debug instance has no auth, so it never listens on a LAN address. Loopback base URLs install

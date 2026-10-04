@@ -4,6 +4,7 @@ containment. No network (call_openrouter is monkeypatched); frame extraction nee
 import json
 import pathlib
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -68,6 +69,20 @@ def test_extract_frames_collapses_static_stretch_and_keeps_every_change(static_t
     assert labels == ["t=0.00s"] + [f"t={1 + i / 10:.2f}s" for i in range(10)]
     assert all(pathlib.Path(f["path"]).exists() for f in frames)
     assert [f["t"] for f in frames] == sorted(f["t"] for f in frames)
+
+
+def _png_size(path):
+    """(width, height) from a PNG's IHDR chunk — no image library needed."""
+    return struct.unpack(">II", pathlib.Path(path).read_bytes()[16:24])
+
+
+@needs_ffmpeg
+def test_extract_frames_downscales_past_max_edge_keeping_aspect(static_then_moving, tmp_path):
+    full = judge.extract_frames(static_then_moving, tmp_path / "full", fps=5)
+    assert {_png_size(f["path"]) for f in full} == {(160, 120)}  # under FRAME_MAX_EDGE: untouched
+    small = judge.extract_frames(static_then_moving, tmp_path / "small", fps=5, max_edge=80)
+    assert {_png_size(f["path"]) for f in small} == {(80, 60)}  # long edge capped, 4:3 kept
+    assert [f["label"] for f in small] == [f["label"] for f in full]  # same frames, just smaller
 
 
 @needs_ffmpeg
@@ -256,6 +271,21 @@ def test_judge_run_rewrites_report_and_logs_frames_cost_cache(entry, run_dir, mo
     assert saved["runs"][0]["judge"]["findings"][0]["title"] == "Banner overflows"
     assert any("11 frame(s)" in line and "100 cached" in line and "300 completion" in line and "SKIPPED" in line
                for line in lines)
+
+
+def test_judge_run_never_sends_a_skipped_entry_to_the_model(entry, tmp_path, monkeypatch):
+    # An ios-sim entry for a flow with no run_ios: recorded as skipped, with no video at all.
+    skipped = {**entry, "viewport": "ios-sim", "video": None, "frames": [], "skipped": "no run_ios"}
+    (tmp_path / "report.json").write_text(json.dumps({"run_id": "r", "base_url": "u", "runs": [skipped]}))
+    calls = []
+    monkeypatch.setattr(judge, "call_openrouter", lambda req, key, timeout=180: calls.append(req) or _body("{}"))
+    lines = []
+    report = judge.judge_run(tmp_path, model="m/x", api_key="k", log=lines.append)
+    assert calls == []
+    assert report["runs"][0]["judge"] == {"skipped": "no run_ios", "model": "m/x", "findings": []}
+    assert report["judge"]["cost_usd"] == 0
+    assert any("ios-sim: skipped (no run_ios), not judged" in line for line in lines)
+    assert json.loads((tmp_path / "report.json").read_text())["runs"][0]["judge"]["skipped"] == "no run_ios"
 
 
 @needs_ffmpeg
