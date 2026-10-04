@@ -13,6 +13,7 @@ import json
 import pathlib
 import sys
 import threading
+import types
 
 import pytest
 
@@ -513,3 +514,303 @@ def test_zoom_disabled_viewport_is_one_page_hit_instead_of_per_input_hits(app):
     hits, _, _ = _phone_probe(app, "?case=nozoom", keyboard=False)
     assert ("zoom-disabled", None) in hits
     assert not any(c == "ios-input-zoom" for c, _ in hits), hits
+
+
+# ------------------------------------------------------------------ ios-sim (real iOS Simulator via ios_hub)
+def test_ios_sim_is_opt_in_not_in_all():
+    assert "ios-sim" not in [v.name for v in vdebug.parse_viewports("all")]
+    assert "ios-sim" not in vdebug.VIEWPORTS
+    assert "ios-sim" in vdebug.REAL_DEVICE_VIEWPORTS
+
+
+def test_parse_viewports_accepts_ios_sim_explicitly():
+    [vp] = vdebug.parse_viewports("ios-sim")
+    assert (vp.name, vp.width, vp.height, vp.mobile, vp.real_device) == ("ios-sim", 390, 844, True, True)
+    mixed = vdebug.parse_viewports("iphone-13-pro,ios-sim")
+    assert [v.name for v in mixed] == ["iphone-13-pro", "ios-sim"]
+    assert mixed[0].real_device is False and mixed[1].real_device is True
+
+
+class FakeIosDevice:
+    """Duck-types enough of ios_hub.Device for IosVD / record_one_ios tests. Tests must never
+    import the real ios_hub (installed on dante): it would lease a real Simulator on perfbook."""
+
+    def __init__(self, console_batches=None):
+        self.shots = 0
+        self.installed = None
+        self.launched = None
+        self.recording = False
+        self.stopped_to = None
+        self._console_batches = list(console_batches or [])
+
+    def install_pwa(self, url, name=None):
+        self.installed = url
+        self.installed_name = name
+        return {"name": name or "the-app", "already_present": False}
+
+    def launch_standalone(self, name):
+        self.launched = name
+
+    def record_start(self):
+        self.recording = True
+
+    def record_stop(self, path=None):
+        self.recording = False
+        self.stopped_to = path
+        if path:
+            pathlib.Path(path).write_bytes(b"not-a-real-mp4")
+        return {"artifact": "recording.mp4"}
+
+    def screenshot(self, path=None):
+        self.shots += 1
+        data = f"png-{self.shots}".encode()
+        if path:
+            pathlib.Path(path).write_bytes(data)
+        return data
+
+    def console(self, since=0):
+        if self._console_batches:
+            return self._console_batches.pop(0)
+        return {"entries": [], "next": since}
+
+
+def test_ios_vd_mark_writes_frames_and_console_error_checks(tmp_path):
+    run_dir = tmp_path
+    out = run_dir / "home-nav" / "ios-sim"
+    out.mkdir(parents=True)
+    device = FakeIosDevice(console_batches=[
+        {"entries": [{"seq": 1, "level": "error", "text": "TypeError: boom"},
+                     {"seq": 2, "level": "log", "text": "fine"}], "next": 2},
+        {"entries": [], "next": 2},
+    ])
+    vd = vdebug.IosVD(device, out, run_dir)
+    vd.mark("start")
+    vd.mark("end")
+    assert [f["label"] for f in vd.frames] == ["start", "end"]
+    assert all((run_dir / f["path"]).exists() for f in vd.frames)
+    assert (run_dir / vd.frames[0]["path"]).read_bytes() == b"png-1"
+    [hit] = vd.checks
+    assert hit["check"] == "console-error" and hit["frame"] == "start" and "TypeError: boom" in hit["detail"]
+    assert "fine" not in hit["detail"]          # only level=="error" entries become hits
+
+
+def test_ios_vd_mark_tolerates_a_console_fetch_failure(tmp_path):
+    class Flaky(FakeIosDevice):
+        def console(self, since=0):
+            raise RuntimeError("daemon unreachable")
+
+    out = tmp_path / "f" / "ios-sim"
+    out.mkdir(parents=True)
+    vd = vdebug.IosVD(Flaky(), out, tmp_path)
+    vd.mark("start")                      # must not raise — the frame is still captured
+    assert len(vd.frames) == 1
+    [hit] = vd.checks
+    assert hit["check"] == "console-error" and "could not fetch console" in hit["detail"]
+
+
+def _load_flow_module(tmp_path, name, body):
+    (tmp_path / f"{name}.py").write_text(body)
+    [flow] = vdebug.load_flows(tmp_path)
+    return flow
+
+
+def test_flow_without_run_ios_is_skipped_not_errored(tmp_path):
+    flow = _load_flow_module(tmp_path, "a", 'NAME = "a"\ndef run(page, vd):\n    pass\n')
+    assert flow.run_ios is None
+    entry = vdebug.record_one_ios(flow, vdebug.REAL_DEVICE_VIEWPORTS["ios-sim"], "http://x.local.thedante.net",
+                                  tmp_path / "run", log=lambda m: None)
+    assert entry["skipped"] == "no run_ios"
+    assert entry["error"] is None
+    assert entry["video"] is None
+    assert entry["frames"] == [] and entry["checks"] == []
+
+
+def test_record_one_ios_reports_a_clear_error_when_ios_hub_is_missing(tmp_path, monkeypatch):
+    # Simulate the import failing even where ios_hub IS installed (it is on dante): without
+    # this, the test leases a real Simulator on perfbook.
+    monkeypatch.setitem(sys.modules, "ios_hub", None)
+    flow = _load_flow_module(
+        tmp_path, "b",
+        'NAME = "b"\ndef run(page, vd):\n    pass\ndef run_ios(device, vd):\n    vd.mark("x")\n',
+    )
+    assert callable(flow.run_ios)
+    entry = vdebug.record_one_ios(flow, vdebug.REAL_DEVICE_VIEWPORTS["ios-sim"], "http://x.local.thedante.net",
+                                  tmp_path / "run", log=lambda m: None)
+    assert entry["error"] and "ImportError" in entry["error"] and "ios_hub" in entry["error"]
+    assert entry["video"] is None
+
+
+def test_record_one_ios_full_run_with_a_fake_ios_hub_module(tmp_path, monkeypatch):
+    flow = _load_flow_module(
+        tmp_path, "c",
+        'NAME = "c"\n'
+        "def run(page, vd):\n    pass\n"
+        "def run_ios(device, vd):\n"
+        '    vd.mark("home")\n'
+        '    device.navigate("x")\n'
+        '    vd.mark("after-nav")\n',
+    )
+    device = FakeIosDevice()
+    device.navigate = lambda url: None
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def fake_session(label, ttl_s=300.0, wait_s=30.0, reset=False):
+        fake_session.calls.append({"label": label, "ttl_s": ttl_s, "wait_s": wait_s})
+        yield device
+    fake_session.calls = []
+
+    fake_ios_hub = __import__("types").ModuleType("ios_hub")
+    fake_ios_hub.session = fake_session
+    monkeypatch.setitem(sys.modules, "ios_hub", fake_ios_hub)
+
+    run_dir = tmp_path / "run"
+    entry = vdebug.record_one_ios(flow, vdebug.REAL_DEVICE_VIEWPORTS["ios-sim"],
+                                  "http://app.local.thedante.net", run_dir, log=lambda m: None)
+
+    assert entry["error"] is None and "skipped" not in entry
+    assert entry["video"] == "c/ios-sim/video.mp4"
+    assert (run_dir / entry["video"]).exists()
+    # vd.mark("end") is appended by record_one_ios after a successful run_ios, like record_one does.
+    assert [f["label"] for f in entry["frames"]] == ["home", "after-nav", "end"]
+    assert device.installed == "http://app.local.thedante.net"
+    assert device.installed_name is None and device.launched == "the-app"   # real hostname: app default
+    assert device.launched == "the-app"
+    assert fake_session.calls == [{"label": "vdebug-c-ios-sim", "ttl_s": 1800.0, "wait_s": 600.0}]
+
+
+def test_record_one_ios_records_the_error_frame_and_stops_recording_on_a_flow_crash(tmp_path, monkeypatch):
+    flow = _load_flow_module(
+        tmp_path, "d",
+        'NAME = "d"\n'
+        "def run(page, vd):\n    pass\n"
+        "def run_ios(device, vd):\n"
+        '    vd.mark("home")\n'
+        '    raise RuntimeError("tap failed")\n',
+    )
+    device = FakeIosDevice()
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def fake_session(label, ttl_s=300.0, wait_s=30.0, reset=False):
+        yield device
+
+    fake_ios_hub = __import__("types").ModuleType("ios_hub")
+    fake_ios_hub.session = fake_session
+    monkeypatch.setitem(sys.modules, "ios_hub", fake_ios_hub)
+
+    run_dir = tmp_path / "run"
+    entry = vdebug.record_one_ios(flow, vdebug.REAL_DEVICE_VIEWPORTS["ios-sim"],
+                                  "http://app.local.thedante.net", run_dir, log=lambda m: None)
+    assert "RuntimeError: tap failed" in entry["error"]
+    assert [f["label"] for f in entry["frames"]] == ["home", "error"]
+    assert device.recording is False               # record_stop was still called
+    assert entry["video"] == "d/ios-sim/video.mp4"
+
+
+def test_judge_or_skip_wiring_from_a_skipped_ios_sim_entry_in_the_markdown(tmp_path):
+    """write_markdown shows a skipped ios-sim row distinctly instead of claiming it's 'ok'."""
+    run = {"flow": "f", "description": "", "viewport": "ios-sim", "width": 390, "height": 844,
+           "frames": [], "checks": [], "error": None, "skipped": "no run_ios", "video": None}
+    md = vdebug.write_markdown(tmp_path, {"run_id": "r", "base_url": "u", "runs": [run]}).read_text()
+    assert "skipped: no run_ios" in md
+    assert vdebug.exit_code({"runs": [run]}, "check") == 0   # a skip is not a failure
+
+
+def _install_fake_ios_hub(monkeypatch, session_cm):
+    fake = types.ModuleType("ios_hub")
+    fake.session = session_cm
+    monkeypatch.setitem(sys.modules, "ios_hub", fake)
+
+
+def _ios_flow(tmp_path, name):
+    return _load_flow_module(
+        tmp_path, name,
+        f'NAME = "{name}"\ndef run(page, vd):\n    pass\ndef run_ios(device, vd):\n    vd.mark("x")\n',
+    )
+
+
+def test_record_one_ios_reports_a_session_failure(tmp_path, monkeypatch):
+    import contextlib
+
+    @contextlib.contextmanager
+    def no_slot(label, ttl_s=300.0, wait_s=30.0, reset=False):
+        raise RuntimeError("timed out waiting for a free simulator slot")
+        yield  # pragma: no cover
+
+    _install_fake_ios_hub(monkeypatch, no_slot)
+    entry = vdebug.record_one_ios(_ios_flow(tmp_path, "e"), vdebug.REAL_DEVICE_VIEWPORTS["ios-sim"],
+                                  "http://x.local.thedante.net", tmp_path / "run", log=lambda m: None)
+    assert "free simulator slot" in entry["error"]
+    assert entry["video"] is None and entry["frames"] == []
+
+
+def test_record_one_ios_fails_when_install_returns_no_name(tmp_path, monkeypatch):
+    import contextlib
+
+    device = FakeIosDevice()
+    device.install_pwa = lambda url, name=None: {}
+
+    @contextlib.contextmanager
+    def session(label, ttl_s=300.0, wait_s=30.0, reset=False):
+        yield device
+
+    _install_fake_ios_hub(monkeypatch, session)
+    entry = vdebug.record_one_ios(_ios_flow(tmp_path, "f"), vdebug.REAL_DEVICE_VIEWPORTS["ios-sim"],
+                                  "http://x.local.thedante.net", tmp_path / "run", log=lambda m: None)
+    assert "returned no app name" in entry["error"]
+    assert entry["video"] is None and device.launched is None
+
+
+def test_record_one_ios_keeps_the_flow_error_when_record_stop_fails(tmp_path, monkeypatch):
+    import contextlib
+
+    flow = _load_flow_module(
+        tmp_path, "g",
+        'NAME = "g"\ndef run(page, vd):\n    pass\ndef run_ios(device, vd):\n    raise ValueError("boom")\n',
+    )
+    device = FakeIosDevice()
+
+    def broken_stop(path=None):
+        raise OSError("disk full")
+
+    device.record_stop = broken_stop
+
+    @contextlib.contextmanager
+    def session(label, ttl_s=300.0, wait_s=30.0, reset=False):
+        yield device
+
+    _install_fake_ios_hub(monkeypatch, session)
+    entry = vdebug.record_one_ios(flow, vdebug.REAL_DEVICE_VIEWPORTS["ios-sim"],
+                                  "http://x.local.thedante.net", tmp_path / "run", log=lambda m: None)
+    assert entry["error"].startswith("ValueError: boom")
+    assert entry["video"] is None
+
+
+def test_record_with_only_ios_sim_never_starts_playwright(tmp_path, monkeypatch):
+    import contextlib
+
+    @contextlib.contextmanager
+    def session(label, ttl_s=300.0, wait_s=30.0, reset=False):
+        yield FakeIosDevice()
+
+    _install_fake_ios_hub(monkeypatch, session)
+    # Any attempt to import Playwright fails the test.
+    monkeypatch.setitem(sys.modules, "playwright", None)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", None)
+    run_dir = vdebug.record([_ios_flow(tmp_path, "h")], [vdebug.REAL_DEVICE_VIEWPORTS["ios-sim"]],
+                            "http://x.local.thedante.net", tmp_path / "out", log=lambda m: None)
+    report = json.loads((run_dir / "report.json").read_text())
+    assert [r["viewport"] for r in report["runs"]] == ["ios-sim"]
+    assert report["runs"][0]["error"] is None
+
+
+def test_pwa_name_is_per_port_for_loopback_and_default_for_real_hosts():
+    """Every loopback instance shares the app's default icon name, and install_pwa reuses an icon
+    by name — so without a per-port name a tunnelled :4910 run would launch :4899's icon."""
+    assert vdebug.pwa_name("http://localhost:4910/") == "vdebug-4910"
+    assert vdebug.pwa_name("http://127.0.0.1:4899") == "vdebug-4899"
+    assert vdebug.pwa_name("http://localhost/") == "vdebug-80"
+    assert vdebug.pwa_name("https://earful.local.thedante.net/") is None

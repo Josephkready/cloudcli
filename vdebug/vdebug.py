@@ -3,7 +3,7 @@
 
     vdebug.py list
     vdebug.py record --base-url http://localhost:8000 [--flow NAME[,NAME...] ...]
-                     [--viewports all | iphone-13-pro,ipad-pro-11,2k,4k,half-2k,third-4k | NAME=WxH]
+                     [--viewports all | iphone-13-pro,ipad-pro-11,2k,4k,half-2k,third-4k,ios-sim | NAME=WxH]
                      [--reset-cmd CMD] [--judge [--model M] [--fps 10]] [--fail-on error|check|major|never]
 
 Each flow is a Python file in flows/ (copy the shape of an existing one, e.g. the template's
@@ -18,18 +18,31 @@ and at every mark runs deterministic DOM layout checks (layout_checks.js). The r
 report.json / report.md list every frame, check hit and — with --judge — the multimodal
 model's findings. <out>/latest always points at the newest run.
 
---judge (judge.py) cuts each video.webm into frames at --fps, drops consecutive duplicates,
+--judge (judge.py) cuts each recording (video.webm, or ios-sim's video.mp4) into frames at --fps, drops consecutive duplicates,
 and sends every remaining frame in one request — so the model sees animations and
 transitions, not just the settled checkpoint states. The frames it sent are kept in
 <flow>/<viewport>/film/ and linked from report.md.
 
+`ios-sim` is an opt-in, real-device-ish viewport (NOT included in `--viewports all`): instead
+of headless Chromium, it drives a real iOS Simulator on perfbook through the `ios_hub`
+library (ios-automation skill) — install the flow as a PWA, launch it standalone, and run the
+flow's optional `run_ios(device, vd)` function, recording `video.mp4` (simctl's variable
+frame rate — frames only on screen change) instead of `video.webm`. A flow with no run_ios is
+skipped for `ios-sim` (not an error). It needs perfbook up, a base URL reachable FROM
+PERFBOOK, and `ios_hub` installed. In cloudcli, `npm run ios:debug` serves a seeded, auth-disabled
+instance and reverse-tunnels its port to perfbook, so `--base-url http://localhost:<port>` is
+correct there (perfbook's loopback, forwarded to dante); a plain dante-only localhost server is
+not reachable. It is slow (session acquire + install + launch, often 1-2 min on a cold
+simulator), so use it sparingly; it is never part of `all`.
+
 Needs: `pip install playwright && playwright install chromium`; --judge also needs ffmpeg and
-OPENROUTER_API_KEY.
+OPENROUTER_API_KEY; `ios-sim` needs `ios_hub` (`pip install -e ~/repos/ios-hub`) and perfbook.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import datetime as dt
 import fnmatch
@@ -43,6 +56,7 @@ import subprocess
 import sys
 import time
 import types
+import urllib.parse
 from urllib.parse import urljoin
 
 os.environ.setdefault("NODE_OPTIONS", "--no-deprecation")  # silence Playwright driver noise
@@ -59,6 +73,7 @@ class Viewport:
     height: int
     mobile: bool = False  # is_mobile + has_touch, so the app takes its touch/mobile branch
     keyboard: int = 0     # on-screen keyboard height (CSS px) when a text field has focus; 0 = none
+    real_device: bool = False  # drive a real iOS Simulator via ios_hub instead of Chromium
 
 
 # The screens the apps are actually used on (CSS px, at deviceScaleFactor 1 — layout is the
@@ -83,20 +98,36 @@ def canonical(name: str) -> str:
     return ALIASES.get(name, name)
 
 
+# Opt-in only: parse_viewports() recognizes these by name, but "all" never expands to them —
+# they drive a real iOS Simulator on perfbook (ios_hub), which is slow and needs perfbook up.
+# See record_one_ios / the ios-automation skill.
+REAL_DEVICE_VIEWPORTS = {
+    "ios-sim": Viewport("ios-sim", 390, 844, mobile=True, keyboard=0, real_device=True),
+}
+
+
 def parse_viewports(spec: str) -> list[Viewport]:
-    """'mobile,desktop', 'all', custom 'phone-se=320x568', or mixed: 'all,kiosk=2560x1600'."""
+    """'mobile,desktop', 'all', custom 'phone-se=320x568', the opt-in 'ios-sim', or mixed:
+    'all,kiosk=2560x1600' / 'iphone-13-pro,ios-sim'. 'all' never includes ios-sim (or any
+    other REAL_DEVICE_VIEWPORTS entry) — ask for it by name."""
     out = []
     for part in filter(None, (p.strip() for p in spec.split(","))):
         if part == "all":
             out.extend(v for v in VIEWPORTS.values() if v not in out)
             continue
-        if canonical(part) in VIEWPORTS:
-            if VIEWPORTS[canonical(part)] not in out:
-                out.append(VIEWPORTS[canonical(part)])
+        name = canonical(part)
+        if name in VIEWPORTS:
+            if VIEWPORTS[name] not in out:
+                out.append(VIEWPORTS[name])
+            continue
+        if name in REAL_DEVICE_VIEWPORTS:
+            if REAL_DEVICE_VIEWPORTS[name] not in out:
+                out.append(REAL_DEVICE_VIEWPORTS[name])
             continue
         m = re.fullmatch(r"(?:([\w-]+)=)?(\d+)x(\d+)", part)
         if not m:
-            raise ValueError(f"unknown viewport {part!r} (presets: {', '.join(VIEWPORTS)}, or NAME=WxH)")
+            raise ValueError(f"unknown viewport {part!r} (presets: {', '.join(VIEWPORTS)}, "
+                              f"or NAME=WxH, or opt-in: {', '.join(REAL_DEVICE_VIEWPORTS)})")
         w, h = int(m.group(2)), int(m.group(3))
         touch = w < 768
         out.append(Viewport(m.group(1) or f"{w}x{h}", w, h, mobile=touch, keyboard=round(h * 0.4) if touch else 0))
@@ -126,6 +157,7 @@ class Flow:
     must_fit: bool | list[str] = False
     setup: types.FunctionType | None = None
     keyboard: bool = True  # flow's KEYBOARD: simulate the on-screen keyboard on touch viewports
+    run_ios: types.FunctionType | None = None  # optional run_ios(device, vd) for the ios-sim target
 
 
 def load_flows(flows_dir: pathlib.Path) -> list[Flow]:
@@ -163,6 +195,7 @@ def load_flows(flows_dir: pathlib.Path) -> list[Flow]:
             keyboard=getattr(mod, "KEYBOARD", True),
             setup=getattr(mod, "setup", None),
             path=path,
+            run_ios=getattr(mod, "run_ios", None) if callable(getattr(mod, "run_ios", None)) else None,
         ))
     names = [f.name for f in flows]
     dupes = {n for n in names if names.count(n) > 1}
@@ -264,6 +297,55 @@ class VD:
 
 
 # ------------------------------------------------------------------ recording
+class IosVD:
+    """The handle a flow's run_ios(device, vd) receives — the ios-sim counterpart of VD.
+
+    `device` is an `ios_hub.Device` (a leased real iOS Simulator session), not a Playwright
+    page: no DOM access, so there is no layout_checks.js equivalent. `mark()` keeps the same
+    two-piece shape vdebug/judge already understand (a checkpoint frame + "check" hits) so
+    report.json/report.md and judge.py need no ios-sim special-casing: the frame comes from
+    `device.screenshot()`, and in place of DOM checks, console entries seen since the
+    previous mark (via `device.console()`) are surfaced as hits of check id "console-error" —
+    the closest signal ios_hub can offer to "something is visibly wrong".
+    """
+
+    def __init__(self, device, out_dir: pathlib.Path, run_dir: pathlib.Path):
+        self.device = device
+        self._out, self._run_dir = out_dir, run_dir
+        self._t0 = time.monotonic()
+        self.frames: list[dict] = []
+        self.checks: list[dict] = []
+        self._console_since = 0
+
+    def mark(self, label: str) -> None:
+        """Checkpoint: a device.screenshot() + any console errors seen since the last mark."""
+        t = round(time.monotonic() - self._t0, 2)
+        n = len(self.frames) + 1
+        rel = pathlib.Path(self._out.relative_to(self._run_dir), "frames", f"{n:02d}-{slug(label)}.png")
+        (self._run_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+        (self._run_dir / rel).write_bytes(self.device.screenshot())
+        self.frames.append({"label": label, "t": t, "path": str(rel), "url": None})
+        try:
+            log = self.device.console(since=self._console_since) or {}
+        except Exception as e:  # a console fetch must never cost the checkpoint frame itself
+            self.checks.append({"check": "console-error", "selector": None, "rect": None,
+                                 "source": "ios_hub_console", "frame": label, "t": t, "frames": [label],
+                                 "detail": f"could not fetch console: {type(e).__name__}: {str(e)[:160]}"})
+            return
+        entries = log.get("entries") or []
+        self._console_since = log.get("next", self._console_since)
+        errors = [e for e in entries if str(e.get("level", "")).lower() == "error"]
+        if errors:
+            shown = [str(e.get("text", ""))[:200] for e in errors[:5]]
+            more = f" (+{len(errors) - 5} more)" if len(errors) > 5 else ""
+            self.checks.append({"check": "console-error", "selector": None, "rect": None,
+                                 "source": "ios_hub_console", "frame": label, "t": t, "frames": [label],
+                                 "detail": "; ".join(shown) + more})
+
+
+# ------------------------------------------------------------------ recording
+
+
 def record_one(browser, flow: Flow, vp: Viewport, base_url: str, run_dir: pathlib.Path,
                log=print, step_timeout_ms: int = 15000) -> dict:
     out = run_dir / slug(flow.name) / vp.name
@@ -329,6 +411,99 @@ def record_one(browser, flow: Flow, vp: Viewport, base_url: str, run_dir: pathli
     }
 
 
+def pwa_name(base_url: str) -> str | None:
+    """Home-screen name to install `base_url` under, or None for the app's own default.
+
+    install_pwa reuses an existing icon with the same name, and every loopback instance of an app
+    has the same default name ("CloudCLI UI") — so a tunnelled http://localhost:4910 would silently
+    launch the icon installed earlier for :4899, a different server. Loopback URLs therefore get a
+    per-port name; a real hostname is one app and keeps its default."""
+    parsed = urllib.parse.urlsplit(base_url)
+    if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
+        return f"vdebug-{parsed.port or 80}"
+    return None
+
+
+def record_one_ios(flow: Flow, vp: Viewport, base_url: str, run_dir: pathlib.Path,
+                   log=print) -> dict:
+    """Record one flow x viewport on a REAL iOS Simulator on perfbook, via `ios_hub`, instead
+    of Playwright/Chromium. Returns the same shape as record_one() (video is .mp4, not
+    .webm — a VFR simctl recording, which judge.extract_frames handles), so report.json /
+    report.md / judge.py need no ios-sim special-casing.
+
+    A flow with no run_ios(device, vd) is skipped (not an error) — most flows are
+    Playwright-only; opting a flow into the real simulator is per-flow. `base_url` must be
+    reachable from perfbook: a `*.local.thedante.net` hostname, or `http://localhost:<port>`
+    when `npm run ios:debug` has reverse-tunnelled that port to perfbook (a bare dante-only
+    localhost server is NOT reachable). See the ios-automation skill.
+    """
+    out = run_dir / slug(flow.name) / vp.name
+    out.mkdir(parents=True, exist_ok=True)
+    base = {
+        "flow": flow.name, "description": flow.description, "source": flow.source,
+        "viewport": vp.name, "width": vp.width, "height": vp.height,
+        "keyboard": False, "console_errors": [],
+    }
+    if flow.run_ios is None:
+        log("  skipped: no run_ios")
+        return {**base, "video": None, "duration_s": 0.0, "frames": [], "checks": [],
+                "error": None, "skipped": "no run_ios"}
+    try:
+        import ios_hub
+    except ImportError as e:
+        msg = ("ios_hub is not installed — `pip install -e ~/repos/ios-hub` (or `uv pip install "
+               f"git+ssh://git@github.com/Josephkready/ios-hub.git`); {type(e).__name__}: {e}")
+        log(f"  FAILED: {msg}")
+        return {**base, "video": None, "duration_s": 0.0, "frames": [], "checks": [],
+                "error": f"ImportError: {msg}"}
+
+    started = time.monotonic()
+    error = None
+    video_rel = None
+    vd: IosVD | None = None
+    try:
+        label = f"vdebug-{slug(flow.name)}-{vp.name}"
+        # A cold simulator spends ~2.5 min on WebDriverAgent + install before the flow starts,
+        # and the reaper reclaims a lease whose TTL lapses, so lease generously; the session is
+        # released as soon as this block exits. wait_s queues behind the other slot's user.
+        with ios_hub.session(label=label, ttl_s=1800.0, wait_s=600.0) as device:
+            info = device.install_pwa(base_url, name=pwa_name(base_url)) or {}
+            name = info.get("name")
+            if not name:
+                raise RuntimeError(f"install_pwa({base_url!r}) returned no app name: {info!r}")
+            device.launch_standalone(name)
+            vd = IosVD(device, out, run_dir)
+            device.record_start()
+            try:
+                flow.run_ios(device, vd)
+                vd.mark("end")
+            except Exception as e:
+                lines = [ln.strip() for ln in str(e).splitlines() if ln.strip()]
+                error = f"{type(e).__name__}: {' | '.join(lines[:6])[:600]}"
+                log(f"  FAILED: {error}")
+                try:
+                    vd.mark("error")
+                except Exception as e2:
+                    log(f"  (also failed to capture the error frame: {type(e2).__name__}: {str(e2)[:200]})")
+            finally:
+                dest = out / "video.mp4"
+                try:
+                    device.record_stop(str(dest))
+                except Exception as e:  # keep the flow's own error; the recording is just lost
+                    error = error or f"record_stop failed: {type(e).__name__}: {str(e)[:300]}"
+                    log(f"  record_stop failed: {type(e).__name__}: {str(e)[:200]}")
+                if dest.exists():
+                    video_rel = str(dest.relative_to(run_dir))
+    except Exception as e:
+        error = error or f"{type(e).__name__}: {str(e)[:400]}"
+        log(f"  FAILED (ios-sim session): {error}")
+
+    frames = vd.frames if vd is not None else []
+    checks = vd.checks if vd is not None else []
+    return {**base, "video": video_rel, "duration_s": round(time.monotonic() - started, 2),
+            "frames": frames, "checks": checks, "error": error}
+
+
 def run_reset(cmd: str, log=print) -> str | None:
     """Run --reset-cmd (restores app state between recordings). Returns an error string or None."""
     log(f"  reset: {cmd}")  # cloudcli: echo the reset so a run log shows every state restore
@@ -343,35 +518,42 @@ def run_reset(cmd: str, log=print) -> str | None:
 
 def record(flows: list[Flow], viewports: list[Viewport], base_url: str, out_root: pathlib.Path,
            *, headed: bool = False, log=print, reset_cmd: str | None = None) -> pathlib.Path:
-    from playwright.sync_api import sync_playwright
-
     run_id = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = out_root / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
     report = {"run_id": run_id, "base_url": base_url, "created": dt.datetime.now().isoformat(timespec="seconds"),
               "viewports": [dataclasses.asdict(v) for v in viewports], "runs": []}
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not headed)
-        try:
-            for flow in flows:
-                for vp in viewports:
-                    if flow.viewports and canonical(vp.name) not in {canonical(v) for v in flow.viewports}:
-                        continue
-                    log(f"recording {flow.name} @ {vp.name} ({vp.width}x{vp.height})"
-                        + (" +keyboard" if vp.keyboard and flow.keyboard else ""))
-                    # Every recording starts from the same app state: one server serves all
-                    # viewports, and a flow that saves data changes what the next one sees.
-                    reset_error = run_reset(reset_cmd, log) if reset_cmd else None
+    # Chromium only when a Playwright viewport is selected: an `ios-sim`-only run drives the
+    # Simulator through ios_hub and must not need (or launch) a browser at all.
+    with contextlib.ExitStack() as stack:
+        browser = None
+        if any(not vp.real_device for vp in viewports):
+            from playwright.sync_api import sync_playwright
+
+            browser = stack.enter_context(sync_playwright()).chromium.launch(headless=not headed)
+            stack.callback(browser.close)
+        for flow in flows:
+            for vp in viewports:
+                if flow.viewports and canonical(vp.name) not in {canonical(v) for v in flow.viewports}:
+                    continue
+                log(f"recording {flow.name} @ {vp.name} ({vp.width}x{vp.height})"
+                    + (" +keyboard" if vp.keyboard and flow.keyboard else ""))
+                # Every recording starts from the same app state: one server serves all
+                # viewports, and a flow that saves data changes what the next one sees.
+                reset_error = run_reset(reset_cmd, log) if reset_cmd else None
+                if vp.real_device:
+                    entry = record_one_ios(flow, vp, base_url, run_dir, log=log)
+                else:
                     entry = record_one(browser, flow, vp, base_url, run_dir, log=log)
-                    entry["reset_error"] = reset_error
-                    if reset_error:  # state is unknown, so the recording can't be trusted: fail it
-                        log(f"  {reset_error}")
-                        entry["error"] = entry["error"] or (
-                            f"recorded from UNKNOWN app state — the reset before it failed: {reset_error}")
-                    report["runs"].append(entry)
-                    log(f"  {len(entry['frames'])} frame(s), {len(entry['checks'])} check hit(s), {entry['duration_s']}s")
-        finally:
-            browser.close()
+                entry["reset_error"] = reset_error
+                if reset_error:  # state is unknown, so the recording can't be trusted: fail it
+                    log(f"  {reset_error}")
+                    entry["error"] = entry["error"] or (
+                        f"recorded from UNKNOWN app state — the reset before it failed: {reset_error}")
+                report["runs"].append(entry)
+                if entry.get("skipped"):
+                    continue  # already logged "skipped: ..." inside record_one_ios
+                log(f"  {len(entry['frames'])} frame(s), {len(entry['checks'])} check hit(s), {entry['duration_s']}s")
     (run_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     latest = out_root / "latest"
     if latest.is_symlink() or not latest.exists():
@@ -394,8 +576,9 @@ def write_markdown(run_dir: pathlib.Path, report: dict) -> pathlib.Path:
     lines += ["| flow | viewport | frames | DOM checks | AI findings | status |", "|---|---|---|---|---|---|"]
     for e in report["runs"]:
         jd = e.get("judge") or {}
-        ai = "—" if not jd else ("judge error" if jd.get("error") else str(len(jd.get("findings", []))))
-        status = "FAILED" if e.get("error") else "ok"
+        ai = "—" if not jd else ("skipped" if jd.get("skipped") else
+                                 ("judge error" if jd.get("error") else str(len(jd.get("findings", [])))))
+        status = "FAILED" if e.get("error") else (f"skipped: {e['skipped']}" if e.get("skipped") else "ok")
         lines.append(f"| {e['flow']} | {e['viewport']} {e['width']}x{e['height']} | {len(e['frames'])} "
                      f"| {len(e['checks'])} | {ai} | {status} |")
     for e in report["runs"]:
@@ -480,6 +663,8 @@ def main(argv: list[str] | None = None) -> int:
             vps = ",".join(f.viewports) if f.viewports else "all"
             print(f"{f.name:28} {f.source:18} viewports={vps:18} {f.description}")
         print("\nviewport presets: " + ", ".join(f"{v.name}={v.width}x{v.height}" for v in VIEWPORTS.values()))
+        print("opt-in (not in 'all'), real iOS Simulator via ios_hub: "
+              + ", ".join(f"{v.name}={v.width}x{v.height}" for v in REAL_DEVICE_VIEWPORTS.values()))
         return 0
 
     if not a.base_url:

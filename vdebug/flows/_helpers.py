@@ -132,3 +132,155 @@ def pinch(page, locator, scale: float, *, steps: int = 10, spread: float = 40) -
             cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
         finally:
             cdp.detach()
+
+
+# ------------------------------------------------------------------ ios-sim (run_ios)
+# A flow's optional run_ios(device, vd) drives the real iOS Simulator (`--viewports ios-sim`)
+# through an ios_hub.Device: no Playwright locators, only eval_js + native taps. IosApp wraps the
+# two things every cloudcli run_ios needs: finding an element by role/label/text in the page, and
+# tapping it with a REAL native touch (focus from a synthetic click does not open the keyboard the
+# way a finger does, which is the whole point of running on a Simulator).
+
+# Resolve an element from a JS function body over `document` (see by_label/by_text/by_css), then
+# report its centre (to tap) or its vertical extent against the visible viewport (keyboard check).
+# Only the tap path scrolls the element into view: the extent check must see it where it is.
+_FIND_JS = "const el = (() => { %s })();\nif (!el) return null;\n"
+_CENTRE_JS = _FIND_JS + """el.scrollIntoView({block: 'nearest'});
+const r = el.getBoundingClientRect();
+return r.width && r.height ? {x: r.left + r.width / 2, y: r.top + r.height / 2} : null;"""
+_EXTENT_JS = _FIND_JS + """const r = el.getBoundingClientRect();
+return {top: r.top, bottom: r.bottom, visibleBottom: visualViewport.offsetTop + visualViewport.height};"""
+
+
+def js_str(s: str) -> str:
+    """A Python str as a JS string literal (JSON is valid JS)."""
+    import json
+    return json.dumps(s)
+
+
+# "Tappable": rendered, horizontally on screen (a closed drawer keeps its links mounted, slid off
+# to the left), and — when vertically on screen — the topmost thing at its centre, so a drawer or
+# dialog covering it disqualifies it (a native tap there would land on the overlay instead).
+# Content above/below the fold passes; the tap path scrolls it into view first.
+_TAPPABLE = ("(e => { if (!e.getClientRects().length) return false; const r = e.getBoundingClientRect(); "
+             "const x = r.left + r.width / 2, y = r.top + r.height / 2; "
+             "if (x < 0 || x > innerWidth) return false; "
+             "if (y < 0 || y > innerHeight) return true; "
+             "const h = document.elementFromPoint(x, y); return !!h && (h === e || e.contains(h)); })")
+
+
+def by_label(label: str, tag: str = "button") -> str:
+    """JS finding the first visible `tag` whose aria-label/title/text matches `label` exactly."""
+    return (f"return [...document.querySelectorAll({js_str(tag)})].find(e => {_TAPPABLE}(e) && "
+            f"[e.getAttribute('aria-label'), e.getAttribute('title'), e.textContent.trim()].includes({js_str(label)}));")
+
+
+def by_text(pattern: str, tag: str = "a, button") -> str:
+    """JS finding the first tappable `tag` whose text matches the JS regex source `pattern`."""
+    return (f"return [...document.querySelectorAll({js_str(tag)})].find(e => {_TAPPABLE}(e) && "
+            f"new RegExp({js_str(pattern)}).test(e.textContent));")
+
+
+def by_css(selector: str) -> str:
+    """JS finding the first tappable match of a CSS selector (prefer data-slot/test ids, not paths)."""
+    return f"return [...document.querySelectorAll({js_str(selector)})].find({_TAPPABLE});"
+
+
+class IosApp:
+    """cloudcli's standalone PWA on an ios_hub.Device, addressed in DOM terms.
+
+    `device.tap(x, y)` takes SCREEN points, but getBoundingClientRect() is in viewport points. In a
+    standalone PWA the webview starts below the status bar, so screen y = viewport y + the top
+    inset (47pt on an iPhone 13 Pro: 844 screen - 797 innerHeight). The inset is measured once at
+    construction — with the keyboard closed, because innerHeight can dip while it animates.
+    """
+
+    def __init__(self, device, timeout: float = 20.0):
+        self.device = device
+        self.timeout = timeout
+        self.top_inset = float(device.eval_js("return screen.height - window.innerHeight") or 0)
+
+    def js(self, script: str):
+        return self.device.eval_js(script)
+
+    def wait(self, condition_js: str, what: str, timeout: float | None = None):
+        """Poll a JS expression (wrapped in `return`) until truthy; return its value."""
+        import time
+        deadline = time.monotonic() + (timeout or self.timeout)
+        while True:
+            value = self.js(f"return ({condition_js});")
+            if value:
+                return value
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"ios-sim: timed out waiting for {what}")
+            time.sleep(0.25)
+
+    def rect(self, find_js: str, what: str) -> dict:
+        import time
+        deadline = time.monotonic() + self.timeout
+        while True:
+            r = self.js(_CENTRE_JS % find_js)
+            if r:
+                return r
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"ios-sim: no visible {what}")
+            time.sleep(0.25)
+
+    def tap(self, find_js: str, what: str) -> None:
+        """A native touch at the centre of the element `find_js` resolves to."""
+        r = self.rect(find_js, what)
+        self.device.tap(x=round(r["x"]), y=round(r["y"] + self.top_inset))
+
+    def go(self, path: str) -> None:
+        """In-app navigation (location assignment) — stays inside the standalone window, unlike
+        device.navigate(), which drives Safari's URL bar."""
+        self.js(f"location.assign({js_str(path)}); return 1;")
+
+    def keyboard_height(self) -> float:
+        """How much of the layout viewport the on-screen keyboard currently hides."""
+        return float(self.js("return window.innerHeight - visualViewport.height - visualViewport.offsetTop") or 0)
+
+    def check_not_covered(self, vd, find_js: str, what: str, check: str = "keyboard-covers-control") -> None:
+        """Record a check hit on `vd` when the element's bottom is below the visible viewport —
+        the iOS-real counterpart of the Chromium keyboard checks (layout_checks.js)."""
+        r = self.js(_EXTENT_JS % find_js)
+        if r and r["bottom"] > r["visibleBottom"] + 1:
+            vd.checks.append({"check": check, "selector": what, "rect": None, "source": "ios_run",
+                              "frame": vd.frames[-1]["label"] if vd.frames else None,
+                              "frames": [vd.frames[-1]["label"]] if vd.frames else [],
+                              "detail": f"{what} bottom {r['bottom']:.0f}px is below the visible "
+                                        f"viewport bottom {r['visibleBottom']:.0f}px (keyboard covering it)"})
+
+
+def ios_boot(device, vd) -> IosApp:
+    """Show the seeded CLI chats (like boot()), reload, wait for the shell, mark 'start'."""
+    app = IosApp(device)
+    app.js(SHOW_CLI_CHATS + " location.reload(); return 1;")
+    app.wait("document.querySelector('[aria-label=\"Open menu\"], a[href*=\"/session/\"]')", "the app shell")
+    vd.mark("start")
+    return app
+
+
+# The drawer's backdrop is a full-width "Close sidebar" button under the drawer itself, so it is
+# never tappable at its centre; its presence is what says the drawer is open.
+_DRAWER_OPEN = "!!document.querySelector('[aria-label=\"Close sidebar\"]')"
+
+
+def ios_open_sidebar(app: IosApp, vd) -> None:
+    if app.js(f"return {_DRAWER_OPEN};"):
+        return
+    app.tap(by_label("Open menu"), "'Open menu' button")
+    app.wait(_DRAWER_OPEN, "the sidebar drawer")
+    vd.mark("sidebar open")
+
+
+def ios_open_large_conversation(app: IosApp, vd) -> None:
+    """Tap the 120-turn conversation: listed on the phone's 'Choose Your Conversation' screen or in
+    an already-open drawer; otherwise open the drawer first. Waits for the list to render."""
+    link = by_text(r"\(120 turns\)")
+    app.wait(f"(() => {{ {link} }})() || (() => {{ {by_label('Open menu')} }})()",
+             "the conversation list or the menu button")
+    if not app.js(link):
+        ios_open_sidebar(app, vd)
+    app.tap(link, "the 120-turn conversation link")
+    app.wait("document.querySelector('.chat-message')", "the transcript")

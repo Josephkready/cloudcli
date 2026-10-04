@@ -37,6 +37,7 @@
     "test:unit:coverage": "node -e \"require('node:fs').mkdirSync('coverage', { recursive: true })\" && tsx --tsconfig tsconfig.json --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/unit.lcov \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
     "test:component:coverage": "vitest run --coverage",
     "bench": "tsx --tsconfig bench/tsconfig.json bench/run.ts",
+    "ios:debug": "tsx --tsconfig bench/tsconfig.json vdebug/serve-fixture.ts --ios-tunnel",
     "test:e2e": "playwright test",
     "test:e2e:report": "playwright show-report",
     "coverage:floor": "node scripts/check-coverage-floor.mjs",

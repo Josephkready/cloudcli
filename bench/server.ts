@@ -79,12 +79,17 @@ export async function startBenchServer(options: {
   repoRoot: string;
   profile?: ProfileName;
   seed?: number;
+  /**
+   * Fixed loopback port instead of a free-port probe — for a debug instance something else must
+   * find at a known address (the iOS Simulator tunnel in vdebug/serve-fixture.ts).
+   */
+  port?: number;
   /** Prints seeding/boot progress. */
   onProgress?: (message: string) => void;
 }): Promise<BenchServer> {
   const report = options.onProgress ?? (() => {});
   const home = mkdtempSync('/var/tmp/cloudcli-bench-');
-  const port = await findFreePort();
+  const port = options.port ?? (await findFreePort());
   const baseURL = `http://127.0.0.1:${port}`;
 
   report(`seeding fixture in ${home} (profile: ${options.profile ?? 'standard'})`);

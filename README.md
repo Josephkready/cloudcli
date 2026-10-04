@@ -132,6 +132,31 @@ keyboard with `KEYBOARD = False`. Read `vdebug-runs/latest/report.md` (gitignore
 code, re-record the flows that touch those screens before opening a PR.** Full
 method: the `video-debugger` skill.
 
+**On a real iOS Simulator (`--viewports ios-sim`).** Chromium's `iphone-13-pro` preset cannot
+enter iOS standalone mode, which is where the home-screen app's keyboard and layout bugs live
+(#354 reproduced only from the icon). The opt-in `ios-sim` viewport drives a real iPhone 13 Pro
+Simulator on perfbook through `ios_hub` (the `ios-automation` skill): it installs the app to the
+home screen, launches it standalone, and runs each flow's `run_ios(device, vd)` with native
+taps, so the real keyboard opens. `composer-keyboard`, `new-chat-turn` and `open-conversation`
+have one; other flows are skipped for `ios-sim`. The Simulator is another machine, so serve
+the fixture with a reverse tunnel to it:
+
+```bash
+npm run ios:debug          # fixture on 127.0.0.1:4870, tunnelled to perfbook's own loopback
+python3 vdebug/vdebug.py record --base-url http://localhost:4870 --viewports ios-sim \
+  --flow composer-keyboard,new-chat-turn,open-conversation
+```
+
+`npm run ios:debug -- --port N --ios-tunnel <host> --profile standard --skip-build` adjusts it.
+`localhost` is right here only because of the tunnel (perfbook's loopback forwards to dante);
+the debug instance has no auth, so it never listens on a LAN address. Loopback base URLs install
+under a per-port home-screen name (`vdebug-4870`), so two instances never share an icon. Budget
+~2 min per flow (lease, install, launch), and always let the run finish or the lease release.
+`run_ios` steps use `IosApp` in `vdebug/flows/_helpers.py`, which turns DOM rects into screen
+points (the standalone webview starts below the status bar) and records a
+`keyboard-covers-control` hit when the keyboard hides the composer. The Simulator runs a newer
+iOS on a fast Mac: it catches layout and behaviour, not real-phone timings or touch latency.
+
 **Real-user flow capture.** `public/vd-recorder.js` sends intent events to
 `POST /api/_vd/events`, stored in `flows.db` beside `DATABASE_PATH`
 (`/var/lib/cloudcli/flows.db` on dante; override with `VD_FLOWS_DB`). No input
