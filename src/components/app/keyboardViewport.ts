@@ -51,7 +51,11 @@ const KEYBOARD_FOCUS_SETTLE_MS = 1000;
 
 export interface DocumentLike {
   activeElement: { tagName?: string; isContentEditable?: boolean } | null;
-  documentElement: { style: { setProperty(property: string, value: string): void } };
+  documentElement: {
+    /** The initial containing block's height. Optional so older fakes keep compiling. */
+    clientHeight?: number;
+    style: { setProperty(property: string, value: string): void };
+  };
 }
 
 /**
@@ -77,6 +81,28 @@ export function keyboardAwareBottomStyle(
 /** Height the keyboard is covering. Clamped: the two viewports can disagree by a rounding error. */
 export function computeKeyboardHeight(innerHeight: number, viewportHeight: number): number {
   return Math.max(0, innerHeight - viewportHeight);
+}
+
+/**
+ * The layout viewport's height, robust to a WebKit transient (#528).
+ *
+ * Measured in the standalone PWA on an iOS 26.5 Simulator: while the keyboard
+ * opens, `window.innerHeight` drops to the *visual* viewport's height (797 to
+ * 421) for 40-70ms, across one or two visualViewport `scroll` events, then
+ * returns to 797. `document.documentElement.clientHeight` stays at 797 the
+ * whole time. Read through `innerHeight` alone, the keyboard measures 0 for
+ * those frames, so the shell drops to full height with the composer under the
+ * keyboard, then jumps back up. If no later event re-reads the viewport, it
+ * stays at 0, which matches #442's report: a 797px layout viewport, a 394px
+ * visual viewport and a published 0px inset.
+ *
+ * The larger of the two, not `clientHeight` alone: in a Safari tab the initial
+ * containing block is the toolbar-expanded height and `innerHeight` legitimately
+ * grows past it as the toolbars collapse, so there `innerHeight` stays the
+ * answer, exactly as before. They agree everywhere else.
+ */
+export function layoutViewportHeight(innerHeight: number, documentClientHeight: number | undefined): number {
+  return Math.max(innerHeight, documentClientHeight ?? 0);
 }
 
 /** Does this element take text, i.e. is it the kind of focus that summons the keyboard? */
@@ -121,7 +147,10 @@ export function installKeyboardViewportSync(win: WindowLike, doc: DocumentLike):
   let lastPublishedKeyboardHeight: number | null = null;
 
   const applyKeyboardHeight = () => {
-    const keyboardHeight = computeKeyboardHeight(win.innerHeight, viewport.height);
+    const keyboardHeight = computeKeyboardHeight(
+      layoutViewportHeight(win.innerHeight, doc.documentElement.clientHeight),
+      viewport.height,
+    );
     if (keyboardHeight === lastPublishedKeyboardHeight) {
       return;
     }
