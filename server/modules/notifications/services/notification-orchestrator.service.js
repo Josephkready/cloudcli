@@ -187,6 +187,29 @@ function buildNotificationPayload(event) {
   };
 }
 
+// Log only the push service origin: the endpoint path is a bearer capability
+// for delivering to the user's device, so none of it goes into logs.
+function describeEndpoint(endpoint) {
+  try {
+    return new URL(String(endpoint)).origin;
+  } catch {
+    return '<invalid endpoint>';
+  }
+}
+
+function describeRejectionBody(reason) {
+  const body = reason?.body ?? reason?.message ?? '';
+  let text;
+  try {
+    text = typeof body === 'string' ? body : JSON.stringify(body);
+  } catch {
+    text = String(body);
+  }
+  const trimmed = (text || '').trim();
+  if (!trimmed) return '<empty>';
+  return trimmed.length > 300 ? `${trimmed.slice(0, 300)}...` : trimmed;
+}
+
 function sendWebPushPayload(userId, payload) {
   const subscriptions = pushSubscriptionsDb.getSubscriptions(userId);
   if (!subscriptions.length) return Promise.resolve();
@@ -211,6 +234,12 @@ function sendWebPushPayload(userId, payload) {
         const statusCode = result.reason?.statusCode;
         if (statusCode === 410 || statusCode === 404) {
           pushSubscriptionsDb.removeSubscription(subscriptions[index].endpoint);
+        } else {
+          // Anything else (e.g. Apple's 403 BadJwtToken, #496) used to vanish silently.
+          console.error(
+            `[web-push] Send failed for subscription #${index} (${describeEndpoint(subscriptions[index].endpoint)}): ` +
+              `status=${statusCode ?? 'n/a'} body=${describeRejectionBody(result.reason)}`
+          );
         }
       }
     });
@@ -313,6 +342,8 @@ function notifyRunFailed({ userId, provider, sessionId = null, error, sessionNam
 export {
   buildNotificationPayload,
   createNotificationEvent,
+  describeEndpoint,
+  describeRejectionBody,
   notifyUserIfEnabled,
   notifyRunStopped,
   notifyRunFailed
