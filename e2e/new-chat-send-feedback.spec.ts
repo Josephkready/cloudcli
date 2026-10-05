@@ -87,3 +87,34 @@ test('a failed session start gives the draft back instead of losing it', async (
   await expect(page.locator(COMPOSER)).toHaveValue(text);
   await expect(page.locator('.chat-message.user').getByText(text)).toHaveCount(0);
 });
+
+test('a draft typed while the session is starting survives the send', async ({ page }) => {
+  const hold = await holdSessionCreate(page);
+  const text = 'the first message';
+  await sendFirstMessage(page, text);
+  await hold.arrival;
+
+  const composer = page.locator(COMPOSER);
+  await expect(composer).toHaveValue('');
+  await composer.fill('a follow-up typed during the wait');
+
+  await hold.route().continue();
+
+  await expect(page).toHaveURL(/\/session\/[0-9a-f-]{36}$/);
+  await expect(page.locator('.chat-message.user').getByText(text)).toHaveCount(1);
+  await expect(composer).toHaveValue('a follow-up typed during the wait');
+});
+
+test('a failed start keeps both the unsent message and a draft typed meanwhile', async ({ page }) => {
+  const hold = await holdSessionCreate(page);
+  const text = 'the unsent message';
+  await sendFirstMessage(page, text);
+  await hold.arrival;
+
+  const composer = page.locator(COMPOSER);
+  await composer.fill('typed during the wait');
+  await hold.route().fulfill({ status: 503, contentType: 'application/json', body: '{"error":"down"}' });
+
+  await expect(page.getByText('Failed to start a new session', { exact: false })).toBeVisible();
+  await expect(composer).toHaveValue(`${text}\n\ntyped during the wait`);
+});

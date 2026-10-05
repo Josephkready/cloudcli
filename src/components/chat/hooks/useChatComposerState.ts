@@ -371,43 +371,56 @@ export function useChatComposerState({
       // round trip fails, the error replaces the bubble and the draft goes back
       // into the composer, so nothing typed is lost.
       const showedEarlyBubble = !(selectedSession?.id || currentSessionId);
+      // The files being sent. The upload below reads this captured list, so the
+      // composer's own attachment state can be cleared up front with the text.
+      const sentImages = attachedImages;
       if (showedEarlyBubble) {
         addMessage({ type: 'user', content: currentInput, timestamp: new Date() });
         setInput('');
         inputValueRef.current = '';
         resetCommandMenuState();
+        resetImages();
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto';
         }
       }
       const resetComposerAfterSend = () => {
-        resetImages();
         // A new chat's composer was already cleared up front, so anything in it
-        // now was typed during the round trip and is a new draft to keep.
-        if (showedEarlyBubble && inputValueRef.current) {
+        // now (text or attachments) was added during the round trip and is a
+        // new draft to keep.
+        if (showedEarlyBubble) {
+          if (!inputValueRef.current) {
+            safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
+          }
           return;
         }
         setInput('');
         inputValueRef.current = '';
         resetCommandMenuState();
+        resetImages();
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto';
         }
         safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
       };
       const restoreDraftAfterFailedStart = () => {
-        // Only into an empty composer: never overwrite what was typed meanwhile.
-        if (!showedEarlyBubble || inputValueRef.current) {
+        if (!showedEarlyBubble) {
           return;
         }
-        setInput(currentInput);
-        inputValueRef.current = currentInput;
+        // Never overwrite what was typed meanwhile: put the unsent text first.
+        const typedMeanwhile = inputValueRef.current;
+        const restored = typedMeanwhile ? `${currentInput}\n\n${typedMeanwhile}` : currentInput;
+        setInput(restored);
+        inputValueRef.current = restored;
+        if (sentImages.length > 0) {
+          setAttachedImages((current) => (current.length > 0 ? current : sentImages));
+        }
       };
 
       let uploadedImages: unknown[] = [];
-      if (attachedImages.length > 0) {
+      if (sentImages.length > 0) {
         const formData = new FormData();
-        attachedImages.forEach((file) => {
+        sentImages.forEach((file) => {
           formData.append('images', file);
         });
 
@@ -619,6 +632,7 @@ export function useChatComposerState({
       slashCommands,
       enqueueDraft,
       resetImages,
+      setAttachedImages,
       textareaRef,
     ],
   );
