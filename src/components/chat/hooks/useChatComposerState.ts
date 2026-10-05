@@ -360,6 +360,50 @@ export function useChatComposerState({
 
       const messageContent = currentInput;
 
+      // A brand-new chat must round-trip to the server for its session id (and,
+      // with attachments, upload them) before anything can be sent. Until #527
+      // the bubble and the composer reset both waited for that round trip, so a
+      // slow or cold connection - the phone PWA just back from the background -
+      // left the tap on Send looking ignored for seconds. Show both right away.
+      // With no session yet, `addMessage` parks the message as the pending
+      // bubble, which the final `addMessage(userMessage)` below replaces and
+      // which is flushed into the store once the session id is known. If the
+      // round trip fails, the error replaces the bubble and the draft goes back
+      // into the composer, so nothing typed is lost.
+      const showedEarlyBubble = !(selectedSession?.id || currentSessionId);
+      if (showedEarlyBubble) {
+        addMessage({ type: 'user', content: currentInput, timestamp: new Date() });
+        setInput('');
+        inputValueRef.current = '';
+        resetCommandMenuState();
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+      }
+      const resetComposerAfterSend = () => {
+        resetImages();
+        // A new chat's composer was already cleared up front, so anything in it
+        // now was typed during the round trip and is a new draft to keep.
+        if (showedEarlyBubble && inputValueRef.current) {
+          return;
+        }
+        setInput('');
+        inputValueRef.current = '';
+        resetCommandMenuState();
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+        safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
+      };
+      const restoreDraftAfterFailedStart = () => {
+        // Only into an empty composer: never overwrite what was typed meanwhile.
+        if (!showedEarlyBubble || inputValueRef.current) {
+          return;
+        }
+        setInput(currentInput);
+        inputValueRef.current = currentInput;
+      };
+
       let uploadedImages: unknown[] = [];
       if (attachedImages.length > 0) {
         const formData = new FormData();
@@ -388,6 +432,7 @@ export function useChatComposerState({
             content: `Failed to upload images: ${message}`,
             timestamp: new Date(),
           });
+          restoreDraftAfterFailedStart();
           return false;
         }
       }
@@ -422,6 +467,7 @@ export function useChatComposerState({
             content: `Failed to start a new session: ${message}`,
             timestamp: new Date(),
           });
+          restoreDraftAfterFailedStart();
           return false;
         }
 
@@ -431,6 +477,7 @@ export function useChatComposerState({
             content: 'Failed to start a new session: no session id returned.',
             timestamp: new Date(),
           });
+          restoreDraftAfterFailedStart();
           return false;
         }
 
@@ -497,14 +544,7 @@ export function useChatComposerState({
             + "It's saved and will be sent automatically when the connection comes back.",
           timestamp: new Date(),
         });
-        setInput('');
-        inputValueRef.current = '';
-        resetCommandMenuState();
-        resetImages();
-        if (textareaRef.current) {
-          textareaRef.current.style.height = 'auto';
-        }
-        safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
+        resetComposerAfterSend();
         return false;
       }
 
@@ -552,16 +592,7 @@ export function useChatComposerState({
           error,
         );
       } finally {
-        setInput('');
-        inputValueRef.current = '';
-        resetCommandMenuState();
-        resetImages();
-
-        if (textareaRef.current) {
-          textareaRef.current.style.height = 'auto';
-        }
-
-        safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
+        resetComposerAfterSend();
       }
       // A chat.send was dispatched: a run has started.
       return true;

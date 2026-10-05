@@ -51,11 +51,15 @@ const KEYBOARD_SPECS =
  * virtualizer moving `scrollTop` itself — is engine-agnostic, and the fix
  * leans on touch/wheel input events whose timing differs per engine.
  *
+ * `new-chat-send-feedback` (#527) asserts what the user sees while a new chat's
+ * session-create request is held open. That was reported from an iPhone, so it
+ * runs on WebKit too.
+ *
  * Same anchoring rules as above — the leading separator and trailing `$` are
  * load-bearing, because these are matched against absolute paths and the
  * worktree directory is named after the task being developed.
  */
-const CROSS_ENGINE_SPECS = /[\\/](composer-focus|mention-dropdown-stacking|autofollow-stall)\.spec\.ts$/;
+const CROSS_ENGINE_SPECS = /[\\/](composer-focus|mention-dropdown-stacking|autofollow-stall|new-chat-send-feedback)\.spec\.ts$/;
 
 /**
  * Transcript scroll stability (#495) — WebKit under an iPhone UA, and *only*

@@ -101,3 +101,57 @@ test('keeps sampling after focus when iOS settles without another resize (#442)'
     })
     .toBeGreaterThan(KEYBOARD * 0.8);
 });
+
+test('an innerHeight that briefly collapses to the visual viewport does not drop the keyboard (#528)', async ({
+  page,
+}) => {
+  // Replays the sequence measured on the iOS 26.5 Simulator in the installed PWA
+  // (frame-by-frame probe, 2026-10-04). The keyboard is up: visual viewport 421,
+  // layout viewport 797. Then, across two visualViewport `scroll` events about
+  // 40-70ms apart, `window.innerHeight` reports 421 before returning to 797.
+  // `document.documentElement.clientHeight` stayed at 797 throughout. Both
+  // numbers are synthetic here, as `keyboard.ts` states for the viewport ones.
+  // The listeners, the frame timing and the publishing are the app's own.
+  await page.goto('/');
+  const composer = page.locator('[data-slot="prompt-input-textarea"]');
+  await expect(composer).toBeVisible();
+
+  await composer.click();
+  await shrinkVisualViewport(page, KEYBOARD);
+  await expect.poll(() => publishedHeight(page)).toBeGreaterThan(KEYBOARD * 0.8);
+
+  const published = await page.evaluate(async () => {
+    const viewport = window.visualViewport;
+    if (!viewport) throw new Error('visualViewport is unavailable in this browser');
+    const root = document.documentElement;
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => {
+      seen.push(root.style.getPropertyValue('--keyboard-height'));
+    });
+    observer.observe(root, { attributes: true, attributeFilter: ['style'] });
+
+    const frames = (count: number) => new Promise<void>((resolve) => {
+      const step = (left: number) => (left === 0 ? resolve() : requestAnimationFrame(() => step(left - 1)));
+      step(count);
+    });
+
+    const collapsed = viewport.height;
+    // `innerHeight` is an own accessor of the window, so restore that exact
+    // descriptor afterwards. Deleting the override would remove it entirely.
+    const real = Object.getOwnPropertyDescriptor(window, 'innerHeight')
+      ?? Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), 'innerHeight');
+    if (!real) throw new Error('no innerHeight descriptor to restore');
+    Object.defineProperty(window, 'innerHeight', { configurable: true, get: () => collapsed });
+    viewport.dispatchEvent(new Event('scroll'));
+    await frames(4);
+    Object.defineProperty(window, 'innerHeight', real);
+    viewport.dispatchEvent(new Event('scroll'));
+    await frames(4);
+
+    observer.disconnect();
+    return seen;
+  });
+
+  expect(published, 'the shell must not fall back under a keyboard that never left').not.toContain('0px');
+  expect(await publishedHeight(page)).toBeGreaterThan(KEYBOARD * 0.8);
+});

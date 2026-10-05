@@ -7,6 +7,7 @@ import {
   isTextEntryElement,
   isViewportDisplaced,
   keyboardAwareBottomStyle,
+  layoutViewportHeight,
   type DocumentLike,
   type WindowLike,
 } from './keyboardViewport';
@@ -122,6 +123,21 @@ function openKeyboard(harness: Harness, keyboardHeight: number, displacement: nu
   harness.win.scrollY = displacement;
   viewport.offsetTop = displacement;
 }
+
+test('layoutViewportHeight ignores innerHeight collapsing to the visual viewport (#528)', () => {
+  // Measured on the iOS 26.5 Simulator, standalone PWA, keyboard up.
+  assert.equal(layoutViewportHeight(421, 797), 797);
+});
+
+test('layoutViewportHeight keeps innerHeight where it is the larger (Safari tab, toolbars collapsed)', () => {
+  assert.equal(layoutViewportHeight(844, 797), 844);
+  assert.equal(layoutViewportHeight(797, 797), 797);
+});
+
+test('layoutViewportHeight falls back to innerHeight without a clientHeight', () => {
+  assert.equal(layoutViewportHeight(797, undefined), 797);
+  assert.equal(layoutViewportHeight(797, 0), 797);
+});
 
 test('computeKeyboardHeight clamps a viewport that reports taller than the window', () => {
   assert.equal(computeKeyboardHeight(800, 500), 300);
