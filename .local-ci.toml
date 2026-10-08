@@ -103,3 +103,8 @@ setup    = "ln -sfn /deps/node_modules node_modules"
 run      = "CI=1 npm run test:e2e"
 # Chromium crashes in confusing ways on Docker's default 64MB /dev/shm.
 shm      = "1g"
+# Stay on dante: on the aarch64 perfbook fleet host a mobile-safari scroll-follow test
+# (e2e/autofollow-stall.spec.ts) failed through all retries (2026-10-08 fleet MVP), so
+# this lane is timing-sensitive enough to need the fast host. See dante-config
+# docs/projects/local-ci-fleet.md.
+hosts    = ["dante"]
