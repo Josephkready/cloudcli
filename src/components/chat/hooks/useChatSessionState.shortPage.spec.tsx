@@ -97,11 +97,18 @@ describe('useChatSessionState — non-overflowing first page (#591)', () => {
 
   it('loads older messages without any scroll event when the page does not fill the pane', async () => {
     const fetchMore = vi.fn(async () => null);
-    render(makeContainer(300), fetchMore);
+    const { rerender } = render(makeContainer(300), fetchMore);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1500);
     });
-    expect(fetchMore).toHaveBeenCalled();
+    expect(fetchMore).toHaveBeenCalledTimes(1);
+
+    // Same session and message count: the failed fetch must not be retried on re-render.
+    rerender();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(fetchMore).toHaveBeenCalledTimes(1);
   });
 
   it('does not fetch extra pages when the pane already overflows', async () => {

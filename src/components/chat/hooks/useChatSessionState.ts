@@ -459,7 +459,10 @@ export function useChatSessionState({
         // threw. Returning false here leaves `hasMoreMessages`, the visible
         // window and the caller's top-load lock untouched, so the next scroll
         // retries instead of the pane concluding it has reached the top.
-        if (!slot) return false;
+        if (!slot) {
+          console.warn('[chat] older-page fetch returned no slot; retry on next scroll or fill pass', selectedSession.id);
+          return false;
+        }
         if (slot.serverMessages.length === 0) {
           if (!slot.hasMore) {
             setHasMoreMessages(false);
@@ -560,13 +563,14 @@ export function useChatSessionState({
   const fillAttemptKeyRef = useRef('');
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container || !hasMoreMessages || allMessagesLoaded || isLoadingMoreMessages) return;
+    if (!container || !hasMoreMessages || allMessagesLoaded || isLoadingMoreMessages || isLoadingSessionMessages) return;
     if (container.clientHeight <= 0 || container.scrollHeight > container.clientHeight) return;
     const key = `${selectedSession?.id ?? ''}:${chatMessages.length}`;
     if (fillAttemptKeyRef.current === key) return;
     fillAttemptKeyRef.current = key;
+    console.debug('[chat] pane does not overflow; auto-filling older pages', { sessionId: selectedSession?.id, messageCount: chatMessages.length });
     void loadOlderMessages(container);
-  }, [selectedSession?.id, chatMessages.length, hasMoreMessages, allMessagesLoaded, isLoadingMoreMessages, loadOlderMessages]);
+  }, [selectedSession?.id, chatMessages.length, hasMoreMessages, allMessagesLoaded, isLoadingMoreMessages, isLoadingSessionMessages, loadOlderMessages]);
 
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) return;
@@ -613,6 +617,7 @@ export function useChatSessionState({
     autoFollowSuspendedRef.current = false;
     pointerDownRef.current = false;
     lastScrollTopRef.current = 0;
+    fillAttemptKeyRef.current = '';
     // Drop the outgoing session's messages so the first stabilization pass for
     // the new session starts clean instead of comparing across sessions.
     previousChatMessagesRef.current = [];
