@@ -551,6 +551,23 @@ export function useChatSessionState({
     }
   }, [loadOlderMessages, pointerIsActive, readScrollMetrics]);
 
+  // A page that does not overflow the pane cannot be scrolled, so no scroll
+  // event ever fires and `handleScroll` never gets to load the older rows
+  // (cloudcli#591 "No scroll up"). Antigravity hits this most: its history is
+  // many small step messages that collapse into a few short rows. Keep pulling
+  // pages until the pane overflows or history is exhausted. One attempt per
+  // (session, message count): a failed fetch changes neither, so it cannot loop.
+  const fillAttemptKeyRef = useRef('');
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || !hasMoreMessages || allMessagesLoaded || isLoadingMoreMessages) return;
+    if (container.clientHeight <= 0 || container.scrollHeight > container.clientHeight) return;
+    const key = `${selectedSession?.id ?? ''}:${chatMessages.length}`;
+    if (fillAttemptKeyRef.current === key) return;
+    fillAttemptKeyRef.current = key;
+    void loadOlderMessages(container);
+  }, [selectedSession?.id, chatMessages.length, hasMoreMessages, allMessagesLoaded, isLoadingMoreMessages, loadOlderMessages]);
+
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) return;
     const restore = pendingScrollRestoreRef.current;
