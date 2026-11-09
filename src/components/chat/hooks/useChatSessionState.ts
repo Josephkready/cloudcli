@@ -459,7 +459,10 @@ export function useChatSessionState({
         // threw. Returning false here leaves `hasMoreMessages`, the visible
         // window and the caller's top-load lock untouched, so the next scroll
         // retries instead of the pane concluding it has reached the top.
-        if (!slot) return false;
+        if (!slot) {
+          console.warn('[chat] older-page fetch returned no slot; retry on next scroll or fill pass', selectedSession.id);
+          return false;
+        }
         if (slot.serverMessages.length === 0) {
           if (!slot.hasMore) {
             setHasMoreMessages(false);
@@ -551,6 +554,28 @@ export function useChatSessionState({
     }
   }, [loadOlderMessages, pointerIsActive, readScrollMetrics]);
 
+  // A page that does not overflow the pane cannot be scrolled, so no scroll
+  // event ever fires and `handleScroll` never gets to load the older rows
+  // (cloudcli#591 "No scroll up"). Antigravity hits this most: its history is
+  // many small step messages that collapse into a few short rows. Keep pulling
+  // pages until the pane overflows or history is exhausted. One attempt per
+  // (session, message count): a failed fetch changes neither, so it cannot loop.
+  const fillAttemptKeyRef = useRef('');
+  const storeMessageCount = storeMessages.length;
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || !hasMoreMessages || allMessagesLoaded || isLoadingMoreMessages || isLoadingSessionMessages) return;
+    if (container.clientHeight <= 0 || container.scrollHeight > container.clientHeight) return;
+    // Keyed on the RAW store count, not `chatMessages.length`: antigravity pages
+    // are mostly tool_result steps that fold into existing rows, so a loaded page
+    // can leave the rendered row count unchanged and would stall the fill.
+    const key = `${selectedSession?.id ?? ''}:${storeMessageCount}`;
+    if (fillAttemptKeyRef.current === key) return;
+    fillAttemptKeyRef.current = key;
+    console.debug('[chat] pane does not overflow; auto-filling older pages', { sessionId: selectedSession?.id, messageCount: storeMessageCount });
+    void loadOlderMessages(container);
+  }, [selectedSession?.id, storeMessageCount, chatMessages.length, hasMoreMessages, allMessagesLoaded, isLoadingMoreMessages, isLoadingSessionMessages, loadOlderMessages]);
+
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) return;
     const restore = pendingScrollRestoreRef.current;
@@ -596,6 +621,7 @@ export function useChatSessionState({
     autoFollowSuspendedRef.current = false;
     pointerDownRef.current = false;
     lastScrollTopRef.current = 0;
+    fillAttemptKeyRef.current = '';
     // Drop the outgoing session's messages so the first stabilization pass for
     // the new session starts clean instead of comparing across sessions.
     previousChatMessagesRef.current = [];
