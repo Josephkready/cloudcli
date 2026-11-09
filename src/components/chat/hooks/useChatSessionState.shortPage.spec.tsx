@@ -48,8 +48,7 @@ function makeContainer(scrollHeight: number): HTMLDivElement {
   return c;
 }
 
-function render(container: HTMLDivElement, fetchMore: ReturnType<typeof vi.fn>) {
-  const messages = [msg(0)];
+function render(container: HTMLDivElement, fetchMore: ReturnType<typeof vi.fn>, messages: NormalizedMessage[] = [msg(0)]) {
   const sessionStore = {
     has: () => true,
     isStale: () => false,
@@ -118,5 +117,24 @@ describe('useChatSessionState — non-overflowing first page (#591)', () => {
       await vi.advanceTimersByTimeAsync(1500);
     });
     expect(fetchMore).not.toHaveBeenCalled();
+  });
+
+  it('keeps filling when a page adds raw steps that fold into existing rows (antigravity tool_results)', async () => {
+    // The page grows the store but not the rendered row count; keying the fill on
+    // rendered rows stalled it after two pages on the real session (#591).
+    const messages = [msg(0)];
+    const fetchMore = vi.fn(async () => {
+      if (fetchMore.mock.calls.length > 3) return null; // history exhausted
+      messages.unshift({ ...msg(messages.length + 1), kind: 'tool_result', toolId: `orphan-${messages.length}` } as NormalizedMessage);
+      return null;
+    });
+    const { rerender } = render(makeContainer(300), fetchMore, messages);
+    for (let i = 0; i < 6; i += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+      rerender();
+    }
+    expect(fetchMore.mock.calls.length).toBe(4);
   });
 });

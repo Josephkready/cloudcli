@@ -561,16 +561,20 @@ export function useChatSessionState({
   // pages until the pane overflows or history is exhausted. One attempt per
   // (session, message count): a failed fetch changes neither, so it cannot loop.
   const fillAttemptKeyRef = useRef('');
+  const storeMessageCount = storeMessages.length;
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container || !hasMoreMessages || allMessagesLoaded || isLoadingMoreMessages || isLoadingSessionMessages) return;
     if (container.clientHeight <= 0 || container.scrollHeight > container.clientHeight) return;
-    const key = `${selectedSession?.id ?? ''}:${chatMessages.length}`;
+    // Keyed on the RAW store count, not `chatMessages.length`: antigravity pages
+    // are mostly tool_result steps that fold into existing rows, so a loaded page
+    // can leave the rendered row count unchanged and would stall the fill.
+    const key = `${selectedSession?.id ?? ''}:${storeMessageCount}`;
     if (fillAttemptKeyRef.current === key) return;
     fillAttemptKeyRef.current = key;
-    console.debug('[chat] pane does not overflow; auto-filling older pages', { sessionId: selectedSession?.id, messageCount: chatMessages.length });
+    console.debug('[chat] pane does not overflow; auto-filling older pages', { sessionId: selectedSession?.id, messageCount: storeMessageCount });
     void loadOlderMessages(container);
-  }, [selectedSession?.id, chatMessages.length, hasMoreMessages, allMessagesLoaded, isLoadingMoreMessages, isLoadingSessionMessages, loadOlderMessages]);
+  }, [selectedSession?.id, storeMessageCount, chatMessages.length, hasMoreMessages, allMessagesLoaded, isLoadingMoreMessages, isLoadingSessionMessages, loadOlderMessages]);
 
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) return;
